@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional during bootstrap
+    def load_dotenv(*args: object, **kwargs: object) -> bool:
+        return False
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_WORKSPACE_ROOT = PACKAGE_ROOT / "workspace"
+DEFAULT_DATA_DIR = PACKAGE_ROOT / "data"
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_env(env_file: Path | None = None) -> None:
+    target = (env_file.expanduser().resolve() if env_file else PACKAGE_ROOT / ".env")
+    if target.exists():
+        load_dotenv(target, override=True)
+
+
+def resolve_env_path(raw_value: str, default: Path) -> Path:
+    candidate = Path(raw_value).expanduser() if raw_value else default
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (PACKAGE_ROOT / candidate).resolve()
+
+
+@dataclass(slots=True)
+class GatewaySettings:
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = ""
+    model_id: str = "claude-opus-4-6"
+    host: str = "127.0.0.1"
+    port: int = 8765
+    workspace_root: Path = DEFAULT_WORKSPACE_ROOT
+    data_dir: Path = DEFAULT_DATA_DIR
+    config_dir: Path = PACKAGE_ROOT / "config"
+    default_agent_id: str = "main"
+    default_agent_name: str = "GatewayMain"
+    max_iterations: int = 12
+    max_tokens: int = 4096
+    tool_timeout_seconds: int = 30
+    max_tool_output_chars: int = 50_000
+    context_safe_limit: int = 180_000
+    max_overflow_compaction: int = 3
+    fallback_models: tuple[str, ...] = ()
+    heartbeat_interval_seconds: float = 1800.0
+    heartbeat_active_start: int = 9
+    heartbeat_active_end: int = 22
+    proactive_channel: str = "cli"
+    proactive_account_id: str = "cli-local"
+    proactive_peer_id: str = "cli-user"
+    proactive_agent_id: str = "main"
+    feishu_webhook_host: str = "127.0.0.1"
+    feishu_webhook_port: int = 8766
+    feishu_webhook_path: str = "/webhooks/feishu"
+    feishu_signature_window_seconds: int = 300
+    feishu_event_dedup_ttl_seconds: int = 86400
+    web_search_enabled: bool = False
+    web_search_provider: str = "tavily"
+    tavily_api_key: str = ""
+    tavily_base_url: str = "https://api.tavily.com"
+    web_search_timeout_seconds: float = 15.0
+    web_search_max_results: int = 5
+    web_search_max_output_chars: int = 12_000
+
+    @property
+    def sessions_dir(self) -> Path:
+        return self.data_dir / "sessions"
+
+    @property
+    def delivery_queue_dir(self) -> Path:
+        return self.data_dir / "delivery-queue"
+
+    @property
+    def feishu_webhook_dir(self) -> Path:
+        return self.data_dir / "feishu-webhook"
+
+    @property
+    def agents_config_file(self) -> Path:
+        return self.config_dir / "agents.json"
+
+    @property
+    def bindings_config_file(self) -> Path:
+        return self.config_dir / "bindings.json"
+
+    @property
+    def profiles_config_file(self) -> Path:
+        return self.config_dir / "profiles.json"
+
+    @property
+    def channels_config_file(self) -> Path:
+        return self.config_dir / "channels.json"
+
+    @classmethod
+    def from_env(cls) -> "GatewaySettings":
+        fallback_models = tuple(
+            item.strip()
+            for item in os.getenv("GATEWAY_FALLBACK_MODELS", "").split(",")
+            if item.strip()
+        )
+        return cls(
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", ""),
+            model_id=os.getenv("MODEL_ID", "claude-opus-4-6"),
+            host=os.getenv("GATEWAY_HOST", "127.0.0.1"),
+            port=int(os.getenv("GATEWAY_PORT", "8765")),
+            workspace_root=resolve_env_path(
+                os.getenv("GATEWAY_WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT)),
+                DEFAULT_WORKSPACE_ROOT,
+            ),
+            data_dir=resolve_env_path(
+                os.getenv("GATEWAY_DATA_DIR", str(DEFAULT_DATA_DIR)),
+                DEFAULT_DATA_DIR,
+            ),
+            config_dir=resolve_env_path(
+                os.getenv("GATEWAY_CONFIG_DIR", str(PACKAGE_ROOT / "config")),
+                PACKAGE_ROOT / "config",
+            ),
+            default_agent_id=os.getenv("GATEWAY_DEFAULT_AGENT_ID", "main"),
+            default_agent_name=os.getenv("GATEWAY_DEFAULT_AGENT_NAME", "GatewayMain"),
+            max_iterations=int(os.getenv("GATEWAY_MAX_ITERATIONS", "12")),
+            max_tokens=int(os.getenv("GATEWAY_MAX_TOKENS", "4096")),
+            tool_timeout_seconds=int(os.getenv("GATEWAY_TOOL_TIMEOUT_SECONDS", "30")),
+            max_tool_output_chars=int(os.getenv("GATEWAY_MAX_TOOL_OUTPUT_CHARS", "50000")),
+            context_safe_limit=int(os.getenv("GATEWAY_CONTEXT_SAFE_LIMIT", "180000")),
+            max_overflow_compaction=int(os.getenv("GATEWAY_MAX_OVERFLOW_COMPACTION", "3")),
+            fallback_models=fallback_models,
+            heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")),
+            heartbeat_active_start=int(os.getenv("HEARTBEAT_ACTIVE_START", "9")),
+            heartbeat_active_end=int(os.getenv("HEARTBEAT_ACTIVE_END", "22")),
+            proactive_channel=os.getenv("GATEWAY_PROACTIVE_CHANNEL", "cli"),
+            proactive_account_id=os.getenv("GATEWAY_PROACTIVE_ACCOUNT_ID", "cli-local"),
+            proactive_peer_id=os.getenv("GATEWAY_PROACTIVE_PEER_ID", "cli-user"),
+            proactive_agent_id=os.getenv("GATEWAY_PROACTIVE_AGENT_ID", "main"),
+            feishu_webhook_host=os.getenv("FEISHU_WEBHOOK_HOST", "127.0.0.1"),
+            feishu_webhook_port=int(os.getenv("FEISHU_WEBHOOK_PORT", "8766")),
+            feishu_webhook_path=os.getenv("FEISHU_WEBHOOK_PATH", "/webhooks/feishu"),
+            feishu_signature_window_seconds=int(
+                os.getenv("FEISHU_SIGNATURE_WINDOW_SECONDS", "300")
+            ),
+            feishu_event_dedup_ttl_seconds=int(
+                os.getenv("FEISHU_EVENT_DEDUP_TTL_SECONDS", "86400")
+            ),
+            web_search_enabled=env_bool("GATEWAY_WEB_SEARCH_ENABLED", False),
+            web_search_provider=os.getenv("GATEWAY_WEB_SEARCH_PROVIDER", "tavily"),
+            tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
+            tavily_base_url=os.getenv("TAVILY_BASE_URL", "https://api.tavily.com").rstrip("/"),
+            web_search_timeout_seconds=float(
+                os.getenv("GATEWAY_WEB_SEARCH_TIMEOUT_SECONDS", "15")
+            ),
+            web_search_max_results=int(os.getenv("GATEWAY_WEB_SEARCH_MAX_RESULTS", "5")),
+            web_search_max_output_chars=int(
+                os.getenv("GATEWAY_WEB_SEARCH_MAX_OUTPUT_CHARS", "12000")
+            ),
+        )
+
+    def ensure_directories(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.delivery_queue_dir.mkdir(parents=True, exist_ok=True)
+        self.feishu_webhook_dir.mkdir(parents=True, exist_ok=True)

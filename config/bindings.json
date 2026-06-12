@@ -1,0 +1,11 @@
+{
+  "bindings": [
+    {
+      "agent_id": "main",
+      "tier": 5,
+      "match_key": "default",
+      "match_value": "*",
+      "priority": 0
+    }
+  ]
+}

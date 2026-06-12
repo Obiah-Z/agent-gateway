@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-gateway"
+version = "0.1.0"
+description = "Modular AI Agent Gateway built by integrating claw0 session demos."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic>=0.39.0",
+  "python-dotenv>=1.0.0",
+  "websockets>=12.0",
+  "croniter>=2.0.0",
+  "python-telegram-bot>=21.0",
+  "httpx>=0.27.0",
+]
+
+[project.scripts]
+agent-gateway = "agent_gateway.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent_gateway*"]

@@ -1,0 +1,40 @@
+{
+  "channels": [
+    {
+      "channel": "cli",
+      "account_id": "cli-local",
+      "enabled": true,
+      "label": "Local CLI",
+      "token": "",
+      "config": {}
+    },
+    {
+      "channel": "telegram",
+      "account_id": "telegram-main",
+      "enabled": false,
+      "label": "Telegram Bot",
+      "token_env": "TELEGRAM_BOT_TOKEN",
+      "config": {
+        "allowed_chats": ""
+      }
+    },
+    {
+      "channel": "feishu",
+      "account_id": "feishu-main",
+      "enabled": true,
+      "label": "Feishu Bot",
+      "config": {
+        "app_id_env": "FEISHU_APP_ID",
+        "app_secret_env": "FEISHU_APP_SECRET",
+        "verification_token_env": "FEISHU_VERIFICATION_TOKEN",
+        "encrypt_key_env": "FEISHU_ENCRYPT_KEY",
+        "bot_open_id_env": "FEISHU_BOT_OPEN_ID",
+        "render_mode_env": "FEISHU_RENDER_MODE",
+        "card_page_max_bytes_env": "FEISHU_CARD_PAGE_MAX_BYTES",
+        "text_page_max_bytes_env": "FEISHU_TEXT_PAGE_MAX_BYTES",
+        "enable_stateful_cards_env": "FEISHU_ENABLE_STATEFUL_CARDS",
+        "is_lark": false
+      }
+    }
+  ]
+}
