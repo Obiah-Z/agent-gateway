@@ -65,7 +65,7 @@ class FeishuWebhookServer:
         request_body: dict[str, Any] = {}
         account_id = ""
         try:
-            status, payload, request_headers, body_bytes = await self._read_request(reader)
+            status, payload, request_headers, body_bytes, request_path = await self._read_request(reader)
             if status is not None:
                 self.audit.write(
                     outcome="rejected",
@@ -77,7 +77,7 @@ class FeishuWebhookServer:
                 await self._write_json(writer, status, payload)
                 return
 
-            channel = self._resolve_channel()
+            channel = self._resolve_channel(request_path)
             if channel is None:
                 request_body = payload
                 self.audit.write(
@@ -90,6 +90,28 @@ class FeishuWebhookServer:
                 await self._write_json(writer, HTTPStatus.NOT_FOUND, {"error": "feishu channel not configured"})
                 return
             account_id = channel.account_id
+
+            if not self._has_signature_headers(request_headers):
+                body = channel.decode_payload(payload)
+                request_body = body
+                if "challenge" in body:
+                    if not self._challenge_token_matches(channel, body, require_token=True):
+                        self.audit.write(
+                            outcome="rejected",
+                            body=body,
+                            headers=request_headers,
+                            http_status=HTTPStatus.UNAUTHORIZED.value,
+                            reason="verification token mismatch",
+                            channel_account=account_id,
+                        )
+                        await self._write_json(
+                            writer,
+                            HTTPStatus.UNAUTHORIZED,
+                            {"error": "verification token mismatch"},
+                        )
+                        return
+                    await self._accept_challenge(writer, channel, body, request_headers)
+                    return
 
             ok, reason = FeishuSignatureVerifier(
                 secret=channel.encrypt_key,
@@ -114,20 +136,27 @@ class FeishuWebhookServer:
             body = channel.decode_payload(payload)
             request_body = body
             if "challenge" in body:
-                print("[feishu] webhook challenge received")
-                self.audit.write(
-                    outcome="challenge",
-                    body=body,
-                    headers=request_headers,
-                    http_status=HTTPStatus.OK.value,
-                    reason="challenge",
-                    channel_account=account_id,
-                )
-                await self._write_json(writer, HTTPStatus.OK, {"challenge": body.get("challenge", "")})
+                if not self._challenge_token_matches(channel, body, require_token=False):
+                    self.audit.write(
+                        outcome="rejected",
+                        body=body,
+                        headers=request_headers,
+                        http_status=HTTPStatus.UNAUTHORIZED.value,
+                        reason="verification token mismatch",
+                        channel_account=account_id,
+                    )
+                    await self._write_json(
+                        writer,
+                        HTTPStatus.UNAUTHORIZED,
+                        {"error": "verification token mismatch"},
+                    )
+                    return
+                await self._accept_challenge(writer, channel, body, request_headers)
                 return
 
             event_id = extract_event_id(body)
-            if not self.dedup.mark_if_new(event_id):
+            dedup_key = f"{account_id}:{event_id}" if event_id else ""
+            if not self.dedup.mark_if_new(dedup_key):
                 print(f"[feishu] webhook duplicate ignored: event_id={event_id}")
                 self.audit.write(
                     outcome="duplicate",
@@ -295,19 +324,18 @@ class FeishuWebhookServer:
     async def _read_request(
         self,
         reader: asyncio.StreamReader,
-    ) -> tuple[HTTPStatus | None, dict[str, Any], dict[str, str], bytes]:
+    ) -> tuple[HTTPStatus | None, dict[str, Any], dict[str, str], bytes, str]:
         request_line = await reader.readline()
         if not request_line:
-            return HTTPStatus.BAD_REQUEST, {"error": "empty request"}, {}, b""
+            return HTTPStatus.BAD_REQUEST, {"error": "empty request"}, {}, b"", ""
         try:
             method, raw_path, _ = request_line.decode("utf-8").strip().split(" ", 2)
         except ValueError:
-            return HTTPStatus.BAD_REQUEST, {"error": "invalid request line"}, {}, b""
+            return HTTPStatus.BAD_REQUEST, {"error": "invalid request line"}, {}, b"", ""
         if method.upper() != "POST":
-            return HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method not allowed"}, {}, b""
+            return HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method not allowed"}, {}, b"", ""
         path = raw_path.split("?", 1)[0]
-        if path != self.path:
-            return HTTPStatus.NOT_FOUND, {"error": "not found"}, {}, b""
+        path = self._normalize_path(path)
 
         headers: dict[str, str] = {}
         while True:
@@ -323,17 +351,17 @@ class FeishuWebhookServer:
         try:
             content_length = int(headers.get("content-length", "0"))
         except ValueError:
-            return HTTPStatus.BAD_REQUEST, {"error": "invalid content-length"}, headers, b""
+            return HTTPStatus.BAD_REQUEST, {"error": "invalid content-length"}, headers, b"", path
         body_bytes = await reader.readexactly(content_length) if content_length > 0 else b""
         if not body_bytes:
-            return HTTPStatus.BAD_REQUEST, {"error": "empty body"}, headers, body_bytes
+            return HTTPStatus.BAD_REQUEST, {"error": "empty body"}, headers, body_bytes, path
         try:
             body = json.loads(body_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return HTTPStatus.BAD_REQUEST, {"error": "invalid json"}, headers, body_bytes
+            return HTTPStatus.BAD_REQUEST, {"error": "invalid json"}, headers, body_bytes, path
         if not isinstance(body, dict):
-            return HTTPStatus.BAD_REQUEST, {"error": "json body must be object"}, headers, body_bytes
-        return None, body, headers, body_bytes
+            return HTTPStatus.BAD_REQUEST, {"error": "json body must be object"}, headers, body_bytes, path
+        return None, body, headers, body_bytes, path
 
     async def _write_json(
         self,
@@ -354,11 +382,82 @@ class FeishuWebhookServer:
         writer.write("\r\n".join(head).encode("utf-8") + body)
         await writer.drain()
 
-    def _resolve_channel(self) -> FeishuChannel | None:
-        channel = self.channels.get("feishu")
-        if isinstance(channel, FeishuChannel):
-            return channel
+    def _resolve_channel(self, request_path: str = "") -> FeishuChannel | None:
+        normalized_path = self._normalize_path(request_path or self.path)
+        for _account, channel in self._iter_feishu_channels():
+            if self._channel_webhook_path(channel) == normalized_path:
+                return channel
+
+        # Backward compatibility: single Feishu account deployments used the
+        # process-level FEISHU_WEBHOOK_PATH before account-level paths existed.
+        if normalized_path == self._normalize_path(self.path):
+            channel = self.channels.get("feishu")
+            if isinstance(channel, FeishuChannel):
+                return channel
         return None
+
+    def list_webhook_paths(self) -> list[tuple[str, str]]:
+        return [
+            (channel.account_id, self._channel_webhook_path(channel))
+            for _account, channel in self._iter_feishu_channels()
+        ]
+
+    def _iter_feishu_channels(self) -> list[tuple[object, FeishuChannel]]:
+        rows: list[tuple[object, FeishuChannel]] = []
+        for account, channel in self.channels.iter_channels():
+            if account.channel == "feishu" and isinstance(channel, FeishuChannel):
+                rows.append((account, channel))
+        return rows
+
+    def _channel_webhook_path(self, channel: FeishuChannel) -> str:
+        raw_path = str(channel.account.config.get("webhook_path", "") or self.path)
+        return self._normalize_path(raw_path)
+
+    def _has_signature_headers(self, headers: dict[str, str]) -> bool:
+        return bool(
+            headers.get("x-lark-request-timestamp")
+            or headers.get("x-lark-request-nonce")
+            or headers.get("x-lark-signature")
+        )
+
+    def _challenge_token_matches(
+        self,
+        channel: FeishuChannel,
+        body: dict[str, Any],
+        *,
+        require_token: bool,
+    ) -> bool:
+        if not channel.verification_token:
+            return True
+        token = str(body.get("token", ""))
+        if not token:
+            return not require_token
+        return token == channel.verification_token
+
+    async def _accept_challenge(
+        self,
+        writer: asyncio.StreamWriter,
+        channel: FeishuChannel,
+        body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> None:
+        print("[feishu] webhook challenge received")
+        self.audit.write(
+            outcome="challenge",
+            body=body,
+            headers=headers,
+            http_status=HTTPStatus.OK.value,
+            reason="challenge",
+            channel_account=channel.account_id,
+        )
+        await self._write_json(writer, HTTPStatus.OK, {"challenge": body.get("challenge", "")})
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        normalized = (path or "/").split("?", 1)[0].strip()
+        if not normalized.startswith("/"):
+            normalized = f"/{normalized}"
+        return normalized.rstrip("/") or "/"
 
     def _extract_event_type(self, body: dict[str, Any]) -> str:
         header = body.get("header", {})

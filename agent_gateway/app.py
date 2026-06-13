@@ -169,11 +169,20 @@ async def serve(app: GatewayApplication) -> None:
     await app.autonomy_runtime.start()
     await feishu_webhook.start()
     print(f"Gateway running on ws://{app.settings.host}:{app.settings.port}")
-    print(
-        "Feishu webhook on "
-        f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
-        f"{app.settings.feishu_webhook_path}"
-    )
+    webhook_paths = feishu_webhook.list_webhook_paths()
+    if webhook_paths:
+        for account_id, path in webhook_paths:
+            print(
+                "Feishu webhook on "
+                f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
+                f"{path} account={account_id}"
+            )
+    else:
+        print(
+            "Feishu webhook on "
+            f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
+            f"{app.settings.feishu_webhook_path}"
+        )
     print(f"Loaded channels: {', '.join(app.channel_manager.list_channels()) or '(none)'}")
     print(
         "Loaded tools: "

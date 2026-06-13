@@ -1,11 +1,28 @@
 {
+  "_comment": "消息路由表：入站消息会按 tier 从小到大匹配，命中后交给对应 agent_id。数字越小越精确；同一 tier 下 priority 越大越优先。",
+  "_tier_notes": {
+    "1": "peer_id：指定某个用户或某个群，最精确。飞书私聊 peer_id 通常是 open_id，群聊 peer_id 通常是 chat_id。",
+    "2": "guild_id：指定群组空间，目前飞书通道基本不用。",
+    "3": "account_id：指定某个通道账号，例如 feishu-secondary。",
+    "4": "channel：指定整个通道，例如 feishu。",
+    "5": "default：兜底规则，所有未命中更精确规则的消息都会走这里。"
+  },
   "bindings": [
     {
+      "_comment": "默认兜底路由：除非前面的更精确规则命中，否则所有消息都交给 main Agent。",
       "agent_id": "main",
       "tier": 5,
       "match_key": "default",
       "match_value": "*",
       "priority": 0
+    },
+    {
+      "_comment": "第二个飞书机器人账号专用路由：来自 account_id=feishu-secondary 的消息会交给 FeishuQABot 对应的 feishu-secondary Agent。",
+      "agent_id": "feishu-secondary",
+      "tier": 3,
+      "match_key": "account_id",
+      "match_value": "feishu-secondary",
+      "priority": 50
     }
   ]
 }

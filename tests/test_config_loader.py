@@ -185,6 +185,7 @@ def test_save_channel_accounts_preserves_env_backed_fields(tmp_path: Path) -> No
         "verification_token_env": "FEISHU_VERIFICATION_TOKEN",
         "encrypt_key_env": "FEISHU_ENCRYPT_KEY",
         "bot_open_id_env": "FEISHU_BOT_OPEN_ID",
+        "webhook_path": "/webhooks/feishu",
         "is_lark": false
       }
     }
@@ -208,6 +209,7 @@ def test_save_channel_accounts_preserves_env_backed_fields(tmp_path: Path) -> No
                     "verification_token": "resolved-verification-token",
                     "encrypt_key": "resolved-key",
                     "bot_open_id": "resolved-bot",
+                    "webhook_path": "/webhooks/feishu",
                     "is_lark": False,
                 },
             )
@@ -218,4 +220,5 @@ def test_save_channel_accounts_preserves_env_backed_fields(tmp_path: Path) -> No
     assert '"app_id_env": "FEISHU_APP_ID"' in payload
     assert '"app_secret_env": "FEISHU_APP_SECRET"' in payload
     assert '"verification_token_env": "FEISHU_VERIFICATION_TOKEN"' in payload
+    assert '"webhook_path": "/webhooks/feishu"' in payload
     assert "resolved-app-id" not in payload

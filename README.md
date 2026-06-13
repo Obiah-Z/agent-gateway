@@ -122,6 +122,45 @@ FEISHU_WEBHOOK_PORT=8766
 - Markdown 自动转飞书卡片
 - 长回复分页
 - 可选状态卡片按钮回调
+- 多个飞书机器人账号按 webhook path 分发
+
+### 新增独立飞书机器人账号
+
+项目已预留第二个独立飞书账号 `feishu-secondary`，默认处于禁用状态。启用前需要在飞书开放平台创建新的机器人应用，并准备：
+
+- 新应用的 `App ID`
+- 新应用的 `App Secret`
+- 事件订阅的 `Verification Token`
+- 事件订阅的 `Encrypt Key`
+- 该机器人的 `bot_open_id`
+
+然后在 `.env` 中填写：
+
+```env
+FEISHU_SECONDARY_APP_ID=cli_xxx
+FEISHU_SECONDARY_APP_SECRET=xxx
+FEISHU_SECONDARY_VERIFICATION_TOKEN=xxx
+FEISHU_SECONDARY_ENCRYPT_KEY=xxx
+FEISHU_SECONDARY_BOT_OPEN_ID=ou_xxx
+FEISHU_SECONDARY_RENDER_MODE=auto
+FEISHU_SECONDARY_CARD_PAGE_MAX_BYTES=6000
+FEISHU_SECONDARY_TEXT_PAGE_MAX_BYTES=12000
+FEISHU_SECONDARY_ENABLE_STATEFUL_CARDS=false
+```
+
+再把 `config/channels.json` 中 `feishu-secondary` 的 `enabled` 改为 `true`。该账号的 webhook path 已预留为：
+
+```json
+"webhook_path": "/webhooks/feishu/secondary"
+```
+
+如果公网地址仍是 `8.153.15.37`，第二个飞书应用事件订阅中的请求地址填写：
+
+```text
+http://8.153.15.37:8766/webhooks/feishu/secondary
+```
+
+`config/bindings.json` 已预留按 `account_id=feishu-secondary` 路由到 `feishu-secondary` Agent 的规则；该 Agent 的专属提示词位于 `workspace/agents/feishu-secondary/`。如果你要新增第三、第四个飞书机器人，复制 `feishu-secondary` 的配置块，换成新的 `account_id`、环境变量名、`webhook_path` 和绑定规则即可。
 
 ## 配置说明
 

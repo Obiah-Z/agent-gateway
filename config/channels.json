@@ -33,6 +33,26 @@
         "card_page_max_bytes_env": "FEISHU_CARD_PAGE_MAX_BYTES",
         "text_page_max_bytes_env": "FEISHU_TEXT_PAGE_MAX_BYTES",
         "enable_stateful_cards_env": "FEISHU_ENABLE_STATEFUL_CARDS",
+        "webhook_path": "/webhooks/feishu",
+        "is_lark": false
+      }
+    },
+    {
+      "channel": "feishu",
+      "account_id": "feishu-secondary",
+      "enabled": true,
+      "label": "Feishu Secondary Bot",
+      "config": {
+        "app_id_env": "FEISHU_SECONDARY_APP_ID",
+        "app_secret_env": "FEISHU_SECONDARY_APP_SECRET",
+        "verification_token_env": "FEISHU_SECONDARY_VERIFICATION_TOKEN",
+        "encrypt_key_env": "FEISHU_SECONDARY_ENCRYPT_KEY",
+        "bot_open_id_env": "FEISHU_SECONDARY_BOT_OPEN_ID",
+        "render_mode_env": "FEISHU_SECONDARY_RENDER_MODE",
+        "card_page_max_bytes_env": "FEISHU_SECONDARY_CARD_PAGE_MAX_BYTES",
+        "text_page_max_bytes_env": "FEISHU_SECONDARY_TEXT_PAGE_MAX_BYTES",
+        "enable_stateful_cards_env": "FEISHU_SECONDARY_ENABLE_STATEFUL_CARDS",
+        "webhook_path": "/webhooks/feishu/secondary",
         "is_lark": false
       }
     }

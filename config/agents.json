@@ -57,6 +57,33 @@
         "use_global_files": true,
         "skills_enabled": true
       }
+    },
+    {
+      "id": "feishu-secondary",
+      "name": "FeishuQABot",
+      "personality": "亲和、简洁、耐心、适合日常问答",
+      "model": "",
+      "dm_scope": "per-account-channel-peer",
+      "extra_system": "你是面向飞书日常使用场景的轻量问答助手，主要负责解释概念、整理信息、回答常见问题、提供简短建议和协助表达。优先直接回答，不要过度调用工具；除非用户明确要求联网核验、查询时间或引用长期记忆，否则不要主动使用工具。回答应自然、简洁、友好，群聊中默认控制在 3 到 6 句话。",
+      "tool_policy": {
+        "mode": "allowlist",
+        "tool_names": [
+          "get_current_time",
+          "memory_search",
+          "web_search",
+          "fetch_url"
+        ]
+      },
+      "memory_policy": {
+        "enabled": true,
+        "auto_recall": false,
+        "top_k": 2
+      },
+      "prompt_policy": {
+        "prompt_dir": "agents/feishu-secondary",
+        "use_global_files": true,
+        "skills_enabled": true
+      }
     }
   ]
 }

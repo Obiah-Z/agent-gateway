@@ -106,6 +106,7 @@ def ensure_default_project_files(settings: GatewaySettings) -> None:
                         "card_page_max_bytes_env": "FEISHU_CARD_PAGE_MAX_BYTES",
                         "text_page_max_bytes_env": "FEISHU_TEXT_PAGE_MAX_BYTES",
                         "enable_stateful_cards_env": "FEISHU_ENABLE_STATEFUL_CARDS",
+                        "webhook_path": "/webhooks/feishu",
                         "is_lark": False
                     },
                 }
