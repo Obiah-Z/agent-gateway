@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from agent_gateway.monitoring import STATIC_DIR
+
+
+def test_monitoring_static_assets_exist() -> None:
+    assert STATIC_DIR.is_dir()
+    assert (STATIC_DIR / "index.html").is_file()
+    assert (STATIC_DIR / "app.js").is_file()
+    assert (STATIC_DIR / "styles.css").is_file()
+
+
+def test_monitoring_dashboard_references_local_assets_only() -> None:
+    index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "./styles.css" in index
+    assert "./app.js" in index
+    assert "cdn." not in index.lower()
+    assert "http://" not in index
+    assert "https://" not in index
+
+
+def test_monitoring_json_rpc_client_covers_first_stage_methods() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    expected_methods = {
+        "health.check",
+        "runtime.status",
+        "delivery.stats",
+        "delivery.list",
+        "delivery.retry",
+        "delivery.discard",
+        "delivery.flush",
+        "cron.list",
+        "cron.trigger",
+    }
+
+    missing = sorted(method for method in expected_methods if method not in app_js)
+    assert missing == []
+
+
+def test_monitoring_dashboard_includes_triage_and_delivery_detail_ui() -> None:
+    index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "问题摘要" in index
+    assert "delivery-detail" in index
+    assert "data-jump" in index
+
+
+def test_monitoring_dashboard_classifies_delivery_errors_and_confirms_actions() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "function buildIssues" in app_js
+    assert "function classifyDeliveryError" in app_js
+    assert "invalid_open_id" in app_js
+    assert "function confirmAction" in app_js
+    assert "navigator.clipboard.writeText" in app_js
+
+
+def test_monitoring_static_dir_is_inside_package() -> None:
+    assert Path("agent_gateway/monitoring/static") in STATIC_DIR.relative_to(Path.cwd()).parents or (
+        Path.cwd() / "agent_gateway/monitoring/static"
+    ) == STATIC_DIR

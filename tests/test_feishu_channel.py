@@ -3,6 +3,7 @@ from pathlib import Path
 
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.feishu import FeishuChannel
+from agent_gateway.delivery.queue import PermanentDeliveryError
 from agent_gateway.models import OutboundMessage
 from Crypto.Cipher import AES
 
@@ -300,6 +301,43 @@ def test_feishu_channel_send_falls_back_to_text_when_card_rejected(monkeypatch) 
     assert isinstance(second_payload, dict)
     assert first_payload["msg_type"] == "interactive"
     assert second_payload["msg_type"] == "text"
+
+
+def test_feishu_channel_send_raises_permanent_error_for_invalid_receive_id(monkeypatch) -> None:
+    channel = _build_channel()
+
+    def fake_refresh_token() -> str:
+        return "tenant-token"
+
+    class FakeResponse:
+        def json(self) -> dict[str, object]:
+            return {
+                "code": 99992351,
+                "msg": "The request you send is not a valid {open_id}. Invalid ids: [ou_test_user_002]",
+            }
+
+    def fake_post(url: str, *, params=None, headers=None, json=None):
+        return FakeResponse()
+
+    monkeypatch.setattr(channel, "_refresh_token", fake_refresh_token)
+    monkeypatch.setattr(channel._http, "post", fake_post)
+
+    try:
+        channel.send(
+            OutboundMessage(
+                channel="feishu",
+                to="ou_test_user_002",
+                text="bad target",
+                metadata={"receive_id_type": "open_id"},
+            )
+        )
+    except PermanentDeliveryError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("PermanentDeliveryError was not raised")
+
+    assert "ou_test_user_002" in message
+    assert "99992351" in message
 
 
 def test_feishu_channel_send_honors_text_render_mode(monkeypatch) -> None:

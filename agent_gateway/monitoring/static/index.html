@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Gateway 运维监控台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero panel">
+        <div>
+          <p class="eyebrow">AI Agent Gateway</p>
+          <h1>运维监控台</h1>
+          <p class="hero-copy">
+            复用 Gateway WebSocket 控制面，集中查看健康状态、运行快照、投递队列和 Cron 主动任务。
+          </p>
+        </div>
+        <div class="connection-card">
+          <span id="connection-dot" class="dot is-muted"></span>
+          <div>
+            <strong id="connection-label">未连接</strong>
+            <small id="connection-detail">等待连接 WebSocket 控制面</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="toolbar panel">
+        <label class="field field-grow">
+          <span>控制面地址</span>
+          <input id="ws-url" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <button id="connect-btn" class="button button-primary" type="button">连接</button>
+        <button id="refresh-btn" class="button" type="button">刷新</button>
+        <label class="toggle">
+          <input id="auto-refresh" type="checkbox" checked />
+          <span>15 秒自动刷新</span>
+        </label>
+      </section>
+
+      <section id="alert" class="alert" hidden></section>
+      <section id="toast" class="toast" hidden></section>
+
+      <section class="panel issue-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Triage</p>
+            <h2>问题摘要</h2>
+          </div>
+          <span id="issue-summary" class="pill">等待数据</span>
+        </div>
+        <div id="issue-list" class="issue-list empty">尚未加载问题摘要</div>
+      </section>
+
+      <section class="summary-grid" aria-label="运行总览">
+        <article class="metric-card metric-health" data-jump="#health-panel">
+          <span>整体健康</span>
+          <strong id="metric-health">--</strong>
+          <small id="metric-health-detail">暂无数据</small>
+        </article>
+        <article class="metric-card" data-jump="#runtime-panel">
+          <span>服务运行</span>
+          <strong id="metric-uptime">--</strong>
+          <small id="metric-server">server unknown</small>
+        </article>
+        <article class="metric-card" data-jump="#delivery-panel">
+          <span>投递队列</span>
+          <strong id="metric-delivery">--</strong>
+          <small id="metric-delivery-detail">pending / failed</small>
+        </article>
+        <article class="metric-card" data-jump="#runtime-panel">
+          <span>通道</span>
+          <strong id="metric-channels">--</strong>
+          <small id="metric-channels-detail">active / total</small>
+        </article>
+        <article class="metric-card" data-jump="#runtime-panel">
+          <span>模型 Profile</span>
+          <strong id="metric-profiles">--</strong>
+          <small id="metric-profiles-detail">available / total</small>
+        </article>
+        <article class="metric-card" data-jump="#cron-panel">
+          <span>Cron 任务</span>
+          <strong id="metric-cron">--</strong>
+          <small id="metric-cron-detail">enabled / total</small>
+        </article>
+      </section>
+
+      <section class="grid-two">
+        <article id="health-panel" class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Health</p>
+              <h2>健康检查</h2>
+            </div>
+            <span id="health-summary" class="pill">暂无数据</span>
+          </div>
+          <div id="health-list" class="check-list empty">尚未加载健康检查结果</div>
+        </article>
+
+        <article id="runtime-panel" class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Runtime</p>
+              <h2>运行态快照</h2>
+            </div>
+            <span id="runtime-updated" class="pill">未刷新</span>
+          </div>
+          <div id="runtime-list" class="runtime-list empty">尚未加载运行态数据</div>
+        </article>
+      </section>
+
+      <section id="delivery-panel" class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Delivery</p>
+            <h2>可靠投递队列</h2>
+          </div>
+          <div class="actions">
+            <select id="delivery-state" aria-label="投递队列状态">
+              <option value="failed">failed</option>
+              <option value="pending">pending</option>
+              <option value="all">all</option>
+            </select>
+            <label class="toggle compact">
+              <input id="include-text" type="checkbox" />
+              <span>完整正文</span>
+            </label>
+            <button id="delivery-flush-btn" class="button" type="button">Flush</button>
+          </div>
+        </div>
+        <div id="delivery-table" class="table-card empty">尚未加载投递队列</div>
+      </section>
+
+      <section id="cron-panel" class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Cron</p>
+            <h2>主动任务</h2>
+          </div>
+          <span id="cron-summary" class="pill">暂无数据</span>
+        </div>
+        <div id="cron-list" class="cron-list empty">尚未加载 Cron 任务</div>
+      </section>
+    </main>
+
+    <template id="delivery-actions-template">
+      <div class="row-actions">
+        <button class="button button-small" data-action="retry" type="button">重试</button>
+        <button class="button button-small button-danger" data-action="discard" type="button">丢弃</button>
+      </div>
+    </template>
+
+    <aside id="delivery-detail" class="drawer" aria-hidden="true">
+      <div class="drawer-backdrop" data-close-detail></div>
+      <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="delivery-detail-title">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Delivery Detail</p>
+            <h2 id="delivery-detail-title">投递详情</h2>
+          </div>
+          <button id="delivery-detail-close" class="button button-small" type="button">关闭</button>
+        </div>
+        <div id="delivery-detail-body" class="detail-body"></div>
+      </section>
+    </aside>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

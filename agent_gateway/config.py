@@ -68,6 +68,10 @@ class GatewaySettings:
     feishu_webhook_path: str = "/webhooks/feishu"
     feishu_signature_window_seconds: int = 300
     feishu_event_dedup_ttl_seconds: int = 86400
+    dashboard_enabled: bool = True
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 8780
+    dashboard_refresh_interval_seconds: int = 15
     web_search_enabled: bool = False
     web_search_provider: str = "tavily"
     tavily_api_key: str = ""
@@ -153,6 +157,12 @@ class GatewaySettings:
             ),
             feishu_event_dedup_ttl_seconds=int(
                 os.getenv("FEISHU_EVENT_DEDUP_TTL_SECONDS", "86400")
+            ),
+            dashboard_enabled=env_bool("GATEWAY_DASHBOARD_ENABLED", True),
+            dashboard_host=os.getenv("GATEWAY_DASHBOARD_HOST", "127.0.0.1"),
+            dashboard_port=int(os.getenv("GATEWAY_DASHBOARD_PORT", "8780")),
+            dashboard_refresh_interval_seconds=int(
+                os.getenv("GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS", "15")
             ),
             web_search_enabled=env_bool("GATEWAY_WEB_SEARCH_ENABLED", False),
             web_search_provider=os.getenv("GATEWAY_WEB_SEARCH_PROVIDER", "tavily"),

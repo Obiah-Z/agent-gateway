@@ -75,6 +75,7 @@ agent-gateway serve
 ```text
 WebSocket: ws://127.0.0.1:8765
 Feishu Webhook: http://127.0.0.1:8766/webhooks/feishu
+Dashboard: http://127.0.0.1:8780
 ```
 
 ## 本地 CLI 对话
@@ -300,6 +301,33 @@ Delivery 控制面用于本地可靠投递队列的运维：
 - `runtime.status`：返回 agents、bindings、channels、profiles、delivery、heartbeat、cron、路径与功能开关的结构化快照。
 - `health.check`：返回 `ok` / `degraded` / `unhealthy` 状态，以及逐项 checks；适合后续接入监控或部署探针。
 
+## 运维监控台
+
+启动 `agent-gateway serve` 时会默认同时启动一个本地 Dashboard：
+
+```text
+http://127.0.0.1:8780
+```
+
+该页面不依赖 npm、前端构建或外部 CDN，会通过 WebSocket JSON-RPC 连接当前 Gateway 控制面，并展示：
+
+- 整体健康状态与 `health.check` 明细
+- agents、bindings、channels、profiles、heartbeat、cron、delivery 的运行态快照
+- pending / failed 投递队列
+- 投递消息重试、丢弃与 flush 操作
+- Cron 任务列表与手动触发
+
+相关环境变量：
+
+```env
+GATEWAY_DASHBOARD_ENABLED=true
+GATEWAY_DASHBOARD_HOST=127.0.0.1
+GATEWAY_DASHBOARD_PORT=8780
+GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=15
+```
+
+默认只监听 `127.0.0.1`。如果要通过公网或内网穿透访问 Dashboard，需要先评估风险；当前页面已经具备投递重试、丢弃和 Cron 触发能力，后续应增加 token 鉴权后再对外暴露。
+
 ## 测试
 
 ```bash
@@ -313,9 +341,9 @@ cd ~/Desktop/gateway
 ## 当前边界
 
 - 当前是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。
-- 投递队列已经具备持久化、重试和 WebSocket 控制面运维能力，但还没有独立的可视化管理界面。
+- 投递队列已经具备持久化、重试、WebSocket 控制面运维能力和本地 Dashboard 管理界面。
 - Agent 权限模型已支持工具策略和 capability tags，但还需要继续增强审计、校验和权限预览。
-- 运行态观测已提供 WebSocket 状态与健康检查接口，但还未接入独立监控系统和告警渠道。
+- 运行态观测已提供 WebSocket 状态、健康检查接口和本地可视化页面，但还未接入告警渠道、鉴权和长期趋势指标。
 
 ## 后续计划
 
@@ -325,4 +353,4 @@ cd ~/Desktop/gateway
 2. 升级 Agent 权限模型、配置审计和会话治理。
 3. 演进多 Agent handoff 与任务实例状态机。
 4. 为 delivery / cron / channel runtime 增加更完整的结构化审计日志。
-5. 接入独立监控与告警渠道，消费 `health.check` 的结构化结果。
+5. 为 Dashboard 增加 token 鉴权、运行事件日志、趋势指标和告警渠道。

@@ -1,5 +1,7 @@
 import asyncio
 
+from websockets.exceptions import ConnectionClosedError
+
 from agent_gateway.agents import AgentManager
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
@@ -58,6 +60,24 @@ class FakeDeliveryRuntime:
 
     async def flush_once(self) -> None:
         self.flush_calls += 1
+
+
+class DisconnectingWebSocket:
+    def __init__(self) -> None:
+        self._sent = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._sent:
+            raise StopAsyncIteration
+        self._sent = True
+        return '{"jsonrpc":"2.0","id":1,"method":"status","params":{}}'
+
+    async def send(self, payload: str) -> None:
+        del payload
+        raise ConnectionClosedError(None, None)
 
 
 def _build_tools() -> ToolRegistry:
@@ -121,6 +141,26 @@ def test_gateway_server_exposes_control_plane_methods(tmp_path) -> None:
     assert profiles_result[0]["name"] == "primary"
     assert channels_result == []
     assert source_result == {"bindings": []}
+
+
+def test_gateway_server_ignores_websocket_disconnect_during_send(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main"))
+    bindings = BindingTable()
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+    )
+
+    asyncio.run(server._handle(DisconnectingWebSocket()))
 
 
 def test_gateway_server_mutation_methods(tmp_path) -> None:

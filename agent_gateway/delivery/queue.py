@@ -15,6 +15,10 @@ BACKOFF_SECONDS = [5, 25, 120, 600]
 DELIVERY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
+class PermanentDeliveryError(RuntimeError):
+    """A delivery failure that should not be retried automatically."""
+
+
 @dataclass(slots=True)
 class QueuedDelivery:
     id: str
@@ -109,8 +113,14 @@ class DeliveryQueue:
     def move_to_failed(self, entry: QueuedDelivery) -> None:
         src = self._entry_path(self.queue_dir, entry.id)
         dst = self._entry_path(self.failed_dir, entry.id)
+        tmp_path = self.failed_dir / f".tmp.{entry.id}.json"
+        payload = json.dumps(entry.to_dict(), ensure_ascii=False, indent=2)
+        with self._lock, tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+        tmp_path.replace(dst)
         if src.exists():
-            src.replace(dst)
+            src.unlink()
 
     def retry_now(self, delivery_id: str) -> bool:
         pending = self.get_pending(delivery_id)
@@ -204,6 +214,10 @@ class DeliveryRunner:
                 continue
             try:
                 success = self.deliver_fn(entry)
+            except PermanentDeliveryError as exc:
+                entry.last_error = str(exc) or "permanent delivery failure"
+                self.queue.move_to_failed(entry)
+                continue
             except Exception as exc:
                 success = False
                 error = str(exc)

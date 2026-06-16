@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent_gateway.channels.base import Channel, ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.delivery.queue import DeliveryQueue
+from agent_gateway.delivery.queue import DeliveryQueue, DeliveryRunner, PermanentDeliveryError
 from agent_gateway.models import InboundMessage, OutboundMessage
 from agent_gateway.runtime.delivery_runtime import DeliveryRuntime
 
@@ -125,3 +125,27 @@ def test_delivery_queue_can_retry_failed_and_discard_entries(tmp_path: Path) -> 
 
     assert queue.discard(pending_id, state="pending") is True
     assert queue.get_pending(pending_id) is None
+
+
+def test_delivery_runner_moves_permanent_failure_to_failed_without_retry(tmp_path: Path) -> None:
+    queue = DeliveryQueue(tmp_path / "queue")
+    delivery_id = queue.enqueue(
+        "feishu",
+        "ou_missing_user",
+        "bad target",
+        {"account_id": "feishu-main"},
+    )
+    runner = DeliveryRunner(
+        queue,
+        lambda entry: (_ for _ in ()).throw(PermanentDeliveryError("invalid open_id")),
+        max_retries=5,
+    )
+
+    runner.run_once()
+
+    assert queue.pending_entries() == []
+    failed = queue.failed_entries()
+    assert len(failed) == 1
+    assert failed[0].id == delivery_id
+    assert failed[0].retry_count == 0
+    assert failed[0].last_error == "invalid open_id"

@@ -20,6 +20,7 @@ from agent_gateway.delivery.queue import DeliveryQueue
 from agent_gateway.intelligence.bootstrap import PromptAssembler
 from agent_gateway.intelligence.memory import MemoryStore, register_memory_tools
 from agent_gateway.intelligence.skills import SkillsManager
+from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
 from agent_gateway.router import BindingTable, normalize_agent_id
 from agent_gateway.runtime.autonomy import AutonomyRuntime
 from agent_gateway.runtime.channel_runtime import ChannelRuntime
@@ -56,6 +57,16 @@ class GatewayApplication:
     delivery_runtime: DeliveryRuntime
     command_queue: CommandQueue
     control_plane: GatewayControlPlane
+
+
+def build_dashboard_websocket_url(settings: GatewaySettings) -> str:
+    protocol = "ws"
+    host = settings.host
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{protocol}://{host}:{settings.port}"
 
 
 def build_application(settings: GatewaySettings | None = None) -> GatewayApplication:
@@ -169,12 +180,47 @@ async def serve(app: GatewayApplication) -> None:
         signature_window_seconds=app.settings.feishu_signature_window_seconds,
         dedup_ttl_seconds=app.settings.feishu_event_dedup_ttl_seconds,
     )
-    await server.start()
-    await app.delivery_runtime.start()
-    await channel_runtime.start()
-    await app.autonomy_runtime.start()
-    await feishu_webhook.start()
-    print(f"Gateway running on ws://{app.settings.host}:{app.settings.port}")
+    dashboard_server = (
+        DashboardStaticServer(
+            host=app.settings.dashboard_host,
+            port=app.settings.dashboard_port,
+            config=DashboardConfig(
+                websocket_url=build_dashboard_websocket_url(app.settings),
+                refresh_interval_seconds=app.settings.dashboard_refresh_interval_seconds,
+            ),
+        )
+        if app.settings.dashboard_enabled
+        else None
+    )
+    started: list[object] = []
+    try:
+        await server.start()
+        started.append(server)
+        await app.delivery_runtime.start()
+        started.append(app.delivery_runtime)
+        await channel_runtime.start()
+        started.append(channel_runtime)
+        await app.autonomy_runtime.start()
+        started.append(app.autonomy_runtime)
+        await feishu_webhook.start()
+        started.append(feishu_webhook)
+        if dashboard_server is not None:
+            await dashboard_server.start()
+            started.append(dashboard_server)
+        print(f"Gateway running on ws://{app.settings.host}:{app.settings.port}")
+        if dashboard_server is not None:
+            print(
+                "Dashboard running on "
+                f"http://{app.settings.dashboard_host}:{app.settings.dashboard_port}"
+            )
+        else:
+            print("Dashboard disabled")
+    except Exception:
+        for component in reversed(started):
+            stop = getattr(component, "stop", None)
+            if stop is not None:
+                await stop()
+        raise
     webhook_paths = feishu_webhook.list_webhook_paths()
     if webhook_paths:
         for account_id, path in webhook_paths:
@@ -199,6 +245,8 @@ async def serve(app: GatewayApplication) -> None:
     try:
         await asyncio.Event().wait()
     finally:
+        if dashboard_server is not None:
+            await dashboard_server.stop()
         await app.autonomy_runtime.stop()
         await channel_runtime.stop()
         await app.delivery_runtime.stop()

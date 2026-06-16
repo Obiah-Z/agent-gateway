@@ -4,6 +4,8 @@ import json
 import time
 from typing import Any
 
+from websockets.exceptions import ConnectionClosed
+
 from agent_gateway.models import Binding, InboundMessage
 from agent_gateway.runtime.autonomy import AutonomyRuntime
 from agent_gateway.runtime.control_plane import GatewayControlPlane
@@ -51,9 +53,15 @@ class GatewayServer:
         self._running = False
 
     async def _handle(self, websocket: Any) -> None:
-        async for raw in websocket:
-            response = await self._dispatch(raw)
-            await websocket.send(json.dumps(response, ensure_ascii=False))
+        try:
+            async for raw in websocket:
+                response = await self._dispatch(raw)
+                try:
+                    await websocket.send(json.dumps(response, ensure_ascii=False))
+                except ConnectionClosed:
+                    break
+        except ConnectionClosed:
+            return
 
     async def _dispatch(self, raw: str) -> dict[str, Any]:
         try:

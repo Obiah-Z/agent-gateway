@@ -21,12 +21,14 @@ import hashlib
 from agent_gateway.channels.base import Channel, ChannelAccount
 from agent_gateway.channels.feishu_cards import FeishuCardRenderer, FeishuSendPayload
 from agent_gateway.channels.feishu_state import FeishuCardState, FeishuCardStateStore
+from agent_gateway.delivery.queue import PermanentDeliveryError
 from agent_gateway.models import InboundMessage, OutboundMessage
 
 
 class FeishuChannel(Channel):
     name = "feishu"
     _CARD_FALLBACK_ERROR_CODES = {230025, 230054, 230099}
+    _PERMANENT_SEND_ERROR_CODES = {99992351}
 
     def __init__(self, account: ChannelAccount, state_dir: Path | None = None) -> None:
         if httpx is None:
@@ -378,6 +380,15 @@ class FeishuChannel(Channel):
                 f" code={data.get('code')}"
                 f" msg={data.get('msg', '')}"
             )
+            if self._is_permanent_send_error(data):
+                raise PermanentDeliveryError(
+                    "permanent Feishu send failure:"
+                    f" account={self.account_id}"
+                    f" to={outbound.to}"
+                    f" receive_id_type={self._resolve_receive_id_type(outbound)}"
+                    f" code={data.get('code')}"
+                    f" msg={data.get('msg', '')}"
+                )
         return success
 
     def _resolve_render_mode(self, outbound: OutboundMessage) -> str:
@@ -394,6 +405,12 @@ class FeishuChannel(Channel):
 
     def _should_fallback_to_text(self, data: dict[str, Any]) -> bool:
         return data.get("code") in self._CARD_FALLBACK_ERROR_CODES
+
+    def _is_permanent_send_error(self, data: dict[str, Any]) -> bool:
+        if data.get("code") in self._PERMANENT_SEND_ERROR_CODES:
+            return True
+        msg = str(data.get("msg", "")).lower()
+        return "not a valid" in msg and "invalid ids" in msg
 
     def _read_positive_int(self, value: object, *, default: int, minimum: int) -> int:
         try:

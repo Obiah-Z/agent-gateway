@@ -1,6 +1,11 @@
 import asyncio
 
-from agent_gateway.app import trigger_cron_once, trigger_cron_once_with_timeout
+from agent_gateway.app import (
+    build_dashboard_websocket_url,
+    trigger_cron_once,
+    trigger_cron_once_with_timeout,
+)
+from agent_gateway.config import GatewaySettings
 
 
 class FakeCron:
@@ -111,3 +116,15 @@ def test_trigger_cron_once_with_timeout_returns_timeout_result() -> None:
         "timeout_seconds": 0.01,
         "pending_after_timeout": 0,
     }
+
+
+def test_build_dashboard_websocket_url_uses_loopback_for_wildcard_host() -> None:
+    settings = GatewaySettings(host="0.0.0.0", port=8765)
+
+    assert build_dashboard_websocket_url(settings) == "ws://127.0.0.1:8765"
+
+
+def test_build_dashboard_websocket_url_wraps_ipv6_host() -> None:
+    settings = GatewaySettings(host="::1", port=8765)
+
+    assert build_dashboard_websocket_url(settings) == "ws://[::1]:8765"

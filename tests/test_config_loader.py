@@ -28,6 +28,10 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "GATEWAY_WEB_SEARCH_PROVIDER=tavily",
                 "TAVILY_API_KEY=tvly-test-key",
                 "TAVILY_BASE_URL=https://api.tavily.test",
+                "GATEWAY_DASHBOARD_ENABLED=false",
+                "GATEWAY_DASHBOARD_HOST=0.0.0.0",
+                "GATEWAY_DASHBOARD_PORT=8870",
+                "GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=7",
             ]
         ),
         encoding="utf-8",
@@ -45,6 +49,10 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().web_search_provider == "tavily"
     assert GatewaySettings.from_env().tavily_api_key == "tvly-test-key"
     assert GatewaySettings.from_env().tavily_base_url == "https://api.tavily.test"
+    assert GatewaySettings.from_env().dashboard_enabled is False
+    assert GatewaySettings.from_env().dashboard_host == "0.0.0.0"
+    assert GatewaySettings.from_env().dashboard_port == 8870
+    assert GatewaySettings.from_env().dashboard_refresh_interval_seconds == 7
 
 
 def test_config_loader_reads_default_files(tmp_path: Path, monkeypatch) -> None:

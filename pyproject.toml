@@ -23,3 +23,6 @@ agent-gateway = "agent_gateway.app:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agent_gateway*"]
+
+[tool.setuptools.package-data]
+"agent_gateway.monitoring" = ["static/*.html", "static/*.js", "static/*.css"]
