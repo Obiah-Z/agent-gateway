@@ -482,72 +482,133 @@ function renderRuntime(runtime) {
   dom.runtimeList.className = "runtime-section-list";
   dom.runtimeUpdated.textContent = new Date().toLocaleTimeString("zh-CN");
 
+  const channels = runtime.channels || {};
+  const profiles = runtime.profiles || {};
+  const features = runtime.features || {};
+  const proactive = features.proactive_target || {};
+  const paths = runtime.paths || {};
   const sections = [
     {
+      icon: "AG",
       title: "Agents",
       value: `${runtime.agents?.count ?? 0} 个`,
+      status: Number(runtime.agents?.count || 0) > 0 ? "ok" : "critical",
+      summary: `${runtime.bindings?.count ?? 0} 条路由绑定`,
+      chips: [
+        `agents ${runtime.agents?.count ?? 0}`,
+        `bindings ${runtime.bindings?.count ?? 0}`,
+      ],
       rows: [
-        ["IDs", (runtime.agents?.ids || []).join(", ") || "无"],
-        ["Bindings", `${runtime.bindings?.count ?? 0} 条路由绑定`],
+        ["Agent IDs", (runtime.agents?.ids || []).join(", ") || "无"],
+        ["Route Bindings", `${runtime.bindings?.count ?? 0} 条`],
       ],
     },
     {
+      icon: "CH",
       title: "Channels",
-      value: `${runtime.channels?.active ?? 0}/${runtime.channels?.count ?? 0} active`,
-      rows: (runtime.channels?.items || []).map((row) => [
+      value: `${channels.active ?? 0}/${channels.count ?? 0}`,
+      status: Number(channels.active || 0) > 0 ? "ok" : "warning",
+      summary: "活跃通道 / 已配置通道",
+      chips: [
+        `active ${channels.active ?? 0}`,
+        `total ${channels.count ?? 0}`,
+      ],
+      rows: (channels.items || []).map((row) => [
         `${row.channel}:${row.account_id}`,
         `${row.active ? "active" : "inactive"} | enabled=${row.enabled} | token=${row.has_token ? "configured" : "missing"}`,
       ]),
     },
     {
+      icon: "AI",
       title: "Profiles",
-      value: `${runtime.profiles?.available ?? 0}/${runtime.profiles?.count ?? 0} available`,
-      rows: (runtime.profiles?.items || []).map((row) => [
+      value: `${profiles.available ?? 0}/${profiles.count ?? 0}`,
+      status: Number(profiles.available || 0) > 0 ? "ok" : "critical",
+      summary: "可用模型 Profile / 总数",
+      chips: [
+        `available ${profiles.available ?? 0}`,
+        `total ${profiles.count ?? 0}`,
+      ],
+      rows: (profiles.items || []).map((row) => [
         row.name || "profile",
         `key=${row.has_key ? "configured" : "missing"} | cooldown=${row.cooldown_remaining || 0}s`,
       ]),
     },
     {
+      icon: "FX",
       title: "Features",
-      value: runtime.features?.web_search_enabled ? "web search on" : "web search off",
+      value: features.web_search_enabled ? "Search On" : "Search Off",
+      status: features.web_search_enabled && !features.web_search_has_key ? "warning" : "ok",
+      summary: proactive.peer_id_configured ? "主动投递目标已配置" : "主动投递目标未完整配置",
+      chips: [
+        features.web_search_enabled ? "web search on" : "web search off",
+        proactive.peer_id_configured ? "proactive ready" : "proactive missing",
+      ],
       rows: [
         [
           "Web Search",
-          `${runtime.features?.web_search_provider || "--"} | key=${runtime.features?.web_search_has_key ? "configured" : "missing"}`,
+          `${features.web_search_provider || "--"} | key=${features.web_search_has_key ? "configured" : "missing"}`,
         ],
         [
           "Proactive",
-          `${runtime.features?.proactive_target?.channel || "--"}:${runtime.features?.proactive_target?.account_id || "--"} -> ${runtime.features?.proactive_target?.agent_id || "--"} | peer=${runtime.features?.proactive_target?.peer_id_configured ? "configured" : "missing"}`,
+          `${proactive.channel || "--"}:${proactive.account_id || "--"} -> ${proactive.agent_id || "--"} | peer=${proactive.peer_id_configured ? "configured" : "missing"}`,
         ],
       ],
     },
     {
+      icon: "FS",
       title: "Paths",
-      value: runtime.paths?.workspace_exists ? "workspace ok" : "workspace missing",
+      value: paths.workspace_exists && paths.data_dir_exists && paths.config_dir_exists ? "OK" : "Check",
+      status: paths.workspace_exists && paths.data_dir_exists && paths.config_dir_exists ? "ok" : "critical",
+      summary: "workspace / data / config",
+      chips: [
+        paths.workspace_exists ? "workspace ok" : "workspace missing",
+        paths.data_dir_exists ? "data ok" : "data missing",
+        paths.config_dir_exists ? "config ok" : "config missing",
+      ],
       rows: [
-        ["workspace", runtime.paths?.workspace_root || "--"],
-        ["data", runtime.paths?.data_dir || "--"],
-        ["config", runtime.paths?.config_dir || "--"],
+        ["workspace", paths.workspace_root || "--"],
+        ["data", paths.data_dir || "--"],
+        ["config", paths.config_dir || "--"],
       ],
     },
   ];
 
   for (const section of sections) {
     const card = document.createElement("div");
-    card.className = "runtime-section";
+    card.className = `runtime-section runtime-${normalizeStatus(section.status)}`;
+
+    const head = document.createElement("div");
+    head.className = "runtime-section-head";
+    appendText(head, "span", section.icon, "runtime-icon");
     const title = document.createElement("div");
     title.className = "runtime-section-title";
     appendText(title, "strong", section.title);
-    appendText(title, "span", section.value);
-    card.appendChild(title);
+    appendText(title, "small", section.summary);
+    head.appendChild(title);
+    appendText(head, "span", section.value, "runtime-value");
+    card.appendChild(head);
+
+    const chipRow = document.createElement("div");
+    chipRow.className = "runtime-chips";
+    for (const chip of section.chips) {
+      appendText(chipRow, "span", chip);
+    }
+    card.appendChild(chipRow);
+
+    const details = document.createElement("details");
+    details.className = "runtime-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "查看详情";
+    details.appendChild(summary);
     const rows = section.rows.length ? section.rows : [["empty", "无数据"]];
     for (const [label, value] of rows) {
       const row = document.createElement("div");
       row.className = "kv-row";
       appendText(row, "span", label);
       appendText(row, "code", value || "--");
-      card.appendChild(row);
+      details.appendChild(row);
     }
+    card.appendChild(details);
     dom.runtimeList.appendChild(card);
   }
 }

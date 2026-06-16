@@ -8,40 +8,62 @@
   </head>
   <body>
     <main class="shell">
-      <section class="hero panel">
-        <div>
-          <p class="eyebrow">AI Agent Gateway</p>
-          <h1>运维监控台</h1>
-          <p class="hero-copy">
-            复用 Gateway WebSocket 控制面，集中查看健康状态、运行快照、投递队列和 Cron 主动任务。
-          </p>
-        </div>
-        <div class="connection-card">
-          <span id="connection-dot" class="dot is-muted"></span>
+      <aside class="console-sidebar" aria-label="运维导航">
+        <div class="brand">
+          <span class="brand-mark">AG</span>
           <div>
-            <strong id="connection-label">未连接</strong>
-            <small id="connection-detail">等待连接 WebSocket 控制面</small>
+            <span class="brand-title">Agent Gateway</span>
+            <span class="brand-subtitle">Operations Console</span>
           </div>
         </div>
-      </section>
+        <nav class="side-nav">
+          <a href="#issue-panel"><span class="side-dot"></span>问题摘要</a>
+          <a href="#overview-panel"><span class="side-dot"></span>运行总览</a>
+          <a href="#health-panel"><span class="side-dot"></span>健康检查</a>
+          <a href="#delivery-panel"><span class="side-dot"></span>投递队列</a>
+          <a href="#cron-panel"><span class="side-dot"></span>主动任务</a>
+        </nav>
+        <div class="sidebar-note">
+          <strong>本地控制台</strong>
+          <small>默认监听 127.0.0.1。暴露到公网前应先启用鉴权。</small>
+        </div>
+      </aside>
 
-      <section class="toolbar panel">
-        <label class="field field-grow">
-          <span>控制面地址</span>
-          <input id="ws-url" type="text" autocomplete="off" spellcheck="false" />
-        </label>
-        <button id="connect-btn" class="button button-primary" type="button">连接</button>
-        <button id="refresh-btn" class="button" type="button">刷新</button>
-        <label class="toggle">
-          <input id="auto-refresh" type="checkbox" checked />
-          <span>15 秒自动刷新</span>
-        </label>
-      </section>
+      <section class="console-main">
+        <section class="topbar">
+          <div class="topbar-title">
+            <p class="eyebrow">Gateway Runtime</p>
+            <h1>智能体网关运维控制台</h1>
+            <p class="hero-copy">
+              集中监控健康状态、运行快照、可靠投递队列与 Cron 主动任务。
+            </p>
+          </div>
+          <div class="connection-card">
+            <span id="connection-dot" class="dot is-muted"></span>
+            <div>
+              <strong id="connection-label">未连接</strong>
+              <small id="connection-detail">等待连接 WebSocket 控制面</small>
+            </div>
+          </div>
+        </section>
 
-      <section id="alert" class="alert" hidden></section>
-      <section id="toast" class="toast" hidden></section>
+        <section class="toolbar">
+          <label class="field field-grow">
+            <span>控制面地址</span>
+            <input id="ws-url" type="text" autocomplete="off" spellcheck="false" />
+          </label>
+          <button id="connect-btn" class="button button-primary" type="button">连接</button>
+          <button id="refresh-btn" class="button" type="button">刷新</button>
+          <label class="toggle">
+            <input id="auto-refresh" type="checkbox" checked />
+            <span>15 秒自动刷新</span>
+          </label>
+        </section>
 
-      <section class="panel issue-panel">
+        <section id="alert" class="alert" hidden></section>
+        <section id="toast" class="toast" hidden></section>
+
+      <section id="issue-panel" class="panel issue-panel">
         <div class="section-head">
           <div>
             <p class="eyebrow">Triage</p>
@@ -52,7 +74,7 @@
         <div id="issue-list" class="issue-list empty">尚未加载问题摘要</div>
       </section>
 
-      <section class="summary-grid" aria-label="运行总览">
+      <section id="overview-panel" class="summary-grid" aria-label="运行总览">
         <article class="metric-card metric-health" data-jump="#health-panel">
           <span>整体健康</span>
           <strong id="metric-health">--</strong>
@@ -140,6 +162,7 @@
           <span id="cron-summary" class="pill">暂无数据</span>
         </div>
         <div id="cron-list" class="cron-list empty">尚未加载 Cron 任务</div>
+      </section>
       </section>
     </main>
 

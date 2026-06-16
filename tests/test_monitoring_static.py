@@ -46,6 +46,8 @@ def test_monitoring_dashboard_includes_triage_and_delivery_detail_ui() -> None:
     assert "问题摘要" in index
     assert "delivery-detail" in index
     assert "data-jump" in index
+    assert "console-sidebar" in index
+    assert "Operations Console" in index
 
 
 def test_monitoring_dashboard_classifies_delivery_errors_and_confirms_actions() -> None:
@@ -56,6 +58,18 @@ def test_monitoring_dashboard_classifies_delivery_errors_and_confirms_actions() 
     assert "invalid_open_id" in app_js
     assert "function confirmAction" in app_js
     assert "navigator.clipboard.writeText" in app_js
+
+
+def test_monitoring_runtime_snapshot_uses_compact_cards_and_details() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+
+    assert "runtime-icon" in app_js
+    assert "runtime-chips" in app_js
+    assert "runtime-details" in app_js
+    assert "document.createElement(\"details\")" in app_js
+    assert ".runtime-icon" in styles
+    assert ".runtime-chips" in styles
 
 
 def test_monitoring_static_dir_is_inside_package() -> None:
