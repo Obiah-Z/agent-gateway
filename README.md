@@ -98,10 +98,10 @@ FEISHU_WEBHOOK_PORT=8766
 FEISHU_WEBHOOK_PATH=/webhooks/feishu
 ```
 
-如果本机通过公网 IP 或内网穿透暴露，例如公网地址是 `8.153.15.37`，飞书事件订阅中的请求地址应填写：
+如果本机通过公网 IP、域名或内网穿透地址暴露，飞书事件订阅中的请求地址应填写外部可访问地址：
 
 ```text
-http://8.153.15.37:8766/webhooks/feishu
+http://<你的公网IP或域名>:8766/webhooks/feishu
 ```
 
 如果前面还有 HTTPS 反向代理，则填写代理后的 HTTPS 地址。服务端本地监听仍建议使用：
@@ -154,10 +154,10 @@ FEISHU_SECONDARY_ENABLE_STATEFUL_CARDS=false
 "webhook_path": "/webhooks/feishu/secondary"
 ```
 
-如果公网地址仍是 `8.153.15.37`，第二个飞书应用事件订阅中的请求地址填写：
+第二个飞书应用事件订阅中的请求地址填写对应的外部可访问地址：
 
 ```text
-http://8.153.15.37:8766/webhooks/feishu/secondary
+http://<你的公网IP或域名>:8766/webhooks/feishu/secondary
 ```
 
 `config/bindings.json` 已预留按 `account_id=feishu-secondary` 路由到 `feishu-secondary` Agent 的规则；该 Agent 的专属提示词位于 `workspace/agents/feishu-secondary/`。如果你要新增第三、第四个飞书机器人，复制 `feishu-secondary` 的配置块，换成新的 `account_id`、环境变量名、`webhook_path` 和绑定规则即可。
