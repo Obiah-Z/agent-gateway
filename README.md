@@ -49,7 +49,7 @@ gateway/
 ## 快速启动
 
 ```bash
-cd ~/Desktop/claw0/gateway
+cd ~/Desktop/gateway
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -217,9 +217,9 @@ http://8.153.15.37:8766/webhooks/feishu/secondary
 ## 测试
 
 ```bash
-cd ~/Desktop/claw0
-./gateway/.venv/bin/python -m compileall gateway/agent_gateway gateway/tests
-./gateway/.venv/bin/python -m pytest gateway/tests -q
+cd ~/Desktop/gateway
+./.venv/bin/python -m compileall agent_gateway tests
+./.venv/bin/python -m pytest tests -q
 ```
 
 当前测试覆盖了配置加载、路由、会话存储、Agent Manifest、记忆、技能、通道适配、飞书 webhook、安全校验、dispatcher、delivery runtime、control plane、heartbeat/cron 等核心模块。
