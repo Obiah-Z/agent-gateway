@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import threading
 import time
 import uuid
@@ -11,6 +12,7 @@ from typing import Any, Callable
 
 
 BACKOFF_SECONDS = [5, 25, 120, 600]
+DELIVERY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 @dataclass(slots=True)
@@ -82,15 +84,19 @@ class DeliveryQueue:
         return delivery_id
 
     def pending_entries(self) -> list[QueuedDelivery]:
-        entries: list[QueuedDelivery] = []
-        for path in sorted(self.queue_dir.glob("*.json")):
-            loaded = self._read_entry(path)
-            if loaded is not None:
-                entries.append(loaded)
-        return entries
+        return self._entries_from_dir(self.queue_dir)
+
+    def failed_entries(self) -> list[QueuedDelivery]:
+        return self._entries_from_dir(self.failed_dir)
+
+    def get_pending(self, delivery_id: str) -> QueuedDelivery | None:
+        return self._read_entry(self._entry_path(self.queue_dir, delivery_id))
+
+    def get_failed(self, delivery_id: str) -> QueuedDelivery | None:
+        return self._read_entry(self._entry_path(self.failed_dir, delivery_id))
 
     def ack(self, delivery_id: str) -> None:
-        path = self.queue_dir / f"{delivery_id}.json"
+        path = self._entry_path(self.queue_dir, delivery_id)
         if path.exists():
             path.unlink()
 
@@ -101,13 +107,50 @@ class DeliveryQueue:
         self._write_entry(entry)
 
     def move_to_failed(self, entry: QueuedDelivery) -> None:
-        src = self.queue_dir / f"{entry.id}.json"
-        dst = self.failed_dir / f"{entry.id}.json"
+        src = self._entry_path(self.queue_dir, entry.id)
+        dst = self._entry_path(self.failed_dir, entry.id)
         if src.exists():
             src.replace(dst)
 
+    def retry_now(self, delivery_id: str) -> bool:
+        pending = self.get_pending(delivery_id)
+        if pending is not None:
+            pending.next_retry_at = 0.0
+            self._write_entry(pending)
+            return True
+
+        failed = self.get_failed(delivery_id)
+        if failed is None:
+            return False
+        failed.retry_count = 0
+        failed.next_retry_at = 0.0
+        src = self._entry_path(self.failed_dir, delivery_id)
+        dst = self._entry_path(self.queue_dir, delivery_id)
+        self._write_entry(failed)
+        failed_pending = self._entry_path(self.queue_dir, delivery_id)
+        if failed_pending.exists() and src.exists():
+            src.unlink()
+        elif src.exists():
+            src.replace(dst)
+        return True
+
+    def discard(self, delivery_id: str, *, state: str = "any") -> bool:
+        if state not in {"any", "pending", "failed"}:
+            raise ValueError("state must be one of: any, pending, failed")
+        removed = False
+        paths = []
+        if state in {"any", "pending"}:
+            paths.append(self._entry_path(self.queue_dir, delivery_id))
+        if state in {"any", "failed"}:
+            paths.append(self._entry_path(self.failed_dir, delivery_id))
+        for path in paths:
+            if path.exists():
+                path.unlink()
+                removed = True
+        return removed
+
     def _write_entry(self, entry: QueuedDelivery) -> None:
-        final_path = self.queue_dir / f"{entry.id}.json"
+        final_path = self._entry_path(self.queue_dir, entry.id)
         tmp_path = self.queue_dir / f".tmp.{entry.id}.json"
         payload = json.dumps(entry.to_dict(), ensure_ascii=False, indent=2)
         with self._lock, tmp_path.open("w", encoding="utf-8") as handle:
@@ -117,10 +160,27 @@ class DeliveryQueue:
 
     @staticmethod
     def _read_entry(path: Path) -> QueuedDelivery | None:
+        if not path.exists():
+            return None
         try:
             return QueuedDelivery.from_dict(json.loads(path.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, KeyError):
             return None
+
+    @staticmethod
+    def _entry_path(root: Path, delivery_id: str) -> Path:
+        if not DELIVERY_ID_PATTERN.fullmatch(delivery_id):
+            raise ValueError("invalid delivery id")
+        return root / f"{delivery_id}.json"
+
+    @staticmethod
+    def _entries_from_dir(root: Path) -> list[QueuedDelivery]:
+        entries: list[QueuedDelivery] = []
+        for path in sorted(root.glob("*.json")):
+            loaded = DeliveryQueue._read_entry(path)
+            if loaded is not None:
+                entries.append(loaded)
+        return entries
 
 
 class DeliveryRunner:
@@ -130,10 +190,12 @@ class DeliveryRunner:
         deliver_fn: Callable[[QueuedDelivery], bool],
         *,
         max_retries: int = 5,
+        on_success: Callable[[QueuedDelivery], None] | None = None,
     ) -> None:
         self.queue = queue
         self.deliver_fn = deliver_fn
         self.max_retries = max_retries
+        self.on_success = on_success
 
     def run_once(self) -> None:
         now = time.time()
@@ -150,6 +212,11 @@ class DeliveryRunner:
 
             if success:
                 self.queue.ack(entry.id)
+                if self.on_success is not None:
+                    try:
+                        self.on_success(entry)
+                    except Exception:
+                        pass
                 continue
             if entry.retry_count + 1 >= self.max_retries:
                 entry.last_error = error or "delivery failed"

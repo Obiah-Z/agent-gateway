@@ -1,0 +1,138 @@
+{
+  "sources": [
+    {
+      "id": "openai-news",
+      "type": "rss",
+      "enabled": true,
+      "url": "https://openai.com/news/rss.xml",
+      "max_results": 5,
+      "tags": ["official", "openai", "model", "agent"]
+    },
+    {
+      "id": "anthropic-news",
+      "type": "html_page",
+      "enabled": true,
+      "url": "https://www.anthropic.com/news",
+      "url_patterns": ["/news/"],
+      "exclude_url_patterns": ["/company/", "/careers", "/legal"],
+      "max_results": 5,
+      "tags": ["official", "anthropic", "model", "agent"]
+    },
+    {
+      "id": "deepmind-blog",
+      "type": "html_page",
+      "enabled": true,
+      "url": "https://deepmind.google/blog/",
+      "url_patterns": ["/blog/"],
+      "exclude_url_patterns": ["/terms/", "/privacy/"],
+      "max_results": 5,
+      "tags": ["official", "google-deepmind", "research", "agent"]
+    },
+    {
+      "id": "openai-news-html-fallback",
+      "type": "html_page",
+      "enabled": false,
+      "url": "https://openai.com/news/",
+      "url_patterns": ["/news/"],
+      "exclude_url_patterns": ["/policies/", "/careers/"],
+      "max_results": 5,
+      "tags": ["official", "openai", "fallback"]
+    },
+    {
+      "id": "langchain-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "langchain-ai/langchain",
+      "max_results": 3,
+      "tags": ["framework", "langchain", "agent-runtime"]
+    },
+    {
+      "id": "langgraph-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "langchain-ai/langgraph",
+      "max_results": 3,
+      "tags": ["framework", "langgraph", "agent-runtime"]
+    },
+    {
+      "id": "llamaindex-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "run-llama/llama_index",
+      "max_results": 3,
+      "tags": ["framework", "llamaindex", "rag-agent"]
+    },
+    {
+      "id": "autogen-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "microsoft/autogen",
+      "max_results": 3,
+      "tags": ["framework", "autogen", "multi-agent"]
+    },
+    {
+      "id": "crewai-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "crewAIInc/crewAI",
+      "max_results": 3,
+      "tags": ["framework", "crewai", "multi-agent"]
+    },
+    {
+      "id": "pydantic-ai-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "pydantic/pydantic-ai",
+      "max_results": 3,
+      "tags": ["framework", "pydantic-ai", "tool-calling"]
+    },
+    {
+      "id": "smolagents-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "huggingface/smolagents",
+      "max_results": 3,
+      "tags": ["framework", "huggingface", "agent-runtime"]
+    },
+    {
+      "id": "mcp-python-sdk-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "modelcontextprotocol/python-sdk",
+      "max_results": 3,
+      "tags": ["mcp", "tool-protocol", "agent-runtime"]
+    },
+    {
+      "id": "openai-agents-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "openai/openai-agents-python",
+      "max_results": 3,
+      "tags": ["official", "openai", "agents-sdk"]
+    },
+    {
+      "id": "litellm-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "BerriAI/litellm",
+      "max_results": 3,
+      "tags": ["model-routing", "gateway", "inference"]
+    },
+    {
+      "id": "vllm-releases",
+      "type": "github_releases",
+      "enabled": true,
+      "repo": "vllm-project/vllm",
+      "max_results": 3,
+      "tags": ["inference", "serving", "agent-infra"]
+    },
+    {
+      "id": "arxiv-agent-research",
+      "type": "arxiv",
+      "enabled": true,
+      "query": "cat:cs.AI AND (all:\"AI agent\" OR all:\"tool use\" OR all:\"multi-agent\" OR all:\"agent evaluation\")",
+      "max_results": 5,
+      "tags": ["research", "paper", "agent"]
+    }
+  ]
+}

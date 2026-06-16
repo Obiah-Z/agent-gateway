@@ -15,6 +15,7 @@ class DeliveryRuntime:
         *,
         poll_interval: float = 1.0,
         max_retries: int = 5,
+        on_success=None,
     ) -> None:
         self.queue = queue
         self.channels = channels
@@ -23,6 +24,7 @@ class DeliveryRuntime:
             queue,
             self._deliver_entry,
             max_retries=max_retries,
+            on_success=on_success,
         )
         self._task: asyncio.Task[None] | None = None
         self._stopped = False

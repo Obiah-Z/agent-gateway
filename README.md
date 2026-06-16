@@ -178,9 +178,75 @@ http://8.153.15.37:8766/webhooks/feishu/secondary
 - `IDENTITY.md`、`SOUL.md`、`TOOLS.md`、`BOOTSTRAP.md`：系统提示词分层。
 - `MEMORY.md`：长期记忆。
 - `HEARTBEAT.md`：后台 heartbeat 指令。
-- `CRON.json`：主动定时任务。
+- `CRON.json`：主动定时任务，当前包含每天 09:30 推送的 `AI Agent 每日简报`。
 - `skills/*/SKILL.md`：可注入的技能说明。
 - `agents/<agent_id>/`：Agent 局部提示词覆盖。
+
+## 主动任务与每日简报
+
+`workspace/CRON.json` 中的 `agent-news-digest` 会每天北京时间 09:30 触发 `research` Agent，整理最近 24 小时内 AI Agent 相关动态，并推送到 `.env` 中配置的主动投递目标。
+
+该任务当前使用 `agent_news_digest` payload：程序会先读取 `workspace/agent-news-sources.json`，从 OpenAI RSS、Anthropic / Google DeepMind 官方新闻页、GitHub Releases、arXiv 等来源采集候选条目，做基础去重后再交给 `research` Agent 生成中文简报。运行状态会写入 `data/news-digest/`，其中 `seen-items.jsonl` 用于避免重复推送同一条来源。
+
+需要确保 `.env` 中至少启用：
+
+```env
+GATEWAY_WEB_SEARCH_ENABLED=true
+TAVILY_API_KEY=你的 Tavily Key
+GATEWAY_PROACTIVE_CHANNEL=feishu
+GATEWAY_PROACTIVE_ACCOUNT_ID=feishu-main
+GATEWAY_PROACTIVE_PEER_ID=飞书 open_id 或 chat_id
+GATEWAY_PROACTIVE_AGENT_ID=research
+```
+
+如果要立即验证某个 cron 任务，可以使用一次性触发命令：
+
+```bash
+agent-gateway cron-trigger agent-news-digest
+```
+
+该命令会触发指定任务，并默认 flush 本地投递队列。若只想入队、不立刻发送：
+
+```bash
+agent-gateway cron-trigger agent-news-digest --no-flush
+```
+
+如果主动推送到飞书个人，`GATEWAY_PROACTIVE_PEER_ID` 通常是 `ou_` 开头的 `open_id`；推送到群时通常是 `oc_` 开头的 `chat_id`。飞书发送层会按 ID 前缀自动推断 `receive_id_type`。
+
+信息源配置示例：
+
+```json
+{
+  "id": "langgraph-releases",
+  "type": "github_releases",
+  "enabled": true,
+  "repo": "langchain-ai/langgraph",
+  "max_results": 3,
+  "tags": ["framework", "langgraph", "agent-runtime"]
+}
+```
+
+当前支持的 source 类型：
+
+- `rss`：读取 RSS `<item>` 条目。
+- `html_page`：读取官方新闻或博客列表页中的 `<a>` 链接，通过 `url_patterns` / `exclude_url_patterns` 筛选候选文章；适合没有稳定 RSS 的官网。
+- `github_releases`：读取指定仓库 Releases，可选配置 `GITHUB_TOKEN` 提升 GitHub API 限额。
+- `arxiv`：读取 arXiv Atom API，网络不稳定时会失败隔离，不影响其他来源。
+
+`html_page` 配置示例：
+
+```json
+{
+  "id": "anthropic-news",
+  "type": "html_page",
+  "enabled": true,
+  "url": "https://www.anthropic.com/news",
+  "url_patterns": ["/news/"],
+  "exclude_url_patterns": ["/company/", "/careers", "/legal"],
+  "max_results": 5,
+  "tags": ["official", "anthropic", "model", "agent"]
+}
+```
 
 ## WebSocket 控制面
 
@@ -212,7 +278,27 @@ http://8.153.15.37:8766/webhooks/feishu/secondary
 - `heartbeat.trigger`
 - `cron.list`
 - `cron.trigger`
+- `delivery.stats`
+- `delivery.list`
+- `delivery.retry`
+- `delivery.discard`
+- `delivery.flush`
+- `runtime.status`
+- `health.check`
 - `config.source`
+
+Delivery 控制面用于本地可靠投递队列的运维：
+
+- `delivery.stats`：查看 pending、failed、可立即重试数量和最早入队时间。
+- `delivery.list`：查看 pending / failed / all 队列，默认只返回文本预览；传入 `include_text=true` 可返回完整正文。
+- `delivery.retry`：传入 `delivery_id`，将 failed 消息移回 pending，或让 pending 中处于 backoff 的消息立即可重试。
+- `delivery.discard`：传入 `delivery_id`，从 pending / failed 队列中人工丢弃指定消息。
+- `delivery.flush`：立即执行一次或多次投递队列 flush，适合人工排障后快速验证。
+
+运行态状态接口用于统一查看系统健康：
+
+- `runtime.status`：返回 agents、bindings、channels、profiles、delivery、heartbeat、cron、路径与功能开关的结构化快照。
+- `health.check`：返回 `ok` / `degraded` / `unhealthy` 状态，以及逐项 checks；适合后续接入监控或部署探针。
 
 ## 测试
 
@@ -227,16 +313,16 @@ cd ~/Desktop/gateway
 ## 当前边界
 
 - 当前是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。
-- 投递队列已经具备持久化和重试能力，但人工运维接口还在后续阶段补齐。
+- 投递队列已经具备持久化、重试和 WebSocket 控制面运维能力，但还没有独立的可视化管理界面。
 - Agent 权限模型已支持工具策略和 capability tags，但还需要继续增强审计、校验和权限预览。
-- 运行态观测仍以测试和本地日志为主，后续会增加统一状态面和结构化日志。
+- 运行态观测已提供 WebSocket 状态与健康检查接口，但还未接入独立监控系统和告警渠道。
 
 ## 后续计划
 
 完整路线见 `PROJECT_PLAN.md`。近期优先级：
 
 1. 完成飞书入站限流与审计增强。
-2. 增加 delivery 控制面，支持查看 pending / failed 队列和人工重试。
-3. 增加统一运行态状态接口和健康检查。
-4. 升级 Agent 权限模型、配置审计和会话治理。
-5. 演进多 Agent handoff 与任务实例状态机。
+2. 升级 Agent 权限模型、配置审计和会话治理。
+3. 演进多 Agent handoff 与任务实例状态机。
+4. 为 delivery / cron / channel runtime 增加更完整的结构化审计日志。
+5. 接入独立监控与告警渠道，消费 `health.check` 的结构化结果。

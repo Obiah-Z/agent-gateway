@@ -95,11 +95,18 @@ class GatewayServer:
             "config.source": self._m_config_source,
             "sessions.list": self._m_sessions,
             "status": self._m_status,
+            "runtime.status": self._m_runtime_status,
+            "health.check": self._m_health_check,
             "ingest": self._m_ingest,
             "heartbeat.status": self._m_heartbeat_status,
             "heartbeat.trigger": self._m_heartbeat_trigger,
             "cron.list": self._m_cron_list,
             "cron.trigger": self._m_cron_trigger,
+            "delivery.stats": self._m_delivery_stats,
+            "delivery.list": self._m_delivery_list,
+            "delivery.retry": self._m_delivery_retry,
+            "delivery.discard": self._m_delivery_discard,
+            "delivery.flush": self._m_delivery_flush,
         }
         handler = handlers.get(method)
         if handler is None:
@@ -414,6 +421,39 @@ class GatewayServer:
             "channels": self.control_plane.channels.list_channels() if self.control_plane else [],
         }
 
+    async def _m_runtime_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return {
+            "server": {
+                "running": self._running,
+                "uptime_seconds": round(time.monotonic() - self._start_time, 1),
+            },
+            **self.control_plane.runtime_status(),
+        }
+
+    async def _m_health_check(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        result = self.control_plane.health_check()
+        result["server"] = {
+            "running": self._running,
+            "uptime_seconds": round(time.monotonic() - self._start_time, 1),
+        }
+        if not self._running:
+            result["checks"].append(
+                {
+                    "name": "server.running",
+                    "status": "warning",
+                    "message": "gateway server is not running",
+                }
+            )
+            result["summary"]["warning"] += 1
+            if result["status"] == "ok":
+                result["ok"] = False
+                result["status"] = "degraded"
+        return result
+
     async def _m_ingest(self, params: dict[str, Any]) -> dict[str, Any]:
         inbound = InboundMessage(
             text=params.get("text", ""),
@@ -459,3 +499,43 @@ class GatewayServer:
         if not job_id:
             raise ValueError("job_id is required")
         return {"result": await self.autonomy.cron.trigger_job(job_id)}
+
+    async def _m_delivery_stats(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.delivery_stats()
+
+    async def _m_delivery_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.list_deliveries(
+            state=params.get("state", "pending"),
+            limit=int(params.get("limit", 50)),
+            include_text=bool(params.get("include_text", False)),
+        )
+
+    async def _m_delivery_retry(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        delivery_id = params.get("delivery_id", params.get("id", ""))
+        if not delivery_id:
+            raise ValueError("delivery_id is required")
+        return {"ok": self.control_plane.retry_delivery(str(delivery_id))}
+
+    async def _m_delivery_discard(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        delivery_id = params.get("delivery_id", params.get("id", ""))
+        if not delivery_id:
+            raise ValueError("delivery_id is required")
+        return {
+            "ok": self.control_plane.discard_delivery(
+                str(delivery_id),
+                state=params.get("state", "any"),
+            )
+        }
+
+    async def _m_delivery_flush(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return await self.control_plane.flush_delivery(rounds=int(params.get("rounds", 1)))

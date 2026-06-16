@@ -6,6 +6,7 @@ from agent_gateway.agents import AgentManager
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
+from agent_gateway.delivery.queue import DeliveryQueue
 from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable
 from agent_gateway.runtime.control_plane import GatewayControlPlane
@@ -13,9 +14,39 @@ from agent_gateway.runtime.resilience import AuthProfile, ProfileManager
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
 
 
+class FakeHeartbeat:
+    def status(self) -> dict[str, object]:
+        return {
+            "enabled": True,
+            "running": False,
+            "should_run": True,
+            "reason": "all checks passed",
+            "last_run": "never",
+            "next_in_seconds": 60,
+        }
+
+
+class FakeCron:
+    def list_jobs(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "agent-news-digest",
+                "name": "AI Agent 每日简报",
+                "enabled": True,
+                "kind": "cron",
+                "errors": 0,
+                "last_run": "never",
+                "next_run": "n/a",
+                "next_in": None,
+            }
+        ]
+
+
 class FakeAutonomy:
     def __init__(self) -> None:
         self.updated_channels = None
+        self.heartbeat = FakeHeartbeat()
+        self.cron = FakeCron()
 
     def set_channels(self, channels: ChannelManager) -> None:
         self.updated_channels = channels
@@ -497,6 +528,90 @@ def test_control_plane_lists_tool_capabilities(tmp_path: Path) -> None:
 
     assert any(row["tag"] == "filesystem" and "read_file" in row["tools"] for row in capabilities)
     assert any(row["tag"] == "web" and "web_search" in row["tools"] for row in capabilities)
+
+
+def test_control_plane_manages_delivery_queue(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    queue = DeliveryQueue(tmp_path / "delivery")
+    pending_id = queue.enqueue(
+        "feishu",
+        "ou_user",
+        "pending delivery text",
+        {"account_id": "feishu-main", "kind": "reply"},
+    )
+    failed_id = queue.enqueue(
+        "feishu",
+        "ou_user",
+        "failed delivery text",
+        {"account_id": "feishu-main", "kind": "cron"},
+    )
+    failed = queue.get_pending(failed_id)
+    assert failed is not None
+    failed.retry_count = 5
+    failed.last_error = "send failed"
+    queue.move_to_failed(failed)
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        delivery_queue=queue,
+    )
+
+    stats = control.delivery_stats()
+    pending = control.list_deliveries(state="pending")
+    failed_rows = control.list_deliveries(state="failed", include_text=True)
+
+    assert stats["pending"] == 1
+    assert stats["failed"] == 1
+    assert pending["items"][0]["id"] == pending_id
+    assert pending["items"][0]["text"] == ""
+    assert pending["items"][0]["text_preview"] == "pending delivery text"
+    assert failed_rows["items"][0]["id"] == failed_id
+    assert failed_rows["items"][0]["text"] == "failed delivery text"
+
+    assert control.retry_delivery(failed_id) is True
+    assert control.delivery_stats()["failed"] == 0
+    assert control.discard_delivery(pending_id, state="pending") is True
+
+
+def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    settings.proactive_channel = "cli"
+    settings.proactive_account_id = "cli-local"
+    settings.proactive_peer_id = "cli-user"
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main", model="deepseek-v4-pro"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    profiles = ProfileManager(
+        [AuthProfile(name="primary", provider="anthropic", api_key="k", base_url="https://base")]
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=channels,
+        autonomy=FakeAutonomy(),
+        delivery_queue=DeliveryQueue(tmp_path / "delivery"),
+    )
+
+    status = control.runtime_status()
+    health = control.health_check()
+
+    assert status["agents"]["count"] == 1
+    assert status["profiles"]["available"] == 1
+    assert status["channels"]["active"] == 1
+    assert status["delivery"]["pending"] == 0
+    assert status["cron"]["count"] == 1
+    assert health["ok"] is True
+    assert health["status"] == "ok"
+    assert all(row["status"] == "ok" for row in health["checks"])
 
 
 def test_control_plane_generates_agent_template(tmp_path: Path) -> None:

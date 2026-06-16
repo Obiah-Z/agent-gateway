@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import time
 from typing import Any
 
 from agent_gateway.agents import AgentManager
@@ -22,6 +24,7 @@ from agent_gateway.config_loader import (
     save_channel_accounts,
     write_json_atomic,
 )
+from agent_gateway.delivery.queue import DeliveryQueue, QueuedDelivery
 from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable, normalize_agent_id
 from agent_gateway.runtime.agent_manifest import (
@@ -50,6 +53,8 @@ class GatewayControlPlane:
     tools: ToolRegistry | None = None
     autonomy: AutonomyRuntime | None = None
     channel_runtime: ChannelRuntime | None = None
+    delivery_queue: DeliveryQueue | None = None
+    delivery_runtime: Any = None
 
     def list_bindings(self) -> list[Binding]:
         return self.bindings.list_all()
@@ -117,6 +122,279 @@ class GatewayControlPlane:
             )
         return rows
 
+    def delivery_stats(self) -> dict[str, Any]:
+        queue = self._require_delivery_queue()
+        pending = queue.pending_entries()
+        failed = queue.failed_entries()
+        return {
+            "pending": len(pending),
+            "failed": len(failed),
+            "retry_ready": sum(1 for entry in pending if not entry.next_retry_at or entry.next_retry_at <= time.time()),
+            "oldest_pending_at": min((entry.enqueued_at for entry in pending), default=None),
+            "oldest_failed_at": min((entry.enqueued_at for entry in failed), default=None),
+        }
+
+    def list_deliveries(
+        self,
+        *,
+        state: str = "pending",
+        limit: int = 50,
+        include_text: bool = False,
+    ) -> dict[str, Any]:
+        queue = self._require_delivery_queue()
+        normalized_state = self._normalize_delivery_state(state, allow_all=True)
+        safe_limit = max(1, min(int(limit), 200))
+        rows: list[dict[str, Any]] = []
+        if normalized_state in {"pending", "all"}:
+            rows.extend(
+                self._delivery_entry_to_dict(entry, "pending", include_text=include_text)
+                for entry in queue.pending_entries()
+            )
+        if normalized_state in {"failed", "all"}:
+            rows.extend(
+                self._delivery_entry_to_dict(entry, "failed", include_text=include_text)
+                for entry in queue.failed_entries()
+            )
+        rows.sort(key=lambda row: (str(row["state"]), float(row["enqueued_at"])))
+        return {
+            "state": normalized_state,
+            "count": len(rows),
+            "items": rows[:safe_limit],
+            "limit": safe_limit,
+        }
+
+    def retry_delivery(self, delivery_id: str) -> bool:
+        if not delivery_id:
+            raise ValueError("delivery_id is required")
+        return self._require_delivery_queue().retry_now(delivery_id)
+
+    def discard_delivery(self, delivery_id: str, *, state: str = "any") -> bool:
+        if not delivery_id:
+            raise ValueError("delivery_id is required")
+        normalized = self._normalize_delivery_state(state, allow_all=False, allow_any=True)
+        return self._require_delivery_queue().discard(delivery_id, state=normalized)
+
+    async def flush_delivery(self, *, rounds: int = 1) -> dict[str, Any]:
+        if self.delivery_runtime is None:
+            raise RuntimeError("delivery runtime not configured")
+        before = self.delivery_stats()
+        for _ in range(max(1, min(int(rounds), 20))):
+            await self.delivery_runtime.flush_once()
+            if self.delivery_runtime.pending_count() <= 0:
+                break
+            await asyncio.sleep(0)
+        after = self.delivery_stats()
+        return {"ok": True, "before": before, "after": after}
+
+    def runtime_status(self) -> dict[str, Any]:
+        agents = self.list_agents()
+        bindings = self.list_bindings()
+        channels = self.list_channels()
+        profiles = self.list_profiles()
+        cron_jobs = self.autonomy.cron.list_jobs() if self.autonomy is not None else []
+        heartbeat = (
+            self.autonomy.heartbeat.status()
+            if self.autonomy is not None
+            else {"enabled": False, "reason": "autonomy runtime not configured"}
+        )
+        delivery = (
+            {"configured": True, **self.delivery_stats()}
+            if self.delivery_queue is not None
+            else {"configured": False}
+        )
+        return {
+            "agents": {
+                "count": len(agents),
+                "ids": [agent.id for agent in agents],
+            },
+            "bindings": {
+                "count": len(bindings),
+            },
+            "channels": {
+                "count": len(channels),
+                "active": sum(1 for row in channels if row.get("active")),
+                "items": channels,
+            },
+            "profiles": {
+                "count": len(profiles),
+                "available": sum(
+                    1
+                    for row in profiles
+                    if row.get("has_key") and float(row.get("cooldown_remaining", 0.0)) <= 0.0
+                ),
+                "items": profiles,
+            },
+            "delivery": delivery,
+            "heartbeat": heartbeat,
+            "cron": {
+                "count": len(cron_jobs),
+                "enabled": sum(1 for row in cron_jobs if row.get("enabled")),
+                "errored": sum(1 for row in cron_jobs if int(row.get("errors", 0) or 0) > 0),
+                "items": cron_jobs,
+            },
+            "paths": {
+                "workspace_root": str(self.settings.workspace_root),
+                "workspace_exists": self.settings.workspace_root.exists(),
+                "data_dir": str(self.settings.data_dir),
+                "data_dir_exists": self.settings.data_dir.exists(),
+                "config_dir": str(self.settings.config_dir),
+                "config_dir_exists": self.settings.config_dir.exists(),
+            },
+            "features": {
+                "web_search_enabled": self.settings.web_search_enabled,
+                "web_search_provider": self.settings.web_search_provider,
+                "web_search_has_key": bool(self.settings.tavily_api_key)
+                if self.settings.web_search_provider == "tavily"
+                else True,
+                "proactive_target": {
+                    "channel": self.settings.proactive_channel,
+                    "account_id": self.settings.proactive_account_id,
+                    "peer_id_configured": bool(self.settings.proactive_peer_id),
+                    "agent_id": self.settings.proactive_agent_id,
+                },
+            },
+        }
+
+    def health_check(self) -> dict[str, Any]:
+        status = self.runtime_status()
+        checks = [
+            self._health_check(
+                "agents.loaded",
+                bool(status["agents"]["count"]),
+                "critical",
+                f"{status['agents']['count']} agents loaded",
+                "no agents loaded",
+            ),
+            self._health_check(
+                "bindings.loaded",
+                bool(status["bindings"]["count"]),
+                "warning",
+                f"{status['bindings']['count']} bindings loaded",
+                "no route bindings loaded",
+            ),
+            self._health_check(
+                "profiles.available",
+                bool(status["profiles"]["available"]),
+                "critical",
+                f"{status['profiles']['available']} model profiles available",
+                "no model profile is currently available",
+            ),
+            self._health_check(
+                "channels.active",
+                bool(status["channels"]["active"]),
+                "warning",
+                f"{status['channels']['active']} active channel accounts",
+                "no active channel account",
+            ),
+            self._health_check(
+                "paths.workspace",
+                bool(status["paths"]["workspace_exists"]),
+                "critical",
+                "workspace root exists",
+                "workspace root is missing",
+            ),
+            self._health_check(
+                "paths.data",
+                bool(status["paths"]["data_dir_exists"]),
+                "critical",
+                "data directory exists",
+                "data directory is missing",
+            ),
+            self._health_check(
+                "paths.config",
+                bool(status["paths"]["config_dir_exists"]),
+                "critical",
+                "config directory exists",
+                "config directory is missing",
+            ),
+        ]
+        delivery = status["delivery"]
+        if delivery.get("configured"):
+            failed = int(delivery.get("failed", 0) or 0)
+            pending = int(delivery.get("pending", 0) or 0)
+            checks.append(
+                self._health_check(
+                    "delivery.failed",
+                    failed == 0,
+                    "warning",
+                    "no failed delivery entries",
+                    f"{failed} failed delivery entries",
+                )
+            )
+            checks.append(
+                self._health_check(
+                    "delivery.pending",
+                    pending == 0,
+                    "warning",
+                    "no pending delivery backlog",
+                    f"{pending} pending delivery entries",
+                )
+            )
+        else:
+            checks.append(
+                self._health_check(
+                    "delivery.configured",
+                    False,
+                    "warning",
+                    "",
+                    "delivery queue not configured",
+                )
+            )
+
+        cron = status["cron"]
+        cron_errors = int(cron.get("errored", 0) or 0)
+        checks.append(
+            self._health_check(
+                "cron.errors",
+                cron_errors == 0,
+                "warning",
+                "no cron jobs with consecutive errors",
+                f"{cron_errors} cron jobs have consecutive errors",
+            )
+        )
+
+        features = status["features"]
+        if features.get("web_search_enabled"):
+            checks.append(
+                self._health_check(
+                    "web_search.credentials",
+                    bool(features.get("web_search_has_key")),
+                    "warning",
+                    "web search credentials configured",
+                    "web search is enabled but credentials are missing",
+                )
+            )
+
+        proactive = features["proactive_target"]
+        proactive_channel_ready = any(
+            row.get("channel") == proactive["channel"]
+            and row.get("account_id") == proactive["account_id"]
+            and row.get("active")
+            for row in status["channels"]["items"]
+        )
+        checks.append(
+            self._health_check(
+                "proactive.target",
+                proactive_channel_ready and bool(proactive.get("peer_id_configured")),
+                "warning",
+                "proactive target channel and peer are configured",
+                "proactive target channel is inactive or peer_id is missing",
+            )
+        )
+
+        severities = {row["status"] for row in checks}
+        overall = "unhealthy" if "critical" in severities else "degraded" if "warning" in severities else "ok"
+        return {
+            "ok": overall == "ok",
+            "status": overall,
+            "checks": checks,
+            "summary": {
+                "critical": sum(1 for row in checks if row["status"] == "critical"),
+                "warning": sum(1 for row in checks if row["status"] == "warning"),
+                "ok": sum(1 for row in checks if row["status"] == "ok"),
+            },
+        }
+
     def get_source(self, kind: str) -> dict[str, Any]:
         readers = {
             "agents": read_agents_source,
@@ -128,6 +406,72 @@ class GatewayControlPlane:
         if reader is None:
             raise ValueError(f"unknown source kind: {kind}")
         return reader(self.settings)
+
+    def _require_delivery_queue(self) -> DeliveryQueue:
+        if self.delivery_queue is None:
+            raise RuntimeError("delivery queue not configured")
+        return self.delivery_queue
+
+    @staticmethod
+    def _health_check(
+        name: str,
+        passed: bool,
+        failure_status: str,
+        ok_message: str,
+        failure_message: str,
+    ) -> dict[str, str]:
+        return {
+            "name": name,
+            "status": "ok" if passed else failure_status,
+            "message": ok_message if passed else failure_message,
+        }
+
+    @staticmethod
+    def _normalize_delivery_state(
+        state: str,
+        *,
+        allow_all: bool,
+        allow_any: bool = False,
+    ) -> str:
+        normalized = str(state or "").strip().lower() or "pending"
+        allowed = {"pending", "failed"}
+        if allow_all:
+            allowed.add("all")
+        if allow_any:
+            allowed.add("any")
+        if normalized not in allowed:
+            raise ValueError(f"state must be one of: {', '.join(sorted(allowed))}")
+        return normalized
+
+    @staticmethod
+    def _delivery_entry_to_dict(
+        entry: QueuedDelivery,
+        state: str,
+        *,
+        include_text: bool,
+    ) -> dict[str, Any]:
+        now = time.time()
+        text = entry.text if include_text else ""
+        return {
+            "id": entry.id,
+            "state": state,
+            "channel": entry.channel,
+            "to": entry.to,
+            "text": text,
+            "text_preview": " ".join(entry.text.split())[:200],
+            "text_length": len(entry.text),
+            "retry_count": entry.retry_count,
+            "last_error": entry.last_error,
+            "enqueued_at": entry.enqueued_at,
+            "next_retry_at": entry.next_retry_at,
+            "retry_ready": state == "failed" or not entry.next_retry_at or entry.next_retry_at <= now,
+            "next_retry_in_seconds": (
+                round(max(0.0, entry.next_retry_at - now), 1)
+                if entry.next_retry_at
+                else 0.0
+            ),
+            "metadata": entry.metadata,
+        }
 
     def add_binding(self, binding: Binding) -> Binding:
         binding.agent_id = normalize_agent_id(binding.agent_id)

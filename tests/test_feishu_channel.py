@@ -152,6 +152,38 @@ def test_feishu_channel_send_uses_interactive_card_for_markdown(monkeypatch) -> 
     assert "- item 1" in card["body"]["elements"][0]["content"]
 
 
+def test_feishu_channel_send_infers_open_id_for_proactive_message(monkeypatch) -> None:
+    channel = _build_channel()
+    sent: list[dict[str, object]] = []
+
+    def fake_refresh_token() -> str:
+        return "tenant-token"
+
+    class FakeResponse:
+        def json(self) -> dict[str, object]:
+            return {"code": 0, "msg": "success"}
+
+    def fake_post(url: str, *, params=None, headers=None, json=None):
+        sent.append({"params": params, "json": json})
+        return FakeResponse()
+
+    monkeypatch.setattr(channel, "_refresh_token", fake_refresh_token)
+    monkeypatch.setattr(channel._http, "post", fake_post)
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="feishu",
+            to="ou_user",
+            text="主动任务推送",
+            metadata={"account_id": "feishu-main"},
+        )
+    )
+
+    assert ok is True
+    assert sent[0]["params"] == {"receive_id_type": "open_id"}
+    assert sent[0]["json"]["receive_id"] == "ou_user"
+
+
 def test_feishu_channel_rewrites_secondary_heading_for_feishu_markdown(monkeypatch) -> None:
     channel = _build_channel()
     sent: list[dict[str, object]] = []

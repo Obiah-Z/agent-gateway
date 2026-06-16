@@ -106,7 +106,11 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     dispatcher = GatewayDispatcher(agents, bindings, runner, command_queue, delivery_queue)
     channel_manager = build_channel_manager(settings, load_channel_accounts(settings))
     autonomy_runtime = AutonomyRuntime(settings, dispatcher, channel_manager)
-    delivery_runtime = DeliveryRuntime(delivery_queue, channel_manager)
+    delivery_runtime = DeliveryRuntime(
+        delivery_queue,
+        channel_manager,
+        on_success=autonomy_runtime.cron.on_delivery_success,
+    )
     control_plane = GatewayControlPlane(
         settings=settings,
         agents=agents,
@@ -115,6 +119,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         channels=channel_manager,
         tools=tools,
         autonomy=autonomy_runtime,
+        delivery_queue=delivery_queue,
+        delivery_runtime=delivery_runtime,
     )
 
     return GatewayApplication(
@@ -200,15 +206,114 @@ async def serve(app: GatewayApplication) -> None:
         await server.stop()
 
 
+async def trigger_cron_once(
+    app: GatewayApplication,
+    job_id: str,
+    *,
+    flush_delivery: bool = True,
+    flush_rounds: int = 3,
+) -> dict[str, object]:
+    result = await app.autonomy_runtime.cron.trigger_job(job_id)
+    pending_before_flush = app.delivery_runtime.pending_count()
+    if flush_delivery:
+        for _ in range(max(1, flush_rounds)):
+            if app.delivery_runtime.pending_count() <= 0:
+                break
+            await app.delivery_runtime.flush_once()
+            await asyncio.sleep(0)
+        if app.delivery_runtime.pending_count() > 0:
+            await asyncio.sleep(0.25)
+            await app.delivery_runtime.flush_once()
+    pending_entries = app.delivery_queue.pending_entries()
+    return {
+        "job_id": job_id,
+        "result": result,
+        "pending_before_flush": pending_before_flush,
+        "pending_after_flush": len(pending_entries),
+        "pending_ids": [entry.id for entry in pending_entries],
+        "pending_errors": {
+            entry.id: entry.last_error for entry in pending_entries if entry.last_error
+        },
+    }
+
+
+async def trigger_cron_once_with_timeout(
+    app: GatewayApplication,
+    job_id: str,
+    *,
+    flush_delivery: bool = True,
+    flush_rounds: int = 3,
+    timeout_seconds: float = 180.0,
+) -> dict[str, object]:
+    try:
+        return await asyncio.wait_for(
+            trigger_cron_once(
+                app,
+                job_id,
+                flush_delivery=flush_delivery,
+                flush_rounds=flush_rounds,
+            ),
+            timeout=max(0.001, timeout_seconds),
+        )
+    except asyncio.TimeoutError:
+        return {
+            "job_id": job_id,
+            "result": "timeout",
+            "timeout_seconds": timeout_seconds,
+            "pending_after_timeout": app.delivery_runtime.pending_count(),
+        }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the modular agent gateway.")
-    parser.add_argument("command", nargs="?", default="serve", choices=["serve"])
+    subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser("serve", help="Run the gateway service.")
+
+    cron_trigger = subparsers.add_parser(
+        "cron-trigger",
+        help="Trigger one cron job immediately, then flush delivery queue by default.",
+    )
+    cron_trigger.add_argument("job_id")
+    cron_trigger.add_argument(
+        "--no-flush",
+        action="store_true",
+        help="Only enqueue the cron output; do not flush the delivery queue.",
+    )
+    cron_trigger.add_argument(
+        "--flush-rounds",
+        type=int,
+        default=3,
+        help="Maximum delivery flush rounds after triggering the job.",
+    )
+    cron_trigger.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=180.0,
+        help="Maximum time to wait for the cron job and delivery flush.",
+    )
+
     parser.add_argument("--env-file", default="")
     args = parser.parse_args()
 
     load_env(Path(args.env_file) if args.env_file else None)
     app = build_application()
-    asyncio.run(serve(app))
+    if args.command in {None, "serve"}:
+        asyncio.run(serve(app))
+        return
+    if args.command == "cron-trigger":
+        result = asyncio.run(
+            trigger_cron_once_with_timeout(
+                app,
+                args.job_id,
+                flush_delivery=not args.no_flush,
+                flush_rounds=args.flush_rounds,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+        print(result)
+        return
+    parser.error(f"unknown command: {args.command}")
 
 
 if __name__ == "__main__":

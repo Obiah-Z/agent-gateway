@@ -1,8 +1,10 @@
 import asyncio
 
 from agent_gateway.agents import AgentManager
+from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
+from agent_gateway.delivery.queue import DeliveryQueue
 from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable
 from agent_gateway.runtime.control_plane import GatewayControlPlane
@@ -10,6 +12,52 @@ from agent_gateway.runtime.gateway_server import GatewayServer
 from agent_gateway.runtime.resilience import AuthProfile, ProfileManager
 from agent_gateway.sessions.store import SessionStore
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
+
+
+class FakeHeartbeat:
+    def status(self) -> dict[str, object]:
+        return {
+            "enabled": True,
+            "running": False,
+            "should_run": True,
+            "reason": "all checks passed",
+            "last_run": "never",
+            "next_in_seconds": 60,
+        }
+
+
+class FakeCron:
+    def list_jobs(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "agent-news-digest",
+                "name": "AI Agent 每日简报",
+                "enabled": True,
+                "kind": "cron",
+                "errors": 0,
+                "last_run": "never",
+                "next_run": "n/a",
+                "next_in": None,
+            }
+        ]
+
+
+class FakeAutonomy:
+    def __init__(self) -> None:
+        self.heartbeat = FakeHeartbeat()
+        self.cron = FakeCron()
+
+
+class FakeDeliveryRuntime:
+    def __init__(self, queue: DeliveryQueue) -> None:
+        self.queue = queue
+        self.flush_calls = 0
+
+    def pending_count(self) -> int:
+        return len(self.queue.pending_entries())
+
+    async def flush_once(self) -> None:
+        self.flush_calls += 1
 
 
 def _build_tools() -> ToolRegistry:
@@ -229,3 +277,95 @@ def test_gateway_server_exposes_agent_capabilities_and_template(tmp_path) -> Non
     assert any(row["tag"] == "filesystem" for row in capabilities)
     assert template["agent"]["id"] == "planner"
     assert "read_file" in template["agent"]["tool_policy"]["tool_names"]
+
+
+def test_gateway_server_exposes_delivery_control_methods(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    queue = DeliveryQueue(tmp_path / "delivery")
+    delivery_id = queue.enqueue(
+        "cli",
+        "peer-1",
+        "delivery body",
+        {"account_id": "cli-local", "kind": "reply"},
+    )
+    runtime = FakeDeliveryRuntime(queue)
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        delivery_queue=queue,
+        delivery_runtime=runtime,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": AgentManager(), "bindings": BindingTable()})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    stats = asyncio.run(server._m_delivery_stats({}))
+    listed = asyncio.run(server._m_delivery_list({"include_text": True}))
+    retried = asyncio.run(server._m_delivery_retry({"delivery_id": delivery_id}))
+    flushed = asyncio.run(server._m_delivery_flush({"rounds": 2}))
+    discarded = asyncio.run(server._m_delivery_discard({"delivery_id": delivery_id}))
+
+    assert stats["pending"] == 1
+    assert listed["items"][0]["text"] == "delivery body"
+    assert retried == {"ok": True}
+    assert runtime.flush_calls == 2
+    assert flushed["after"]["pending"] == 1
+    assert discarded == {"ok": True}
+
+
+def test_gateway_server_exposes_runtime_status_and_health_check(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+    )
+    settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    queue = DeliveryQueue(tmp_path / "delivery")
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")]),
+        channels=channels,
+        autonomy=FakeAutonomy(),
+        delivery_queue=queue,
+        delivery_runtime=FakeDeliveryRuntime(queue),
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    status = asyncio.run(server._m_runtime_status({}))
+    health = asyncio.run(server._m_health_check({}))
+
+    assert status["server"]["running"] is False
+    assert status["agents"]["count"] == 1
+    assert status["delivery"]["pending"] == 0
+    assert health["status"] == "degraded"
+    assert any(row["name"] == "server.running" for row in health["checks"])

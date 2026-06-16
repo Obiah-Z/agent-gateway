@@ -16,10 +16,15 @@ except ImportError:  # pragma: no cover
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.models import ProactiveTarget
+from agent_gateway.news.collector import NewsCollector
+from agent_gateway.news.digest import build_digest_prompt
+from agent_gateway.news.models import NewsItem
+from agent_gateway.news.store import NewsDigestStore
 from agent_gateway.runtime.dispatcher import GatewayDispatcher
 
 
 DEFAULT_CRON_DISABLE_THRESHOLD = 5
+NEWS_DIGEST_ACK_METADATA_KEY = "news_digest_items"
 
 
 @dataclass(slots=True)
@@ -204,6 +209,25 @@ class CronService:
     def set_channels(self, channels: ChannelManager) -> None:
         self.channels = channels
 
+    def on_delivery_success(self, entry: Any) -> None:
+        metadata = getattr(entry, "metadata", {})
+        if not isinstance(metadata, dict):
+            return
+        if metadata.get("kind") != "cron" or metadata.get("cron_payload_kind") != "agent_news_digest":
+            return
+        rows = metadata.get(NEWS_DIGEST_ACK_METADATA_KEY, [])
+        if not isinstance(rows, list):
+            return
+        items: list[NewsItem] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            item = NewsItem.from_dict(row)
+            if item.id:
+                items.append(item)
+        if items:
+            NewsDigestStore(self.settings.data_dir / "news-digest").mark_seen(items)
+
     async def start(self) -> None:
         if self._task is not None:
             return
@@ -305,6 +329,7 @@ class CronService:
         payload = job.payload
         kind = payload.get("kind", "")
         output, status, error = "", "ok", ""
+        delivered_news_items: list[NewsItem] = []
         try:
             if kind == "agent_turn":
                 message = payload.get("message", "")
@@ -324,6 +349,11 @@ class CronService:
                 output = payload.get("text", "")
                 if not output:
                     status = "skipped"
+            elif kind == "agent_news_digest":
+                output, status, delivered_news_items = await self._run_agent_news_digest(
+                    job,
+                    payload,
+                )
             else:
                 output = f"[unknown kind: {kind}]"
                 status = "error"
@@ -357,12 +387,69 @@ class CronService:
             pass
 
         if output and status != "skipped":
+            metadata: dict[str, object] = {"kind": "cron", "job_id": job.id}
+            if delivered_news_items:
+                metadata.update(
+                    {
+                        "cron_payload_kind": "agent_news_digest",
+                        NEWS_DIGEST_ACK_METADATA_KEY: [
+                            item.to_dict() for item in delivered_news_items
+                        ],
+                    }
+                )
             await self.dispatcher.deliver_text(
                 self.channels,
                 job.target,
                 f"[{job.name}] {output}",
-                metadata={"kind": "cron", "job_id": job.id},
+                metadata=metadata,
             )
+
+    async def _run_agent_news_digest(
+        self,
+        job: CronJob,
+        payload: dict[str, Any],
+    ) -> tuple[str, str, list[NewsItem]]:
+        lookback_hours = int(payload.get("lookback_hours", 24))
+        max_items = int(payload.get("max_items", 8))
+        per_source_max_items = int(payload.get("per_source_max_items", 5))
+        skip_if_empty = bool(payload.get("skip_if_empty", True))
+        sources_file = self.settings.workspace_root / str(
+            payload.get("sources_file", "agent-news-sources.json")
+        )
+        store = NewsDigestStore(self.settings.data_dir / "news-digest")
+        collector = NewsCollector(
+            sources_file,
+            store,
+            timeout_seconds=float(payload.get("timeout_seconds", 12.0)),
+        )
+        try:
+            result = await asyncio.to_thread(
+                collector.collect,
+                lookback_hours=lookback_hours,
+                max_items=max_items,
+                per_source_max_items=per_source_max_items,
+            )
+        finally:
+            collector.close()
+
+        if not result.items and skip_if_empty:
+            return "no fresh agent news items", "skipped", []
+
+        prompt = build_digest_prompt(
+            result.items,
+            lookback_hours=lookback_hours,
+            max_output_items=max_items,
+            errors=result.errors,
+        )
+        reply = await self.dispatcher.dispatch_background(
+            agent_id=job.target.agent_id,
+            session_key=f"system:cron:{job.id}",
+            prompt=prompt,
+            channel="cron",
+            mode="minimal",
+            lane_name="cron",
+        )
+        return reply.text, "ok", list(result.items)
 
     def _compute_next(self, job: CronJob, now: float) -> float:
         schedule = job.schedule_config

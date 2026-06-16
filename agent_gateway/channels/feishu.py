@@ -303,13 +303,22 @@ class FeishuChannel(Channel):
         outbound: OutboundMessage,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        receive_id_type = self._resolve_receive_id_type(outbound)
         response = self._http.post(
             f"{self.api_base}/im/v1/messages",
-            params={"receive_id_type": outbound.metadata.get("receive_id_type", "chat_id")},
+            params={"receive_id_type": receive_id_type},
             headers={"Authorization": f"Bearer {token}"},
             json=payload,
         )
         return response.json()
+
+    def _resolve_receive_id_type(self, outbound: OutboundMessage) -> str:
+        configured = str(outbound.metadata.get("receive_id_type", "")).strip()
+        if configured:
+            return configured
+        if outbound.to.startswith("ou_"):
+            return "open_id"
+        return "chat_id"
 
     def _send_single_payload(
         self,
@@ -355,7 +364,7 @@ class FeishuChannel(Channel):
                 "[feishu] send ok:"
                 f" account={self.account_id}"
                 f" to={outbound.to}"
-                f" receive_id_type={outbound.metadata.get('receive_id_type', 'chat_id')}"
+                f" receive_id_type={self._resolve_receive_id_type(outbound)}"
                 f" msg_type={payload['msg_type']}"
                 f" page={page_index}/{total_pages}"
             )
