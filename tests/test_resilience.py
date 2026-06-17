@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from agent_gateway.runtime.resilience import AuthProfile, FailoverReason, ProfileManager, classify_failure
-from agent_gateway.runtime.resilience import ResilienceRunner
+from agent_gateway.application.resilience import AuthProfile, FailoverReason, ProfileManager, classify_failure
+from agent_gateway.application.resilience import ResilienceRunner
 from agent_gateway.config import GatewaySettings
 from agent_gateway.tools.registry import ToolRegistry
 

@@ -30,7 +30,6 @@ gateway/
     intelligence/           Prompt、记忆、技能发现
     monitoring/             本地运维 Dashboard
     news/                   AI Agent 简报采集与摘要
-    runtime/                旧路径兼容层，保留给历史导入和外部脚本
     sessions/               JSONL 会话存储与上下文保护
     tools/                  工具注册表与内置工具
     app.py                  应用装配与命令入口

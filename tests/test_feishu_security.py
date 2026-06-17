@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from agent_gateway.runtime.feishu_security import (
+from agent_gateway.interfaces.feishu.security import (
     FeishuEventDeduplicator,
     FeishuSignatureVerifier,
     extract_event_id,

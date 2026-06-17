@@ -3,7 +3,7 @@ from threading import Event
 
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.models import AgentReply, Binding, InboundMessage, RouteResolution
-from agent_gateway.runtime.channel_runtime import ChannelRuntime, PendingInbound
+from agent_gateway.application.channel_runtime import ChannelRuntime, PendingInbound
 
 
 class FakeDispatcher:

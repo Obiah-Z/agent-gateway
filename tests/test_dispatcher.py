@@ -5,8 +5,8 @@ from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.delivery.queue import DeliveryQueue
 from agent_gateway.models import AgentConfig, Binding, InboundMessage
 from agent_gateway.router import BindingTable
-from agent_gateway.runtime.dispatcher import GatewayDispatcher
-from agent_gateway.runtime.lanes import CommandQueue
+from agent_gateway.application.dispatcher import GatewayDispatcher
+from agent_gateway.application.lanes import CommandQueue
 
 
 class FakeRunner:

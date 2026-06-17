@@ -11,8 +11,8 @@ from agent_gateway.onboarding.feishu import (
     FeishuOnboardingSessionStore,
 )
 from agent_gateway.router import BindingTable
-from agent_gateway.runtime.control_plane import GatewayControlPlane
-from agent_gateway.runtime.resilience import ProfileManager
+from agent_gateway.application.control_plane import GatewayControlPlane
+from agent_gateway.application.resilience import ProfileManager
 
 
 class FakeDispatcher:

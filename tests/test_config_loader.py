@@ -14,7 +14,7 @@ from agent_gateway.config_loader import (
 )
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.models import AgentConfig, Binding
-from agent_gateway.runtime.resilience import AuthProfile
+from agent_gateway.application.resilience import AuthProfile
 
 
 def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> None:

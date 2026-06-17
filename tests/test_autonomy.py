@@ -8,7 +8,7 @@ from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.models import AgentReply, OutboundMessage, ProactiveTarget
 from agent_gateway.news.models import NewsItem, NewsSourceConfig
-from agent_gateway.runtime.autonomy import CronService, HeartbeatService
+from agent_gateway.application.autonomy import CronService, HeartbeatService
 
 
 class DummyChannel(Channel):
@@ -199,8 +199,8 @@ def test_cron_service_runs_agent_news_digest(
         def mark_seen(self, items: list[NewsItem]) -> None:
             marked.extend(items)
 
-    monkeypatch.setattr("agent_gateway.runtime.autonomy.NewsCollector", FakeCollector)
-    monkeypatch.setattr("agent_gateway.runtime.autonomy.NewsDigestStore", FakeStore)
+    monkeypatch.setattr("agent_gateway.application.autonomy.NewsCollector", FakeCollector)
+    monkeypatch.setattr("agent_gateway.application.autonomy.NewsDigestStore", FakeStore)
     settings = GatewaySettings(
         workspace_root=workspace,
         data_dir=tmp_path / "data",

@@ -9,9 +9,9 @@ from agent_gateway.intelligence.bootstrap import PromptAssembler
 from agent_gateway.intelligence.memory import MemoryStore
 from agent_gateway.intelligence.skills import SkillsManager
 from agent_gateway.models import AgentConfig
-from agent_gateway.runtime.agent_manifest import build_agent_template, validate_agent_config
-from agent_gateway.runtime.loop import AgentLoopRunner
-from agent_gateway.runtime.resilience import ProfileManager
+from agent_gateway.application.agent_manifest import build_agent_template, validate_agent_config
+from agent_gateway.application.loop import AgentLoopRunner
+from agent_gateway.application.resilience import ProfileManager
 from agent_gateway.sessions.store import SessionStore
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
 

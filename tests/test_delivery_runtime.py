@@ -5,7 +5,7 @@ from agent_gateway.channels.base import Channel, ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.delivery.queue import DeliveryQueue, DeliveryRunner, PermanentDeliveryError
 from agent_gateway.models import InboundMessage, OutboundMessage
-from agent_gateway.runtime.delivery_runtime import DeliveryRuntime
+from agent_gateway.application.delivery_runtime import DeliveryRuntime
 
 
 class DummyChannel(Channel):

@@ -9,8 +9,8 @@ from agent_gateway.config import GatewaySettings
 from agent_gateway.delivery.queue import DeliveryQueue
 from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable
-from agent_gateway.runtime.control_plane import GatewayControlPlane
-from agent_gateway.runtime.resilience import AuthProfile, ProfileManager
+from agent_gateway.application.control_plane import GatewayControlPlane
+from agent_gateway.application.resilience import AuthProfile, ProfileManager
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
 
 
