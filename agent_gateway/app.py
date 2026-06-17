@@ -5,7 +5,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_gateway.agents import AgentManager
+from agent_gateway.core.agents import AgentManager
 from agent_gateway.channels.bootstrap import build_channel_manager
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings, load_env
@@ -25,18 +25,19 @@ from agent_gateway.onboarding.feishu import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
 )
-from agent_gateway.router import BindingTable, normalize_agent_id
-from agent_gateway.runtime.autonomy import AutonomyRuntime
-from agent_gateway.runtime.channel_runtime import ChannelRuntime
-from agent_gateway.runtime.control_plane import GatewayControlPlane
-from agent_gateway.runtime.delivery_runtime import DeliveryRuntime
-from agent_gateway.runtime.dispatcher import GatewayDispatcher
-from agent_gateway.runtime.feishu_http import FeishuWebhookServer
-from agent_gateway.runtime.feishu_long_connection import FeishuLongConnectionRuntime
-from agent_gateway.runtime.gateway_server import GatewayServer
-from agent_gateway.runtime.lanes import CommandQueue
-from agent_gateway.runtime.loop import AgentLoopRunner
-from agent_gateway.runtime.resilience import ProfileManager, ResilienceRunner
+from agent_gateway.core.ids import normalize_agent_id
+from agent_gateway.core.router import BindingTable
+from agent_gateway.application.autonomy import AutonomyRuntime
+from agent_gateway.application.channel_runtime import ChannelRuntime
+from agent_gateway.application.control_plane import GatewayControlPlane
+from agent_gateway.application.delivery_runtime import DeliveryRuntime
+from agent_gateway.application.dispatcher import GatewayDispatcher
+from agent_gateway.application.lanes import CommandQueue
+from agent_gateway.application.loop import AgentLoopRunner
+from agent_gateway.application.resilience import ProfileManager, ResilienceRunner
+from agent_gateway.interfaces.feishu.http import FeishuWebhookServer
+from agent_gateway.interfaces.feishu.long_connection import FeishuLongConnectionRuntime
+from agent_gateway.interfaces.websocket.server import GatewayServer
 from agent_gateway.sessions.store import SessionStore
 from agent_gateway.tools.builtin import register_builtin_tools
 from agent_gateway.tools.registry import ToolRegistry

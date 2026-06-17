@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_gateway.models import InboundMessage, OutboundMessage
+from agent_gateway.core.models import InboundMessage, OutboundMessage
 
 
 @dataclass(slots=True)

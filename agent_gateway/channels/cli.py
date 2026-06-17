@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agent_gateway.channels.base import Channel
-from agent_gateway.models import InboundMessage, OutboundMessage
+from agent_gateway.core.models import InboundMessage, OutboundMessage
 
 
 class CLIChannel(Channel):

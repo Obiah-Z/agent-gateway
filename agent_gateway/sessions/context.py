@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from agent_gateway.models import ConversationMessage
+from agent_gateway.core.models import ConversationMessage
 
 
 def serialize_messages_for_summary(messages: list[ConversationMessage]) -> str:

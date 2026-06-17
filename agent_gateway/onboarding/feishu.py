@@ -1,3 +1,9 @@
+"""飞书低门槛接入流程。
+
+该模块负责扫码/绑定码会话、首条私聊自动绑定、自动创建 Agent 和写入绑定规则。
+它不直接处理飞书 HTTP 或长连接细节，只消费已经标准化的 InboundMessage / event。
+"""
+
 from __future__ import annotations
 
 import json
@@ -8,10 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_gateway.models import Binding, InboundMessage, ProactiveTarget
-from agent_gateway.router import normalize_agent_id
-from agent_gateway.runtime.control_plane import GatewayControlPlane
-from agent_gateway.runtime.dispatcher import GatewayDispatcher
+from agent_gateway.core.ids import normalize_agent_id
+from agent_gateway.core.models import Binding, InboundMessage, ProactiveTarget
+from agent_gateway.application.control_plane import GatewayControlPlane
+from agent_gateway.application.dispatcher import GatewayDispatcher
 
 
 BINDING_CODE_PATTERN = re.compile(r"\bGATEWAY-[A-Z0-9]{4,10}\b", re.IGNORECASE)
@@ -19,6 +25,8 @@ BINDING_CODE_PATTERN = re.compile(r"\bGATEWAY-[A-Z0-9]{4,10}\b", re.IGNORECASE)
 
 @dataclass(slots=True)
 class FeishuOnboardingSession:
+    """一次短期飞书接入会话。"""
+
     session_id: str
     binding_code: str
     mode: str = "personal"
@@ -76,6 +84,8 @@ class FeishuOnboardingSession:
 
 
 class FeishuOnboardingSessionStore:
+    """接入会话的本地 JSON 持久化存储。"""
+
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
@@ -89,6 +99,8 @@ class FeishuOnboardingSessionStore:
         agent_name: str = "",
         ttl_seconds: int = 900,
     ) -> FeishuOnboardingSession:
+        """创建一个短期绑定会话和一次性绑定码。"""
+
         sessions = self._load_all()
         session = FeishuOnboardingSession(
             session_id=f"ob_{secrets.token_urlsafe(8).replace('-', '').replace('_', '')[:12]}",
@@ -103,6 +115,8 @@ class FeishuOnboardingSessionStore:
         return session
 
     def list(self) -> list[FeishuOnboardingSession]:
+        """列出会话并顺手把过期 pending 会话标记为 expired。"""
+
         sessions = self._load_all()
         changed = False
         now = time.time()
@@ -121,6 +135,8 @@ class FeishuOnboardingSessionStore:
         return None
 
     def find_pending_by_code(self, code: str) -> FeishuOnboardingSession | None:
+        """按用户发送的绑定码查找仍有效的会话。"""
+
         normalized = self._normalize_code(code)
         for session in self.list():
             if session.binding_code == normalized and session.status == "pending":
@@ -128,6 +144,8 @@ class FeishuOnboardingSessionStore:
         return None
 
     def update(self, session: FeishuOnboardingSession) -> None:
+        """更新或追加会话。"""
+
         sessions = self._load_all()
         for index, current in enumerate(sessions):
             if current.session_id == session.session_id:
@@ -152,6 +170,8 @@ class FeishuOnboardingSessionStore:
         ]
 
     def _save_all(self, sessions: list[FeishuOnboardingSession]) -> None:
+        """原子写入会话列表，避免进程中断留下半截 JSON。"""
+
         tmp = self.sessions_file.with_suffix(".tmp")
         tmp.write_text(
             json.dumps(
@@ -184,6 +204,11 @@ class FeishuOnboardingSessionStore:
 
 
 class FeishuOnboardingService:
+    """飞书接入业务服务。
+
+    主要入口有两个：用户消息中的绑定码/首条私聊自动绑定，以及机器人被拉群事件自动绑定。
+    """
+
     def __init__(
         self,
         *,
@@ -211,6 +236,8 @@ class FeishuOnboardingService:
         agent_name: str = "",
         ttl_seconds: int = 900,
     ) -> dict[str, Any]:
+        """创建接入会话，并返回可展示给 onboarding 页面的数据。"""
+
         session = self.store.create(
             mode=mode,
             account_id=account_id,
@@ -229,6 +256,11 @@ class FeishuOnboardingService:
         return [self._session_response(session) for session in self.store.list()]
 
     async def try_consume_activation(self, inbound: InboundMessage) -> bool:
+        """尝试消费一条飞书消息作为接入激活消息。
+
+        返回 True 表示这条消息已经被 onboarding 流程处理，不再进入普通 Agent 对话。
+        """
+
         if inbound.channel != "feishu":
             return False
         code = self.extract_binding_code(inbound.text)
@@ -253,6 +285,8 @@ class FeishuOnboardingService:
         return True
 
     async def try_consume_event(self, event: dict[str, Any], account_id: str) -> bool:
+        """尝试消费飞书原始事件，例如机器人被加入群聊。"""
+
         if not self.auto_bind_bot_added:
             return False
         event_type = self._event_type(event)
@@ -287,6 +321,8 @@ class FeishuOnboardingService:
         return True
 
     async def _bind_session(self, session: FeishuOnboardingSession, inbound: InboundMessage) -> None:
+        """把会话绑定到飞书 peer，并创建对应 Agent / Binding。"""
+
         peer_id = inbound.peer_id
         if not peer_id:
             raise ValueError("飞书消息缺少 peer_id，无法绑定")
@@ -344,6 +380,8 @@ class FeishuOnboardingService:
         )
 
     def _should_auto_bind_first_message(self, inbound: InboundMessage) -> bool:
+        """判断是否允许用用户第一条私聊消息直接创建个人 Agent。"""
+
         if not self.auto_bind_first_message:
             return False
         if inbound.channel != "feishu" or inbound.is_group:
@@ -361,6 +399,8 @@ class FeishuOnboardingService:
         return binding is None or (binding.tier == 5 and binding.match_key == "default")
 
     def _has_peer_binding(self, peer_id: str) -> bool:
+        """检查该飞书 peer 是否已经有专属绑定。"""
+
         return any(
             binding.tier == 1
             and binding.match_key == "peer_id"
@@ -369,6 +409,8 @@ class FeishuOnboardingService:
         )
 
     async def _reply(self, inbound: InboundMessage, text: str) -> None:
+        """通过可靠投递队列回复接入结果。"""
+
         metadata = dict(inbound.metadata)
         metadata.update(
             {
@@ -398,6 +440,8 @@ class FeishuOnboardingService:
         session: FeishuOnboardingSession,
         inbound: InboundMessage,
     ) -> None:
+        """为新建 Agent 写入局部 prompt 文件。"""
+
         root = self.control_plane.settings.workspace_root / "agents" / agent_id
         root.mkdir(parents=True, exist_ok=True)
         identity = root / "IDENTITY.md"
@@ -419,6 +463,8 @@ class FeishuOnboardingService:
             )
 
     def _session_response(self, session: FeishuOnboardingSession) -> dict[str, Any]:
+        """转换为 dashboard/onboarding 页面可直接消费的数据。"""
+
         data = session.to_dict()
         data["activation_text"] = f"绑定 {session.binding_code}"
         data["onboarding_url"] = (
@@ -433,11 +479,15 @@ class FeishuOnboardingService:
 
     @staticmethod
     def extract_binding_code(text: str) -> str:
+        """从用户消息中提取绑定码。"""
+
         match = BINDING_CODE_PATTERN.search(text or "")
         return match.group(0).upper() if match else ""
 
     @staticmethod
     def _build_agent_id(session: FeishuOnboardingSession, inbound: InboundMessage) -> str:
+        """根据个人/群聊场景生成稳定 Agent ID。"""
+
         if session.mode == "group" or inbound.is_group:
             raw = f"feishu-group-{inbound.peer_id}"
         else:
@@ -446,12 +496,16 @@ class FeishuOnboardingService:
 
     @staticmethod
     def _build_agent_name(session: FeishuOnboardingSession, inbound: InboundMessage) -> str:
+        """生成默认 Agent 展示名。"""
+
         if session.mode == "group" or inbound.is_group:
             return "飞书群聊助手"
         return "我的飞书助手"
 
     @staticmethod
     def _event_type(event: dict[str, Any]) -> str:
+        """兼容长连接和 webhook 事件中的事件类型字段。"""
+
         header = event.get("header", {})
         if isinstance(header, dict) and header.get("event_type"):
             return str(header.get("event_type", ""))
@@ -459,11 +513,15 @@ class FeishuOnboardingService:
 
     @staticmethod
     def _event_body(event: dict[str, Any]) -> dict[str, Any]:
+        """返回飞书事件 body，兼容扁平事件和 envelope 事件。"""
+
         body = event.get("event", {})
         return body if isinstance(body, dict) else event
 
     @classmethod
     def _operator_open_id(cls, event: dict[str, Any]) -> str:
+        """提取触发机器人入群事件的操作者 ID。"""
+
         operator = cls._event_body(event).get("operator_id", {})
         if isinstance(operator, dict):
             return str(operator.get("open_id") or operator.get("user_id") or "")

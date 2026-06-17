@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent_gateway.channels.feishu_state import FeishuCardState
-from agent_gateway.models import OutboundMessage
+from agent_gateway.core.models import OutboundMessage
 
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")

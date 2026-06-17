@@ -1,3 +1,9 @@
+"""系统 prompt 组装。
+
+PromptAssembler 负责把 workspace 中的身份、人格、工具说明、记忆、技能和运行时上下文
+组装成一次模型调用的 system prompt。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,7 +11,7 @@ from pathlib import Path
 
 from agent_gateway.intelligence.memory import MemoryStore
 from agent_gateway.intelligence.skills import SkillsManager
-from agent_gateway.models import AgentConfig
+from agent_gateway.core.models import AgentConfig
 
 
 BOOTSTRAP_FILES = (
@@ -22,11 +28,15 @@ BOOTSTRAP_FILES = (
 
 @dataclass(slots=True)
 class BootstrapLoader:
+    """从 workspace 读取全局和 Agent 局部 prompt 文件。"""
+
     workspace_root: Path
     per_file_limit: int = 20_000
     total_limit: int = 150_000
 
     def truncate_file(self, content: str, max_chars: int | None = None) -> str:
+        """按字符数截断单个 prompt 文件，避免系统提示词过大。"""
+
         limit = max_chars or self.per_file_limit
         if len(content) <= limit:
             return content
@@ -44,6 +54,8 @@ class BootstrapLoader:
         use_global_files: bool = True,
         prompt_dir: str = "",
     ) -> dict[str, str]:
+        """加载全局 prompt，并用 Agent 局部 prompt 覆盖同名文件。"""
+
         loaded: dict[str, str] = {}
         global_loaded = self._load_from_dir(self.workspace_root) if use_global_files else {}
         loaded.update(global_loaded)
@@ -58,6 +70,8 @@ class BootstrapLoader:
         return loaded
 
     def _load_from_dir(self, root: Path) -> dict[str, str]:
+        """从指定目录读取允许的 bootstrap 文件并应用总大小限制。"""
+
         loaded: dict[str, str] = {}
         total = 0
         for filename in BOOTSTRAP_FILES:
@@ -79,6 +93,8 @@ class BootstrapLoader:
 
 
 class PromptAssembler:
+    """把 Agent 配置和 workspace 内容拼成模型 system prompt。"""
+
     def __init__(
         self,
         workspace_root: Path,
@@ -100,6 +116,8 @@ class PromptAssembler:
         runtime_context: dict[str, str] | None = None,
         memory_context: str = "",
     ) -> str:
+        """构建一次模型调用的 system prompt。"""
+
         runtime_context = runtime_context or {}
         bootstrap = self.loader.load(
             use_global_files=agent.use_global_prompt_files,
@@ -117,6 +135,7 @@ class PromptAssembler:
             and self.memory_store
             and agent.should_auto_recall_memory()
         ):
+            # 自动记忆召回只在 Agent 配置允许时发生，避免所有后台任务都注入过多历史。
             memory_context = self.memory_store.auto_recall(user_text, top_k=agent.memory_top_k)
 
         identity = bootstrap.get("IDENTITY.md", "").strip()

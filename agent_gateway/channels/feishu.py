@@ -24,7 +24,7 @@ from agent_gateway.channels.base import Channel, ChannelAccount
 from agent_gateway.channels.feishu_cards import FeishuCardRenderer, FeishuSendPayload
 from agent_gateway.channels.feishu_state import FeishuCardState, FeishuCardStateStore
 from agent_gateway.delivery.queue import PermanentDeliveryError
-from agent_gateway.models import InboundMessage, OutboundMessage
+from agent_gateway.core.models import InboundMessage, OutboundMessage
 
 
 class FeishuChannel(Channel):

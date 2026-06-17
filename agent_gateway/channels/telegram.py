@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover - optional dependency
     httpx = None  # type: ignore[assignment]
 
 from agent_gateway.channels.base import Channel, ChannelAccount
-from agent_gateway.models import InboundMessage, OutboundMessage
+from agent_gateway.core.models import InboundMessage, OutboundMessage
 
 
 class TelegramChannel(Channel):

@@ -7,8 +7,8 @@ from typing import Any
 
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.config import GatewaySettings
-from agent_gateway.models import AgentConfig, Binding
-from agent_gateway.runtime.resilience import AuthProfile
+from agent_gateway.core.models import AgentConfig, Binding
+from agent_gateway.application.resilience import AuthProfile
 
 
 def ensure_default_project_files(settings: GatewaySettings) -> None:

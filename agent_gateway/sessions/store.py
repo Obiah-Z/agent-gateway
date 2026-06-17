@@ -1,3 +1,9 @@
+"""JSONL 会话存储。
+
+每个 Agent/session_key 对应一个 JSONL 文件。写入时保存为便于审计和追加的事件记录，
+读取时重建成 Anthropic Messages API 可直接消费的对话历史。
+"""
+
 from __future__ import annotations
 
 import json
@@ -6,15 +12,22 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote
 
-from agent_gateway.models import ConversationMessage
+from agent_gateway.core.models import ConversationMessage
 
 
 class SessionStore:
+    """负责会话历史的持久化、重放和重写。"""
+
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def session_path(self, agent_id: str, session_key: str) -> Path:
+        """返回会话文件路径。
+
+        session_key 可能包含冒号等分隔符，因此文件名使用 URL quote 后的安全形式。
+        """
+
         agent_dir = self.base_dir / "agents" / agent_id
         agent_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{quote(session_key, safe='')}.jsonl"
@@ -27,6 +40,12 @@ class SessionStore:
         role: str,
         content: Any,
     ) -> None:
+        """追加单条消息记录。
+
+        当前主链路多数情况下使用 rewrite_messages 保持模型返回的完整历史；该方法保留给
+        需要增量写入的场景。
+        """
+
         if role == "user" and isinstance(content, str):
             record = {"type": "user", "content": content, "ts": time.time()}
         elif role == "assistant":
@@ -43,6 +62,11 @@ class SessionStore:
         session_key: str,
         messages: list[ConversationMessage],
     ) -> None:
+        """用模型执行后的完整 messages 重写会话。
+
+        先写临时文件再 replace，避免重写过程中中断导致原会话损坏。
+        """
+
         path = self.session_path(agent_id, session_key)
         tmp_path = path.with_suffix(".jsonl.tmp")
         with tmp_path.open("w", encoding="utf-8") as handle:
@@ -51,6 +75,8 @@ class SessionStore:
         tmp_path.replace(path)
 
     def load_messages(self, agent_id: str, session_key: str) -> list[ConversationMessage]:
+        """加载并重建可传给模型的 messages 历史。"""
+
         path = self.session_path(agent_id, session_key)
         if not path.exists():
             return []
@@ -79,6 +105,12 @@ class SessionStore:
             return sum(1 for _ in handle)
 
     def _rebuild_history(self, path: Path) -> list[ConversationMessage]:
+        """把 JSONL 事件记录还原成 Anthropic Messages 结构。
+
+        tool_use 需要挂在 assistant 消息上，tool_result 需要作为 user 消息返回模型；
+        这是工具调用闭环能跨进程恢复的关键。
+        """
+
         messages: list[ConversationMessage] = []
         with path.open("r", encoding="utf-8") as handle:
             for raw_line in handle:
@@ -151,6 +183,8 @@ class SessionStore:
         return messages
 
     def _messages_to_records(self, messages: list[ConversationMessage]) -> list[dict[str, Any]]:
+        """把 Anthropic Messages 拆成适合 JSONL 审计和增量恢复的记录。"""
+
         records: list[dict[str, Any]] = []
         now = time.time
 
@@ -203,6 +237,8 @@ class SessionStore:
 
     @staticmethod
     def _normalize_assistant_blocks(content: Any) -> list[dict[str, Any]]:
+        """统一 assistant content block 格式，过滤空文本并保留合法 tool_use。"""
+
         if isinstance(content, str):
             return [{"type": "text", "text": content}] if content else []
         if not isinstance(content, list):
