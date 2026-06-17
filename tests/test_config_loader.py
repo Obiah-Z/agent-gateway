@@ -6,6 +6,7 @@ from agent_gateway.config_loader import (
     load_agents,
     load_auth_profiles,
     load_bindings,
+    read_channels_source,
     save_agents,
     save_auth_profiles,
     save_bindings,
@@ -70,6 +71,7 @@ def test_config_loader_reads_default_files(tmp_path: Path, monkeypatch) -> None:
     agents = load_agents(settings)
     bindings = load_bindings(settings)
     profiles = load_auth_profiles(settings)
+    channels_source = read_channels_source(settings)
 
     assert len(agents) == 1
     assert agents[0].id == "main"
@@ -77,6 +79,14 @@ def test_config_loader_reads_default_files(tmp_path: Path, monkeypatch) -> None:
     assert bindings[0].match_key == "default"
     assert len(profiles) == 1
     assert profiles[0].api_key == "test-key"
+    long_connection = next(
+        item
+        for item in channels_source["channels"]
+        if item["account_id"] == "feishu-long-local"
+    )
+    assert long_connection["enabled"] is False
+    assert long_connection["config"]["connection_mode"] == "long_connection"
+    assert long_connection["config"]["send_mode"] == "lark_cli"
 
 
 def test_save_bindings_writes_atomic_payload(tmp_path: Path) -> None:

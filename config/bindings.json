@@ -23,6 +23,14 @@
       "match_key": "account_id",
       "match_value": "feishu-secondary",
       "priority": 50
+    },
+    {
+      "_comment": "飞书长连接本地快速接入：启用 feishu-long-local 后，消息默认进入 main Agent；后续可改为专属 Agent。",
+      "agent_id": "main",
+      "tier": 3,
+      "match_key": "account_id",
+      "match_value": "feishu-long-local",
+      "priority": 40
     }
   ]
 }
