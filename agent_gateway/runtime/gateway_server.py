@@ -100,6 +100,10 @@ class GatewayServer:
             "channels.remove": self._m_channels_remove,
             "channels.save": self._m_channels_save,
             "channels.reload": self._m_channels_reload,
+            "feishu.long_connection.status": self._m_feishu_long_connection_status,
+            "feishu.onboarding.start": self._m_feishu_onboarding_start,
+            "feishu.onboarding.status": self._m_feishu_onboarding_status,
+            "feishu.onboarding.list": self._m_feishu_onboarding_list,
             "config.source": self._m_config_source,
             "sessions.list": self._m_sessions,
             "status": self._m_status,
@@ -405,6 +409,44 @@ class GatewayServer:
             raise RuntimeError("control plane not configured")
         channels = await self.control_plane.reload_channels()
         return {"ok": True, "channels": channels}
+
+    async def _m_feishu_long_connection_status(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        if self.control_plane is None:
+            return []
+        runtime = getattr(self.control_plane, "feishu_long_connection_runtime", None)
+        if runtime is None:
+            return []
+        return runtime.status()
+
+    async def _m_feishu_onboarding_start(self, params: dict[str, Any]) -> dict[str, Any]:
+        onboarding = self._require_feishu_onboarding()
+        return onboarding.create_session(
+            mode=params.get("mode", "personal"),
+            account_id=params.get("account_id", "feishu-long-local"),
+            agent_name=params.get("agent_name", ""),
+            ttl_seconds=int(params.get("ttl_seconds", 900)),
+        )
+
+    async def _m_feishu_onboarding_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        onboarding = self._require_feishu_onboarding()
+        session_id = params.get("session_id", "")
+        if not session_id:
+            raise ValueError("session_id is required")
+        status = onboarding.status(session_id)
+        if status is None:
+            raise ValueError("session not found")
+        return status
+
+    async def _m_feishu_onboarding_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._require_feishu_onboarding().list_sessions()
+
+    def _require_feishu_onboarding(self):
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        onboarding = getattr(self.control_plane, "feishu_onboarding", None)
+        if onboarding is None:
+            raise RuntimeError("feishu onboarding not configured")
+        return onboarding
 
     async def _m_config_source(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.control_plane is None:

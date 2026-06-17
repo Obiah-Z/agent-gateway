@@ -55,6 +55,8 @@ class GatewayControlPlane:
     channel_runtime: ChannelRuntime | None = None
     delivery_queue: DeliveryQueue | None = None
     delivery_runtime: Any = None
+    feishu_long_connection_runtime: Any = None
+    feishu_onboarding: Any = None
 
     def list_bindings(self) -> list[Binding]:
         return self.bindings.list_all()
@@ -773,6 +775,8 @@ class GatewayControlPlane:
             self.channels.replace_from(next_manager)
         if self.autonomy is not None:
             self.autonomy.set_channels(self.channels)
+        if self.feishu_long_connection_runtime is not None:
+            await self.feishu_long_connection_runtime.restart(self.channels)
         return self.channels.list_channels()
 
     @staticmethod
