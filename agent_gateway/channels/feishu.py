@@ -17,6 +17,8 @@ except ImportError:  # pragma: no cover - optional dependency
 
 import base64
 import hashlib
+import shutil
+import subprocess
 
 from agent_gateway.channels.base import Channel, ChannelAccount
 from agent_gateway.channels.feishu_cards import FeishuCardRenderer, FeishuSendPayload
@@ -40,6 +42,9 @@ class FeishuChannel(Channel):
         self.verification_token = str(account.config.get("verification_token", ""))
         self.encrypt_key = str(account.config.get("encrypt_key", ""))
         self.bot_open_id = str(account.config.get("bot_open_id", ""))
+        self.send_mode = self._normalize_send_mode(account.config.get("send_mode", "api"))
+        self.lark_cli_command = str(account.config.get("lark_cli_command", "lark-cli") or "lark-cli")
+        self.lark_cli_identity = str(account.config.get("lark_cli_identity", "bot") or "bot")
         self.render_mode = self._normalize_render_mode(
             account.config.get("render_mode", "auto")
         )
@@ -81,6 +86,8 @@ class FeishuChannel(Channel):
         return None
 
     def send(self, outbound: OutboundMessage) -> bool:
+        if self.send_mode == "lark_cli":
+            return self._send_via_lark_cli(outbound)
         token = self._refresh_token()
         if not token:
             print("[feishu] send failed: tenant token unavailable")
@@ -396,6 +403,79 @@ class FeishuChannel(Channel):
         if override:
             return self._normalize_render_mode(override)
         return self.render_mode
+
+    def _send_via_lark_cli(self, outbound: OutboundMessage) -> bool:
+        command = self.lark_cli_command
+        if shutil.which(command) is None:
+            print(f"[feishu] lark-cli send failed: command not found: {command}")
+            return False
+        receive_id_type = self._resolve_receive_id_type(outbound)
+        argv = [
+            command,
+            "im",
+            "+messages-send",
+            "--as",
+            self.lark_cli_identity,
+        ]
+        if receive_id_type == "open_id":
+            argv.extend(["--user-id", outbound.to])
+        else:
+            argv.extend(["--chat-id", outbound.to])
+        if self._resolve_render_mode(outbound) == "text":
+            argv.extend(["--text", outbound.text])
+        else:
+            argv.extend(["--markdown", outbound.text])
+        try:
+            result = subprocess.run(
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                "[feishu] lark-cli send timeout:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+            )
+            return False
+        if result.returncode == 0:
+            print(
+                "[feishu] lark-cli send ok:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" receive_id_type={receive_id_type}"
+            )
+            return True
+        stderr = " ".join(result.stderr.split())[:500]
+        stdout = " ".join(result.stdout.split())[:500]
+        print(
+            "[feishu] lark-cli send failed:"
+            f" account={self.account_id}"
+            f" to={outbound.to}"
+            f" receive_id_type={receive_id_type}"
+            f" exit={result.returncode}"
+            f" stderr={stderr}"
+            f" stdout={stdout}"
+        )
+        if "invalid ids" in stderr.lower() or "not a valid" in stderr.lower():
+            raise PermanentDeliveryError(
+                "permanent Feishu lark-cli send failure:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" receive_id_type={receive_id_type}"
+                f" stderr={stderr}"
+            )
+        return False
+
+    def _normalize_send_mode(self, value: object) -> str:
+        mode = str(value or "api").strip().lower().replace("-", "_")
+        if mode in {"api", "lark_cli"}:
+            return mode
+        return "api"
 
     def _normalize_render_mode(self, value: object) -> str:
         mode = str(value or "auto").strip().lower()

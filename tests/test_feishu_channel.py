@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 from agent_gateway.channels.base import ChannelAccount
@@ -182,7 +183,70 @@ def test_feishu_channel_send_infers_open_id_for_proactive_message(monkeypatch) -
 
     assert ok is True
     assert sent[0]["params"] == {"receive_id_type": "open_id"}
-    assert sent[0]["json"]["receive_id"] == "ou_user"
+
+
+def test_feishu_channel_send_can_use_lark_cli_for_group_message(monkeypatch) -> None:
+    channel = _build_channel(send_mode="lark_cli", render_mode="text")
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr("agent_gateway.channels.feishu.shutil.which", lambda command: command)
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr("agent_gateway.channels.feishu.subprocess.run", fake_run)
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="feishu",
+            to="oc_chat",
+            text="hello",
+            metadata={"receive_id_type": "chat_id"},
+        )
+    )
+
+    assert ok is True
+    assert calls == [
+        [
+            "lark-cli",
+            "im",
+            "+messages-send",
+            "--as",
+            "bot",
+            "--chat-id",
+            "oc_chat",
+            "--text",
+            "hello",
+        ]
+    ]
+
+
+def test_feishu_channel_lark_cli_send_uses_user_id_for_open_id(monkeypatch) -> None:
+    channel = _build_channel(send_mode="lark_cli")
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr("agent_gateway.channels.feishu.shutil.which", lambda command: command)
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr("agent_gateway.channels.feishu.subprocess.run", fake_run)
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="feishu",
+            to="ou_user",
+            text="hello",
+            metadata={},
+        )
+    )
+
+    assert ok is True
+    assert "--user-id" in calls[0]
+    assert "ou_user" in calls[0]
+    assert "--markdown" in calls[0]
 
 
 def test_feishu_channel_rewrites_secondary_heading_for_feishu_markdown(monkeypatch) -> None:

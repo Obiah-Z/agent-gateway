@@ -5,7 +5,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.channels.telegram import TelegramChannel
@@ -20,16 +20,23 @@ class PendingInbound:
     completion_event: threading.Event | None = None
 
 
+class InboundInterceptor(Protocol):
+    async def try_consume_activation(self, inbound: InboundMessage) -> bool:
+        ...
+
+
 class ChannelRuntime:
     def __init__(
         self,
         dispatcher: GatewayDispatcher,
         channels: ChannelManager,
         delivery_runtime: DeliveryRuntime | None = None,
+        inbound_interceptors: list[InboundInterceptor] | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.channels = channels
         self.delivery_runtime = delivery_runtime
+        self.inbound_interceptors = list(inbound_interceptors or [])
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event = threading.Event()
@@ -150,6 +157,10 @@ class ChannelRuntime:
             f" peer={inbound.peer_id}"
         )
         await self._send_typing_if_supported(inbound)
+        for interceptor in self.inbound_interceptors:
+            if await interceptor.try_consume_activation(inbound):
+                await self._flush_cli_delivery_if_needed(inbound)
+                return
         result = await self.dispatcher.dispatch_inbound(inbound)
         await self.dispatcher.deliver_reply(self.channels, result)
         await self._flush_cli_delivery_if_needed(inbound)

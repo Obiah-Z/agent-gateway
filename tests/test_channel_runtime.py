@@ -44,6 +44,15 @@ class FakeChannel:
         pass
 
 
+class ConsumingInterceptor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def try_consume_activation(self, inbound: InboundMessage) -> bool:
+        self.calls += 1
+        return True
+
+
 class FlakyDispatcher(FakeDispatcher):
     def __init__(self) -> None:
         self.dispatch_calls = 0
@@ -171,3 +180,38 @@ def test_channel_runtime_continues_after_inbound_failure() -> None:
         assert delivery_runtime.flush_calls == 2
 
     asyncio.run(_run())
+
+
+def test_channel_runtime_interceptor_can_consume_inbound_before_dispatch() -> None:
+    dispatcher = FlakyDispatcher()
+    interceptor = ConsumingInterceptor()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        inbound_interceptors=[interceptor],
+    )
+
+    async def _run() -> None:
+        runtime._consumer_task = asyncio.create_task(runtime._consume())
+        event = Event()
+        await runtime._queue.put(
+            PendingInbound(
+                message=InboundMessage(
+                    text="绑定 GATEWAY-ABC123",
+                    sender_id="ou_user",
+                    channel="feishu",
+                    account_id="feishu-long-local",
+                    peer_id="ou_user",
+                ),
+                completion_event=event,
+            )
+        )
+        await runtime._queue.put(None)
+        await runtime._consumer_task
+        assert event.is_set()
+
+    asyncio.run(_run())
+
+    assert interceptor.calls == 1
+    assert dispatcher.dispatch_calls == 0
