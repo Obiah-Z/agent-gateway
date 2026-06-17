@@ -71,6 +71,116 @@ WebSocket 控制面: ws://127.0.0.1:8765
 
 ## 飞书接入
 
+### 长连接快速接入
+
+如果只是本地或单机运行，推荐先使用飞书长连接模式。该模式不需要公网 IP、内网穿透或飞书 Webhook 请求地址，也不需要在网关 `.env` 中维护多组飞书密钥。
+
+前置条件：
+
+```bash
+lark-cli config init --new
+```
+
+按提示完成飞书应用配置后，打开 `config/channels.json`，将 `feishu-long-local` 改为启用：
+
+```json
+{
+  "channel": "feishu",
+  "account_id": "feishu-long-local",
+  "enabled": true,
+  "label": "Feishu Long Connection",
+  "config": {
+    "connection_mode": "long_connection",
+    "send_mode": "lark_cli",
+    "event_key": "im.message.receive_v1",
+    "event_keys": [
+      "im.message.receive_v1",
+      "im.chat.member.bot.added_v1"
+    ],
+    "event_identity": "bot",
+    "event_command": "lark-cli",
+    "lark_cli_command": "lark-cli",
+    "lark_cli_identity": "bot",
+    "render_mode": "text"
+  }
+}
+```
+
+启动网关后，系统会自动运行：
+
+```bash
+lark-cli event consume im.message.receive_v1 --as bot
+```
+
+收到的飞书消息会进入 `feishu-long-local` 账号，并通过 `config/bindings.json` 默认路由到 `main` Agent。回复会通过：
+
+```bash
+lark-cli im +messages-send --as bot
+```
+
+发送回飞书会话。
+
+注意事项：
+
+- 长连接模式仍需要在飞书开放平台为应用开通并订阅 `im.message.receive_v1` 事件。
+- 如果你希望群聊里机器人被加入时自动完成接入，还需要订阅 `im.chat.member.bot.added_v1`。
+- 发送消息需要应用具备对应 IM 消息发送权限，且机器人在目标会话中可见或已被加入群聊。
+- 长连接适合本地开发、个人部署和快速接入；长期生产部署仍建议使用 Webhook 模式。
+
+### 非专业用户扫码绑定
+
+当前第一版的目标不是让用户配置复杂环境变量，而是让用户“扫码后直接进入飞书机器人会话”。
+
+推荐流程：
+
+1. 管理员先完成 `lark-cli config init`。
+2. 管理员在飞书开放平台发布并可打开机器人会话，然后把机器人的打开链接填入 `.env` 的 `FEISHU_ONBOARDING_BOT_LINK`。
+3. 启动网关后，用户访问 `/onboarding/feishu` 页面扫码。
+4. 二维码会优先指向飞书机器人链接。用户在机器人里发第一句话后，网关会自动创建对应 Agent 并完成绑定。
+
+如果你暂时还没有机器人打开链接，系统会自动回退到绑定码模式，用户可以继续用短期口令完成接入。
+
+启动网关后访问：
+
+```text
+http://127.0.0.1:8780/onboarding/feishu
+```
+
+页面会生成一个可扫码页面和短期绑定码，例如：
+
+```text
+绑定 GATEWAY-ABC123
+```
+
+用户在飞书中执行以下任一操作：
+
+- 私聊机器人后直接发送第一句话，系统会自动为该用户创建个人飞书 Agent，并绑定 `open_id -> agent_id`。
+- 如果使用了绑定码模式，则私聊机器人发送 `绑定 GATEWAY-ABC123`，系统会自动为该用户创建个人飞书 Agent，并绑定 `open_id -> agent_id`。
+- 如果开启群聊自动接入，机器人被加入群后也可以自动建群聊 Agent。
+
+绑定完成后，网关会自动写入：
+
+- `config/agents.json`
+- `config/bindings.json`
+- `workspace/agents/<agent_id>/IDENTITY.md`
+- `workspace/agents/<agent_id>/SOUL.md`
+
+该流程适合内部快速试用。绑定码是短期一次性口令，不包含密钥；后续可升级为飞书 OAuth 扫码登录和管理员一键创建应用。
+
+### 你需要准备什么
+
+最少需要这几项：
+
+- 一个飞书开放平台应用。
+- 这个应用在本机 `lark-cli` 里完成过 `config init`。
+- 机器人的可打开链接，也就是你要填到 `FEISHU_ONBOARDING_BOT_LINK` 的地址。
+- 如果你还想保留 webhook 模式，再准备 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_VERIFICATION_TOKEN`、`FEISHU_ENCRYPT_KEY`。
+- 如果你要走长连接消息接收，确保应用侧订阅了 `im.message.receive_v1`，以及可选的 `im.chat.member.bot.added_v1`。
+
+当前这版不要求你把 app secret 配进网关长连接路径里；长连接进程依赖的是 `lark-cli` 已登录的本机配置，而不是 `.env` 中的飞书密钥。
+
+### Webhook 生产接入
+
 飞书通道由 `.env` 与 `config/channels.json` 共同控制。密钥从环境变量读取，不写入 JSON 配置。
 
 常用配置：
@@ -175,6 +285,8 @@ GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=15
 - `health.check`：健康检查。
 - `delivery.stats/list/retry/discard/flush`：可靠投递队列运维。
 - `cron.list/trigger`：主动任务查看与触发。
+- `feishu.onboarding.start/status/list`：飞书扫码绑定会话管理。
+- `feishu.long_connection.status`：飞书长连接消费状态。
 - `agents.*`、`bindings.*`、`channels.*`、`profiles.*`：运行配置查看、修改、保存和重载。
 
 ## 测试

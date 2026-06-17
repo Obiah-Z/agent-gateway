@@ -21,6 +21,10 @@ from agent_gateway.intelligence.bootstrap import PromptAssembler
 from agent_gateway.intelligence.memory import MemoryStore, register_memory_tools
 from agent_gateway.intelligence.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
+from agent_gateway.onboarding.feishu import (
+    FeishuOnboardingService,
+    FeishuOnboardingSessionStore,
+)
 from agent_gateway.router import BindingTable, normalize_agent_id
 from agent_gateway.runtime.autonomy import AutonomyRuntime
 from agent_gateway.runtime.channel_runtime import ChannelRuntime
@@ -28,6 +32,7 @@ from agent_gateway.runtime.control_plane import GatewayControlPlane
 from agent_gateway.runtime.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.dispatcher import GatewayDispatcher
 from agent_gateway.runtime.feishu_http import FeishuWebhookServer
+from agent_gateway.runtime.feishu_long_connection import FeishuLongConnectionRuntime
 from agent_gateway.runtime.gateway_server import GatewayServer
 from agent_gateway.runtime.lanes import CommandQueue
 from agent_gateway.runtime.loop import AgentLoopRunner
@@ -156,10 +161,26 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
 
 
 async def serve(app: GatewayApplication) -> None:
+    onboarding_store = FeishuOnboardingSessionStore(app.settings.data_dir / "onboarding" / "feishu")
+    onboarding_service = FeishuOnboardingService(
+        store=onboarding_store,
+        control_plane=app.control_plane,
+        dispatcher=app.dispatcher,
+        public_base_url=(
+            f"http://{app.settings.dashboard_host}:{app.settings.dashboard_port}"
+            if app.settings.dashboard_enabled
+            else ""
+        ),
+        bot_link=app.settings.feishu_onboarding_bot_link,
+        auto_bind_first_message=app.settings.feishu_onboarding_auto_bind_first_message,
+        auto_bind_bot_added=app.settings.feishu_onboarding_auto_bind_bot_added,
+    )
+    app.control_plane.feishu_onboarding = onboarding_service
     channel_runtime = ChannelRuntime(
         app.dispatcher,
         app.channel_manager,
         app.delivery_runtime,
+        inbound_interceptors=[onboarding_service],
     )
     app.control_plane.channel_runtime = channel_runtime
     server = GatewayServer(
@@ -180,6 +201,12 @@ async def serve(app: GatewayApplication) -> None:
         signature_window_seconds=app.settings.feishu_signature_window_seconds,
         dedup_ttl_seconds=app.settings.feishu_event_dedup_ttl_seconds,
     )
+    feishu_long_connection = FeishuLongConnectionRuntime(
+        channels=app.channel_manager,
+        channel_runtime=channel_runtime,
+        event_interceptors=[onboarding_service],
+    )
+    app.control_plane.feishu_long_connection_runtime = feishu_long_connection
     dashboard_server = (
         DashboardStaticServer(
             host=app.settings.dashboard_host,
@@ -188,6 +215,7 @@ async def serve(app: GatewayApplication) -> None:
                 websocket_url=build_dashboard_websocket_url(app.settings),
                 refresh_interval_seconds=app.settings.dashboard_refresh_interval_seconds,
             ),
+            onboarding=onboarding_service,
         )
         if app.settings.dashboard_enabled
         else None
@@ -204,6 +232,8 @@ async def serve(app: GatewayApplication) -> None:
         started.append(app.autonomy_runtime)
         await feishu_webhook.start()
         started.append(feishu_webhook)
+        await feishu_long_connection.start()
+        started.append(feishu_long_connection)
         if dashboard_server is not None:
             await dashboard_server.start()
             started.append(dashboard_server)
@@ -247,6 +277,7 @@ async def serve(app: GatewayApplication) -> None:
     finally:
         if dashboard_server is not None:
             await dashboard_server.stop()
+        await feishu_long_connection.stop()
         await app.autonomy_runtime.stop()
         await channel_runtime.stop()
         await app.delivery_runtime.stop()

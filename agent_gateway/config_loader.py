@@ -109,6 +109,27 @@ def ensure_default_project_files(settings: GatewaySettings) -> None:
                         "webhook_path": "/webhooks/feishu",
                         "is_lark": False
                     },
+                },
+                {
+                    "channel": "feishu",
+                    "account_id": "feishu-long-local",
+                    "enabled": False,
+                    "label": "Feishu Long Connection",
+                    "config": {
+                        "connection_mode": "long_connection",
+                        "send_mode": "lark_cli",
+                        "event_key": "im.message.receive_v1",
+                        "event_keys": [
+                            "im.message.receive_v1",
+                            "im.chat.member.bot.added_v1"
+                        ],
+                        "event_identity": "bot",
+                        "event_command": "lark-cli",
+                        "lark_cli_command": "lark-cli",
+                        "lark_cli_identity": "bot",
+                        "render_mode": "text",
+                        "is_lark": False
+                    },
                 }
             ]
         },

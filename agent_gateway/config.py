@@ -68,6 +68,9 @@ class GatewaySettings:
     feishu_webhook_path: str = "/webhooks/feishu"
     feishu_signature_window_seconds: int = 300
     feishu_event_dedup_ttl_seconds: int = 86400
+    feishu_onboarding_bot_link: str = ""
+    feishu_onboarding_auto_bind_first_message: bool = True
+    feishu_onboarding_auto_bind_bot_added: bool = False
     dashboard_enabled: bool = True
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8780
@@ -157,6 +160,15 @@ class GatewaySettings:
             ),
             feishu_event_dedup_ttl_seconds=int(
                 os.getenv("FEISHU_EVENT_DEDUP_TTL_SECONDS", "86400")
+            ),
+            feishu_onboarding_bot_link=os.getenv("FEISHU_ONBOARDING_BOT_LINK", "").strip(),
+            feishu_onboarding_auto_bind_first_message=env_bool(
+                "FEISHU_ONBOARDING_AUTO_BIND_FIRST_MESSAGE",
+                True,
+            ),
+            feishu_onboarding_auto_bind_bot_added=env_bool(
+                "FEISHU_ONBOARDING_AUTO_BIND_BOT_ADDED",
+                False,
             ),
             dashboard_enabled=env_bool("GATEWAY_DASHBOARD_ENABLED", True),
             dashboard_host=os.getenv("GATEWAY_DASHBOARD_HOST", "127.0.0.1"),
