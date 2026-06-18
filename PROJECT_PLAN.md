@@ -169,26 +169,101 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 13.1：事件链路关联增强
 
+- 已完成 `correlation_id` 贯穿。
+- 入站消息进入 dispatcher 时生成或复用 `correlation_id`。
+- `route.resolved`、`agent.turn.*`、`tool.call.*`、`delivery.enqueued` 复用同一个 `correlation_id`。
+- 投递队列 metadata 持久化 `correlation_id`，`delivery.sent/failed` 从队列恢复。
+- Cron、Heartbeat 等主动任务生成任务级 `correlation_id`。
+- 飞书 Webhook 和长连接优先使用 `event_id/message_id` 派生 `correlation_id`。
+- 测试覆盖同一轮消息的事件链路关联。
+
+### Phase 13.2：Dashboard 链路聚合视图
+
+- 已完成 Dashboard 按 `correlation_id` 聚合链路。
+- 前端基于 `events.tail` 返回结果按 `correlation_id` 分组。
+- 新增“最近链路”面板，展示每条链路的事件数、状态、首尾时间、关键组件和最后错误。
+- 点击链路后可展开该链路下的完整事件序列。
+- 错误链路优先显示，便于排障。
+
+### Phase 13.3：事件筛选与查询参数增强
+
 目标：
 
-- 让一次消息或一次后台任务从入站到投递结果具备同一个 `correlation_id`。
-- Dashboard 后续可以按链路聚合，而不是只展示散列事件列表。
+- 让事件查询从“只看最近列表”升级为“按条件定位问题”。
 
 计划项：
 
-1. 入站消息进入 dispatcher 时生成或复用 `correlation_id`。
-2. 将 `correlation_id` 写入 `InboundMessage.metadata`。
-3. `route.resolved`、`agent.turn.*`、`tool.call.*`、`delivery.enqueued` 复用同一个 `correlation_id`。
-4. 投递队列 metadata 持久化 `correlation_id`，`delivery.sent/failed` 从队列恢复。
-5. Cron、Heartbeat 等主动任务生成任务级 `correlation_id`。
-6. 飞书 Webhook 优先使用 `event_id/message_id` 派生 `correlation_id`。
-7. 增加测试覆盖同一轮消息的事件链路关联。
+1. `events.tail` 支持 `correlation_id`、`agent_id`、`channel`、`job_id`、`delivery_id` 过滤。
+2. Dashboard 增加 component/status/type/correlation_id 基础筛选。
+3. 最近错误面板支持只看 delivery、model、tool、feishu、cron。
+4. 增加测试覆盖组合过滤。
 
 完成标准：
 
-- 一条用户消息产生的主要事件拥有相同 `correlation_id`。
-- 一条投递失败事件可以反查到对应入站、路由和 Agent 执行事件。
-- 后续 Dashboard 可以基于 `correlation_id` 做链路折叠展示。
+- 可以通过控制面按链路 ID 或资源 ID 查到相关事件。
+- Dashboard 中事件量增加后仍能快速收敛范围。
+
+### Phase 13.4：事件文件轮转与保留策略
+
+目标：
+
+- 避免 `runtime-events.jsonl` 长期运行后无限增长。
+
+计划项：
+
+1. 支持按日期写入 `runtime-events-YYYY-MM-DD.jsonl`。
+2. 增加配置项 `GATEWAY_EVENTS_RETENTION_DAYS`。
+3. `events.tail` 支持读取最近多个事件文件。
+4. 启动时或写入时清理过期事件文件。
+
+完成标准：
+
+- 长期运行不会导致事件文件无限膨胀。
+- 最近事件查询仍能跨文件返回最新事件。
+
+### Phase 13.5：模型调用与 profile 事件增强
+
+目标：
+
+- 把模型调用、fallback、profile 冷却和上下文压缩纳入可观测链路。
+
+计划项：
+
+1. 增加 `model.call.started/completed/failed`。
+2. 增加 `profile.selected/failed/cooldown`。
+3. 增加 `context.compacted`。
+4. 记录 profile、model、失败分类、耗时和 fallback 次数。
+
+完成标准：
+
+- 可以区分模型慢、模型失败、工具慢、投递失败。
+- 排查 API key、base_url、限流和上下文溢出时有明确事件依据。
+
+### Phase 13.6：错误分类与处理建议
+
+目标：
+
+- 将最近错误从“原始错误列表”升级为“分类后的排障建议”。
+
+计划项：
+
+1. 增加错误分类器：
+   - model_auth_failed
+   - model_rate_limited
+   - model_timeout
+   - tool_failed
+   - delivery_channel_unavailable
+   - delivery_invalid_target
+   - feishu_signature_rejected
+   - cron_failed
+   - config_invalid
+2. `errors.recent` 返回错误类型、影响对象、建议操作。
+3. Dashboard 最近错误面板展示分类和建议。
+
+完成标准：
+
+- 用户看到错误后能快速判断该检查模型、工具、通道、飞书还是配置。
+- 常见错误能给出明确下一步动作。
 
 ## 当前主要边界
 

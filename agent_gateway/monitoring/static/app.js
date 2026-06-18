@@ -130,6 +130,8 @@ const dom = {
   healthList: $("#health-list"),
   runtimeUpdated: $("#runtime-updated"),
   runtimeList: $("#runtime-list"),
+  tracesSummary: $("#traces-summary"),
+  tracesList: $("#traces-list"),
   eventsSummary: $("#events-summary"),
   eventsList: $("#events-list"),
   errorsSummary: $("#errors-summary"),
@@ -350,6 +352,7 @@ async function refreshAll() {
     renderIssues(buildIssues(health, runtime, deliveryStats));
     renderHealth(health);
     renderRuntime(runtime);
+    renderTraces(events);
     renderEvents(events);
     renderErrors(errors);
     renderDelivery(deliveryList);
@@ -776,6 +779,97 @@ function renderEvents(payload) {
     emptyText: "暂无运行事件。发送一条消息、触发 Cron 或 flush 投递队列后会出现链路事件。",
     summaryLabel: "条事件",
   });
+}
+
+function renderTraces(payload) {
+  clearNode(dom.tracesList);
+  const events = Array.isArray(payload?.items) ? payload.items.slice() : [];
+  const traces = buildTraces(events);
+  dom.tracesSummary.textContent = `${traces.length} 条链路`;
+  dom.tracesList.className = traces.length ? "trace-list" : "trace-list empty";
+  if (!traces.length) {
+    dom.tracesList.textContent = "暂无可聚合链路。事件需要包含 correlation_id 才会出现在这里。";
+    return;
+  }
+  for (const trace of traces) {
+    const details = document.createElement("details");
+    details.className = `trace-item trace-${trace.severity}`;
+    const summary = document.createElement("summary");
+    summary.className = "trace-summary";
+    summary.appendChild(badge(trace.severity === "critical" ? "error" : trace.severity));
+    const title = document.createElement("div");
+    appendText(title, "strong", trace.correlationId, "mono");
+    appendText(
+      title,
+      "small",
+      `${trace.events.length} events | ${trace.components.join(", ") || "no component"} | ${formatTimestamp(trace.start)} -> ${formatTimestamp(trace.end)}`,
+    );
+    summary.appendChild(title);
+    appendText(summary, "span", trace.lastType || "event", "trace-last-type");
+    details.appendChild(summary);
+    if (trace.lastError) {
+      appendText(details, "pre", trace.lastError, "event-error");
+    }
+    const timeline = document.createElement("div");
+    timeline.className = "trace-timeline";
+    for (const event of trace.events) {
+      const row = document.createElement("div");
+      row.className = `trace-event trace-event-${normalizeStatus(event.status)}`;
+      appendText(row, "span", formatTimestamp(event.timestamp), "event-time");
+      appendText(row, "strong", event.type || "event");
+      appendText(
+        row,
+        "small",
+        [
+          event.component || "",
+          event.agent_id ? `agent=${event.agent_id}` : "",
+          event.delivery_id ? `delivery=${event.delivery_id}` : "",
+          event.job_id ? `job=${event.job_id}` : "",
+        ].filter(Boolean).join(" | ") || event.message || "",
+      );
+      timeline.appendChild(row);
+    }
+    details.appendChild(timeline);
+    dom.tracesList.appendChild(details);
+  }
+}
+
+function buildTraces(events) {
+  const groups = new Map();
+  for (const event of events) {
+    const id = String(event.correlation_id || "").trim();
+    if (!id) {
+      continue;
+    }
+    if (!groups.has(id)) {
+      groups.set(id, []);
+    }
+    groups.get(id).push(event);
+  }
+  const traces = [];
+  for (const [correlationId, rows] of groups.entries()) {
+    const sorted = rows.slice().sort((left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0));
+    const last = sorted[sorted.length - 1] || {};
+    const errorEvents = sorted.filter((event) => event.error || normalizeStatus(event.status) === "critical");
+    const hasWarning = sorted.some((event) => normalizeStatus(event.status) === "warning");
+    traces.push({
+      correlationId,
+      events: sorted,
+      start: sorted[0]?.timestamp,
+      end: last.timestamp,
+      lastType: last.type || "",
+      lastError: errorEvents[errorEvents.length - 1]?.error || "",
+      severity: errorEvents.length ? "critical" : hasWarning ? "warning" : "ok",
+      components: [...new Set(sorted.map((event) => event.component).filter(Boolean))],
+    });
+  }
+  return traces.sort((left, right) => {
+    const bySeverity = severityWeight(left.severity) - severityWeight(right.severity);
+    if (bySeverity !== 0) {
+      return bySeverity;
+    }
+    return Number(right.end || 0) - Number(left.end || 0);
+  }).slice(0, 24);
 }
 
 function renderErrors(payload) {
