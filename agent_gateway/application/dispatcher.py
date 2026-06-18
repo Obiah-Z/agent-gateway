@@ -130,6 +130,7 @@ class GatewayDispatcher:
         mode: str = "minimal",
         lane_name: str = "",
         correlation_id: str = "",
+        disabled_tools: list[str] | None = None,
     ) -> AgentReply:
         """处理 heartbeat、cron 等系统主动任务。"""
 
@@ -154,6 +155,7 @@ class GatewayDispatcher:
                 channel=channel,
                 mode=mode,
                 correlation_id=correlation_id,
+                disabled_tools=disabled_tools,
             ),
         )
 

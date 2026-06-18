@@ -217,6 +217,47 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
     assert [event["type"] for event in filtered_errors["items"]] == ["delivery.failed"]
 
 
+def test_gateway_server_exposes_recent_memory_writes(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    memory_dir = settings.workspace_root / "memory" / "daily"
+    memory_dir.mkdir(parents=True)
+    (memory_dir / "2026-06-18.jsonl").write_text(
+        (
+            '{"ts":"2026-06-18T12:00:00+00:00",'
+            '"category":"general","content":"cron should not write this often"}\n'
+        ),
+        encoding="utf-8",
+    )
+    agents = AgentManager()
+    bindings = BindingTable()
+    profiles = ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")])
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=ChannelManager(),
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(server._m_memory_recent({"limit": 10}))
+
+    assert result["configured"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["content"] == "cron should not write this often"
+
+
 def test_gateway_server_ignores_websocket_disconnect_during_send(tmp_path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",

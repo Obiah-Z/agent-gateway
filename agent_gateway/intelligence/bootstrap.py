@@ -181,6 +181,12 @@ class PromptAssembler:
         if runtime_context:
             runtime_lines = [f"- {key}: {value}" for key, value in runtime_context.items()]
             sections.append("## Runtime Context\n\n" + "\n".join(runtime_lines))
+            disabled_tools = str(runtime_context.get("disabled_tools", "")).strip()
+            if disabled_tools:
+                sections.append(
+                    "## Runtime Tool Restrictions\n\n"
+                    f"The following tools are disabled for this turn and must not be used: {disabled_tools}."
+                )
 
         channel_hints = {
             "terminal": "You are responding via a terminal REPL. Markdown is supported.",

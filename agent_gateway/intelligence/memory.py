@@ -58,6 +58,33 @@ class MemoryStore:
             "daily_entries": total_entries,
         }
 
+    def recent_entries(self, limit: int = 20) -> list[dict[str, Any]]:
+        """读取最近写入的 daily memory 条目，用于运维排查。"""
+
+        safe_limit = max(1, min(int(limit), 200))
+        rows: list[dict[str, Any]] = []
+        if not self.daily_dir.is_dir():
+            return rows
+        for path in sorted(self.daily_dir.glob("*.jsonl"), reverse=True):
+            try:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    entry = json.loads(raw)
+                    rows.append(
+                        {
+                            "ts": str(entry.get("ts", "")),
+                            "category": str(entry.get("category", "")),
+                            "content": str(entry.get("content", "")),
+                            "file": path.name,
+                        }
+                    )
+            except (OSError, json.JSONDecodeError):
+                continue
+        rows.sort(key=lambda row: row.get("ts", ""), reverse=True)
+        return rows[:safe_limit]
+
     def hybrid_search(self, query: str, top_k: int = 5) -> list[MemorySearchResult]:
         chunks = self._load_all_chunks()
         if not chunks:

@@ -18,7 +18,11 @@ from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
 
 class FakeResilienceRunner:
     def __init__(self) -> None:
-        self.tools = type("Tools", (), {"names": lambda self: ["bash", "read_file", "memory_search"]})()
+        self.tools = type(
+            "Tools",
+            (),
+            {"names": lambda self: ["bash", "read_file", "memory_write", "memory_search"]},
+        )()
         self.last_allowed_tools = None
         self.last_system_prompt = ""
         self.last_model = ""
@@ -186,6 +190,53 @@ def test_agent_loop_runner_applies_tool_policy(tmp_path: Path) -> None:
     assert reply.text == "ok"
     assert resilience.last_model == "deepseek-v4-pro"
     assert resilience.last_allowed_tools == ["read_file", "memory_search"]
+
+
+def test_agent_loop_runner_excludes_disabled_tools(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        model_id="deepseek-v4-pro",
+    )
+    settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    (settings.workspace_root / "IDENTITY.md").write_text("Identity", encoding="utf-8")
+
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="planner",
+            name="Planner",
+            tool_policy_mode="allowlist",
+            tool_names=("read_file", "memory_write", "memory_search"),
+        )
+    )
+    sessions = SessionStore(settings.sessions_dir)
+    resilience = FakeResilienceRunner()
+    runner = AgentLoopRunner(
+        settings,
+        agents,
+        sessions,
+        PromptAssembler(settings.workspace_root),
+        resilience,
+    )
+
+    reply = asyncio.run(
+        runner.run_task_turn(
+            agent_id="planner",
+            session_key="system:cron:test",
+            user_text="run cron",
+            channel="cron",
+            mode="minimal",
+            disabled_tools=["memory_write"],
+        )
+    )
+
+    assert reply.text == "ok"
+    assert resilience.last_allowed_tools == ["read_file", "memory_search"]
+    assert "memory_write" not in resilience.last_allowed_tools
+    assert "disabled_tools: memory_write" in resilience.last_system_prompt
 
 
 def test_agent_manifest_validator_rejects_invalid_config() -> None:

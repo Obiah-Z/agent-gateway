@@ -111,6 +111,7 @@ class GatewayServer:
             "health.check": self._m_health_check,
             "events.tail": self._m_events_tail,
             "errors.recent": self._m_errors_recent,
+            "memory.recent": self._m_memory_recent,
             "ingest": self._m_ingest,
             "heartbeat.status": self._m_heartbeat_status,
             "heartbeat.trigger": self._m_heartbeat_trigger,
@@ -529,6 +530,11 @@ class GatewayServer:
             component=str(params.get("component", "")),
             correlation_id=str(params.get("correlation_id", "")),
         )
+
+    async def _m_memory_recent(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.recent_memories(limit=int(params.get("limit", 20)))
 
     async def _m_ingest(self, params: dict[str, Any]) -> dict[str, Any]:
         inbound = InboundMessage(

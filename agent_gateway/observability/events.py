@@ -18,6 +18,12 @@ from typing import Any
 
 
 ERROR_STATUSES = {"error", "failed", "rejected", "critical"}
+IGNORED_REJECTION_REASONS = {
+    "method not allowed",
+    "duplicate event",
+    "event ignored by parser",
+    "card action ignored by parser",
+}
 CORRELATION_ID_KEY = "correlation_id"
 
 
@@ -176,13 +182,25 @@ class RuntimeEventStore:
         errors = [
             row
             for row in rows
-            if row.get("error") or str(row.get("status", "")).lower() in ERROR_STATUSES
+            if self._is_error_event(row)
         ]
         if component:
             errors = [row for row in errors if row.get("component") == component]
         if correlation_id:
             errors = [row for row in errors if row.get("correlation_id") == correlation_id]
         return errors[-max(1, min(int(limit), 200)) :]
+
+    @staticmethod
+    def _is_error_event(row: dict[str, Any]) -> bool:
+        status = str(row.get("status", "")).lower()
+        if status == "rejected" and RuntimeEventStore._is_ignorable_rejection(row):
+            return False
+        return bool(row.get("error")) or status in ERROR_STATUSES
+
+    @staticmethod
+    def _is_ignorable_rejection(row: dict[str, Any]) -> bool:
+        reason = str(row.get("error") or row.get("metadata", {}).get("reason", "")).lower()
+        return reason in IGNORED_REJECTION_REASONS
 
     def _append(self, row: dict[str, Any]) -> None:
         payload = json.dumps(row, ensure_ascii=False, sort_keys=True)

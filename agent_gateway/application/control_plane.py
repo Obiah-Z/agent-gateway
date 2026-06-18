@@ -25,6 +25,7 @@ from agent_gateway.config_loader import (
     write_json_atomic,
 )
 from agent_gateway.delivery.queue import DeliveryQueue, QueuedDelivery
+from agent_gateway.intelligence.memory import MemoryStore
 from agent_gateway.observability.events import RuntimeEventStore
 from agent_gateway.core.ids import normalize_agent_id
 from agent_gateway.core.models import AgentConfig, Binding
@@ -186,6 +187,16 @@ class GatewayControlPlane:
             component=component,
             correlation_id=correlation_id,
         )
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": True,
+            "limit": max(1, min(int(limit), 200)),
+        }
+
+    def recent_memories(self, *, limit: int = 20) -> dict[str, Any]:
+        store = MemoryStore(self.settings.workspace_root)
+        items = store.recent_entries(limit=limit)
         return {
             "items": items,
             "count": len(items),

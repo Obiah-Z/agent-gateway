@@ -63,6 +63,37 @@ def test_runtime_event_store_supports_tail_filters(tmp_path: Path) -> None:
     assert store.recent_errors(limit=10, correlation_id="missing") == []
 
 
+def test_runtime_event_store_ignores_expected_rejections_in_recent_errors(tmp_path: Path) -> None:
+    store = RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl")
+    store.record(
+        "feishu.event.rejected",
+        status="rejected",
+        component="feishu",
+        message="Feishu webhook request rejected",
+        channel="feishu",
+        error="method not allowed",
+        metadata={"reason": "method not allowed"},
+    )
+    store.record(
+        "feishu.event.rejected",
+        status="rejected",
+        component="feishu",
+        message="Feishu signature rejected",
+        channel="feishu",
+        error="verification token mismatch",
+        metadata={"reason": "verification token mismatch"},
+    )
+
+    events = store.tail(limit=10, component="feishu")
+    errors = store.recent_errors(limit=10, component="feishu")
+
+    assert [event["error"] for event in events] == [
+        "method not allowed",
+        "verification token mismatch",
+    ]
+    assert [event["error"] for event in errors] == ["verification token mismatch"]
+
+
 def test_ensure_correlation_id_reuses_or_generates_value() -> None:
     metadata = {"correlation_id": "corr-existing"}
     assert ensure_correlation_id(metadata, prefix="cli") == "corr-existing"

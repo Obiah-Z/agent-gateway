@@ -45,6 +45,7 @@ async def _dispatch_background_with_correlation(
     mode: str,
     lane_name: str,
     correlation_id: str,
+    disabled_tools: list[str] | None = None,
 ) -> AgentReply:
     try:
         return await dispatcher.dispatch_background(
@@ -55,9 +56,10 @@ async def _dispatch_background_with_correlation(
             mode=mode,
             lane_name=lane_name,
             correlation_id=correlation_id,
+            disabled_tools=disabled_tools,
         )
     except TypeError as exc:
-        if "correlation_id" not in str(exc):
+        if "correlation_id" not in str(exc) and "disabled_tools" not in str(exc):
             raise
         return await dispatcher.dispatch_background(
             agent_id=agent_id,
@@ -499,6 +501,7 @@ class CronService:
                         mode="minimal",
                         lane_name=f"cron:{job.target.agent_id}",
                         correlation_id=correlation_id,
+                        disabled_tools=["memory_write"],
                     )
                     output = reply.text
             elif kind == "system_event":
@@ -634,6 +637,7 @@ class CronService:
             mode="minimal",
             lane_name=f"cron:{job.target.agent_id}",
             correlation_id=correlation_id,
+            disabled_tools=["memory_write"],
         )
         return reply.text, "ok", list(result.items)
 

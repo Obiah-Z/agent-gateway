@@ -425,6 +425,7 @@ select:focus {
 #overview-panel,
 #health-panel,
 #runtime-panel,
+#memory-panel,
 #delivery-panel,
 #cron-panel {
   scroll-margin-top: 92px;
@@ -608,7 +609,8 @@ select:focus {
 .runtime-list,
 .cron-list,
 .event-list,
-.trace-list {
+.trace-list,
+.memory-list {
   display: grid;
   gap: 9px;
 }
@@ -618,7 +620,8 @@ select:focus {
 .cron-item,
 .runtime-section,
 .event-item,
-.trace-item {
+.trace-item,
+.memory-item {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px;
@@ -762,6 +765,36 @@ select:focus {
 .event-collapse-toggle:hover {
   border-color: rgba(23, 105, 224, 0.48);
   background: #ffffff;
+}
+
+.memory-item {
+  display: grid;
+  gap: 7px;
+}
+
+.memory-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-head strong,
+.memory-head small {
+  display: block;
+}
+
+.memory-head small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.memory-content {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .trace-item {

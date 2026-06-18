@@ -218,6 +218,8 @@ Cron 支持两层配置：
 
 智能体局部 Cron 如果没有显式配置 `target.agent_id`，会默认使用目录名作为执行智能体。例如 `workspace/agents/research/CRON.json` 中的任务会默认交给 `research` Agent 执行。运行时会把局部任务 ID 展示为 `<agent_id>:<job_id>`，例如 `research:agent-news-digest`，避免不同智能体之间任务 ID 冲突。
 
+Cron 后台任务默认禁止调用 `memory_write`，避免系统巡检、新闻简报等后台输出污染长期记忆。需要长期保留的系统观察应通过明确的前台指令或后续专门的审计流程写入。
+
 当前 `workspace/agents/research/CRON.json` 中的 `agent-news-digest` 会每天北京时间 09:30 触发 `research` Agent，整理最近 24 小时内 AI Agent 相关动态，并推送到 `.env` 中配置的主动投递目标。
 
 需要启用：
@@ -301,6 +303,7 @@ GATEWAY_EVENTS_RETENTION_DAYS=14
 - `health.check`：健康检查。
 - `events.tail`：查看最近运行事件，支持按 component/status/correlation_id/agent/channel/job/delivery 过滤。
 - `errors.recent`：查看最近错误、失败或拒绝事件，支持按 component/correlation_id 过滤。
+- `memory.recent`：查看最近写入的 daily memory 记录。
 - `delivery.stats/list/retry/discard/flush`：可靠投递队列运维。
 - `cron.list/trigger`：主动任务查看与触发。
 - `feishu.onboarding.start/status/list`：飞书扫码绑定会话管理。

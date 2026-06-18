@@ -140,6 +140,8 @@ const dom = {
   eventsList: $("#events-list"),
   errorsSummary: $("#errors-summary"),
   errorsList: $("#errors-list"),
+  memorySummary: $("#memory-summary"),
+  memoryList: $("#memory-list"),
   deliveryState: $("#delivery-state"),
   includeText: $("#include-text"),
   deliveryFlushBtn: $("#delivery-flush-btn"),
@@ -311,23 +313,58 @@ function formatDuration(seconds) {
 }
 
 function formatTimestamp(value) {
-  if (!value) {
+  const date = parseDateValue(value);
+  if (!date) {
     return "--";
   }
-  if (typeof value === "number") {
-    return new Date(value * 1000).toLocaleString("zh-CN");
+  return formatDateParts(date);
+}
+
+function parseDateValue(value) {
+  if (!value) {
+    return null;
   }
-  return String(value);
+  if (typeof value === "number") {
+    return new Date(value * 1000);
+  }
+  const text = String(value);
+  if (text === "never" || text === "n/a") {
+    return null;
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date;
+}
+
+function formatDateParts(date, { includeSeconds = false } = {}) {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: includeSeconds ? "2-digit" : undefined,
+    hour12: false,
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== "literal") {
+      acc[part.type] = part.value;
+    }
+    return acc;
+  }, {});
+  const base = `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}时${parts.minute}分`;
+  return includeSeconds ? `${base}${parts.second}秒` : base;
 }
 
 function normalizeStatus(status) {
   if (status === "ok" || status === "sent") {
     return "ok";
   }
-  if (status === "degraded" || status === "warning" || status === "pending" || status === "ready") {
+  if (status === "degraded" || status === "warning" || status === "pending" || status === "ready" || status === "rejected") {
     return "warning";
   }
-  if (status === "unhealthy" || status === "critical" || status === "error" || status === "failed" || status === "rejected" || status === "dead") {
+  if (status === "unhealthy" || status === "critical" || status === "error" || status === "failed" || status === "dead") {
     return "critical";
   }
   return "muted";
@@ -347,14 +384,11 @@ function eventLabel(event) {
 }
 
 function formatShortTime(value) {
-  if (!value) {
+  const date = parseDateValue(value);
+  if (!date) {
     return "--";
   }
-  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
-  return date.toLocaleTimeString("zh-CN", { hour12: false });
+  return formatDateParts(date);
 }
 
 function shortId(value, head = 10, tail = 6) {
@@ -532,7 +566,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -544,6 +578,7 @@ async function refreshAll() {
       rpc("cron.list"),
       rpc("events.tail", buildEventQuery({ limit: 80 })),
       rpc("errors.recent", buildErrorQuery({ limit: 40 })),
+      rpc("memory.recent", { limit: 20 }),
     ]);
     renderSummary(health, runtime, deliveryStats);
     renderIssues(buildIssues(health, runtime, deliveryStats));
@@ -552,6 +587,7 @@ async function refreshAll() {
     renderTraces(events);
     renderEvents(events);
     renderErrors(errors);
+    renderMemories(memories);
     renderDelivery(deliveryList);
     renderCron(cronJobs);
   } catch (error) {
@@ -688,7 +724,7 @@ function renderHealth(health) {
 function renderRuntime(runtime) {
   clearNode(dom.runtimeList);
   dom.runtimeList.className = "runtime-section-list";
-  dom.runtimeUpdated.textContent = new Date().toLocaleTimeString("zh-CN");
+  dom.runtimeUpdated.textContent = formatTimestamp(Date.now() / 1000);
 
   const channels = runtime.channels || {};
   const profiles = runtime.profiles || {};
@@ -1122,6 +1158,31 @@ function renderErrors(payload) {
     emptyText: "最近没有错误、失败或拒绝事件。",
     summaryLabel: "条错误",
   });
+}
+
+function renderMemories(payload) {
+  clearNode(dom.memoryList);
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  dom.memorySummary.textContent = `${items.length} 条记录`;
+  dom.memoryList.className = items.length ? "memory-list" : "memory-list empty";
+  if (!items.length) {
+    dom.memoryList.textContent = "最近没有记忆写入。";
+    return;
+  }
+  for (const item of items) {
+    const card = document.createElement("article");
+    card.className = "memory-item";
+    const head = document.createElement("div");
+    head.className = "memory-head";
+    const title = document.createElement("div");
+    appendText(title, "strong", item.category ? `类别：${item.category}` : "未分类记忆");
+    appendText(title, "small", `来源文件：${item.file || "--"}`);
+    head.appendChild(title);
+    appendText(head, "span", formatTimestamp(item.ts), "event-time");
+    card.appendChild(head);
+    appendText(card, "p", item.content || "", "memory-content");
+    dom.memoryList.appendChild(card);
+  }
 }
 
 function renderEventList({

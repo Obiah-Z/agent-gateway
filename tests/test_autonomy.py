@@ -29,6 +29,7 @@ class FakeDispatcher:
     def __init__(self, reply_text: str) -> None:
         self.reply_text = reply_text
         self.background_prompts: list[str] = []
+        self.background_calls: list[dict[str, object]] = []
         self.deliveries: list[dict[str, object]] = []
         self.command_queue = type("Queue", (), {"stats": lambda self: {}})()
 
@@ -41,8 +42,21 @@ class FakeDispatcher:
         channel: str,
         mode: str = "minimal",
         lane_name: str = "",
+        disabled_tools: list[str] | None = None,
+        correlation_id: str = "",
     ) -> AgentReply:
         self.background_prompts.append(prompt)
+        self.background_calls.append(
+            {
+                "agent_id": agent_id,
+                "session_key": session_key,
+                "channel": channel,
+                "mode": mode,
+                "lane_name": lane_name,
+                "disabled_tools": disabled_tools or [],
+                "correlation_id": correlation_id,
+            }
+        )
         return AgentReply(
             agent_id=agent_id,
             session_key=session_key,
@@ -298,7 +312,9 @@ def test_cron_service_loads_agent_scoped_jobs(tmp_path: Path) -> None:
 
     assert "triggered" in result
     assert dispatcher.background_prompts == ["Summarize research."]
+    assert dispatcher.background_calls[0]["disabled_tools"] == ["memory_write"]
     assert channel.sent == ["[Research Daily Digest] Research summary"]
+    assert dispatcher.background_calls[0]["disabled_tools"] == ["memory_write"]
     delivery = dispatcher.deliveries[0]
     assert delivery["target"].agent_id == "research"
     metadata = delivery["metadata"]

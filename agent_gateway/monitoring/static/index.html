@@ -21,6 +21,7 @@
           <a href="#overview-panel"><span class="side-dot"></span>运行总览</a>
           <a href="#health-panel"><span class="side-dot"></span>健康检查</a>
           <a href="#events-panel"><span class="side-dot"></span>事件流</a>
+          <a href="#memory-panel"><span class="side-dot"></span>记忆写入</a>
           <a href="#delivery-panel"><span class="side-dot"></span>投递队列</a>
           <a href="#cron-panel"><span class="side-dot"></span>主动任务</a>
         </nav>
@@ -186,6 +187,17 @@
           </div>
           <div id="errors-list" class="event-list empty">尚未加载错误事件</div>
         </article>
+      </section>
+
+      <section id="memory-panel" class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Memory</p>
+            <h2>最近记忆写入</h2>
+          </div>
+          <span id="memory-summary" class="pill">暂无数据</span>
+        </div>
+        <div id="memory-list" class="memory-list empty">尚未加载记忆写入记录</div>
       </section>
 
       <section id="delivery-panel" class="panel">

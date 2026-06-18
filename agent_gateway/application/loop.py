@@ -72,6 +72,7 @@ class AgentLoopRunner:
         channel: str,
         mode: str,
         correlation_id: str = "",
+        disabled_tools: list[str] | None = None,
     ) -> AgentReply:
         """执行一次 Agent 轮次。
 
@@ -98,6 +99,9 @@ class AgentLoopRunner:
         messages = self.sessions.load_messages(agent_id, session_key)
         messages.append({"role": "user", "content": user_text})
         allowed_tools = agent.allowed_tool_names(self.resilience_runner.tools.names())
+        disabled = {name for name in (disabled_tools or []) if name}
+        if disabled:
+            allowed_tools = [name for name in allowed_tools if name not in disabled]
 
         # PromptAssembler 会按 Agent 策略合并 workspace 文件、记忆召回和技能说明。
         system_prompt = self.prompt_assembler.build(
@@ -109,6 +113,7 @@ class AgentLoopRunner:
                 "agent_id": agent.id,
                 "channel": channel,
                 "model": agent.effective_model(self.settings.model_id),
+                "disabled_tools": ", ".join(sorted(disabled)) if disabled else "",
             },
         )
 
@@ -118,6 +123,7 @@ class AgentLoopRunner:
             "session_key": session_key,
             "channel": channel,
             "correlation_id": correlation_id,
+            "disabled_tools": sorted(disabled),
         }
         try:
             result = await asyncio.to_thread(
