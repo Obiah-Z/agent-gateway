@@ -211,7 +211,14 @@ http://<公网IP或域名>:8766/webhooks/feishu
 
 ## 主动任务与每日简报
 
-`workspace/CRON.json` 中的 `agent-news-digest` 会每天北京时间 09:30 触发 `research` Agent，整理最近 24 小时内 AI Agent 相关动态，并推送到 `.env` 中配置的主动投递目标。
+Cron 支持两层配置：
+
+- `workspace/CRON.json`：全局任务，适合系统健康检查、全局提醒、通用主动任务。
+- `workspace/agents/<agent_id>/CRON.json`：某个智能体自己的任务，适合研究简报、个人助理日程、专项巡检等和 Agent 强绑定的任务。
+
+智能体局部 Cron 如果没有显式配置 `target.agent_id`，会默认使用目录名作为执行智能体。例如 `workspace/agents/research/CRON.json` 中的任务会默认交给 `research` Agent 执行。运行时会把局部任务 ID 展示为 `<agent_id>:<job_id>`，例如 `research:agent-news-digest`，避免不同智能体之间任务 ID 冲突。
+
+当前 `workspace/agents/research/CRON.json` 中的 `agent-news-digest` 会每天北京时间 09:30 触发 `research` Agent，整理最近 24 小时内 AI Agent 相关动态，并推送到 `.env` 中配置的主动投递目标。
 
 需要启用：
 
@@ -227,14 +234,16 @@ GATEWAY_PROACTIVE_AGENT_ID=research
 手动触发：
 
 ```bash
-agent-gateway cron-trigger agent-news-digest
+agent-gateway cron-trigger research:agent-news-digest
 ```
 
 如果只想入队、不立即发送：
 
 ```bash
-agent-gateway cron-trigger agent-news-digest --no-flush
+agent-gateway cron-trigger research:agent-news-digest --no-flush
 ```
+
+如果某个 `job_id` 在所有 Cron 文件中唯一，也可以继续使用短 ID 触发；存在重名时应使用完整 ID。
 
 新闻源配置位于：
 

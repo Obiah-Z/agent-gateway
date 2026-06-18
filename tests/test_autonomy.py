@@ -234,3 +234,75 @@ def test_cron_service_runs_agent_news_digest(
     cron.on_delivery_success(type("Entry", (), {"metadata": metadata})())
 
     assert marked == [item]
+
+
+def test_cron_service_loads_agent_scoped_jobs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    agent_dir = workspace / "agents" / "research"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "CRON.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "daily-digest",
+                        "name": "Research Daily Digest",
+                        "enabled": True,
+                        "schedule": {
+                            "kind": "every",
+                            "every_seconds": 1,
+                            "anchor": "2026-01-01T00:00:00+00:00",
+                        },
+                        "payload": {"kind": "agent_turn", "message": "Summarize research."},
+                        "delete_after_run": False,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    dispatcher = FakeDispatcher("Research summary")
+    cron = CronService(
+        settings,
+        dispatcher,
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+    )
+
+    assert len(cron.jobs) == 1
+    job = cron.jobs[0]
+    assert job.id == "research:daily-digest"
+    assert job.config_id == "daily-digest"
+    assert job.scope == "research"
+    assert job.target.agent_id == "research"
+    assert job.source_file == "agents/research/CRON.json"
+
+    rows = cron.list_jobs()
+    assert rows[0]["id"] == "research:daily-digest"
+    assert rows[0]["config_id"] == "daily-digest"
+    assert rows[0]["agent_id"] == "research"
+    assert rows[0]["scope"] == "research"
+
+    result = asyncio.run(cron.trigger_job("daily-digest"))
+
+    assert "triggered" in result
+    assert dispatcher.background_prompts == ["Summarize research."]
+    assert channel.sent == ["[Research Daily Digest] Research summary"]
+    delivery = dispatcher.deliveries[0]
+    assert delivery["target"].agent_id == "research"
+    metadata = delivery["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["job_id"] == "research:daily-digest"
+    assert metadata["cron_config_id"] == "daily-digest"
+    assert metadata["cron_scope"] == "research"

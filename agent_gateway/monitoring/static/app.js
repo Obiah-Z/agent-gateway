@@ -101,6 +101,7 @@ const state = {
   autoRefreshTimer: null,
   deliveryState: "failed",
   refreshIntervalSeconds: 15,
+  eventsExpanded: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -151,6 +152,79 @@ const dom = {
   deliveryDetail: $("#delivery-detail"),
   deliveryDetailBody: $("#delivery-detail-body"),
   deliveryDetailClose: $("#delivery-detail-close"),
+};
+
+const STATUS_LABELS = {
+  ok: "正常",
+  warning: "注意",
+  degraded: "降级",
+  critical: "严重",
+  unhealthy: "异常",
+  error: "错误",
+  failed: "失败",
+  rejected: "拒绝",
+  ignored: "忽略",
+  duplicate: "重复",
+  pending: "待投递",
+  sent: "已发送",
+  discarded: "已丢弃",
+  dead: "已终止",
+  ready: "可重试",
+};
+
+const COMPONENT_LABELS = {
+  dispatcher: "消息分发",
+  agent_loop: "智能体执行",
+  tools: "工具调用",
+  delivery: "可靠投递",
+  cron: "定时任务",
+  feishu: "飞书接入",
+  websocket: "控制面",
+  model: "模型调用",
+  profile: "模型 Profile",
+  context: "上下文",
+};
+
+const EVENT_LABELS = {
+  "inbound.received": "收到入站消息",
+  "route.resolved": "完成路由匹配",
+  "agent.turn.started": "开始智能体轮次",
+  "agent.turn.completed": "智能体轮次完成",
+  "agent.turn.failed": "智能体轮次失败",
+  "agent.task.started": "后台任务进入执行",
+  "tool.call.started": "开始调用工具",
+  "tool.call.completed": "工具调用完成",
+  "tool.call.failed": "工具调用失败",
+  "delivery.enqueued": "消息已进入投递队列",
+  "delivery.sent": "消息投递成功",
+  "delivery.failed": "消息投递失败",
+  "cron.triggered": "定时任务触发",
+  "cron.completed": "定时任务完成",
+  "cron.failed": "定时任务失败",
+  "feishu.event.accepted": "飞书事件已接收",
+  "feishu.event.ignored": "飞书事件已忽略",
+  "feishu.event.rejected": "飞书事件已拒绝",
+  "model.call.started": "开始调用模型",
+  "model.call.completed": "模型调用完成",
+  "model.call.failed": "模型调用失败",
+  "profile.selected": "已选择模型 Profile",
+  "profile.failed": "模型 Profile 失败",
+  "profile.cooldown": "模型 Profile 冷却",
+  "context.compacted": "上下文已压缩",
+};
+
+const DETAIL_LABELS = {
+  agent_id: "智能体",
+  session_key: "会话",
+  channel: "通道",
+  account_id: "账号",
+  peer_id: "目标",
+  delivery_id: "投递 ID",
+  job_id: "任务",
+  correlation_id: "链路 ID",
+  component: "模块",
+  metadata: "技术元数据",
+  error: "错误详情",
 };
 
 function defaultWsUrl() {
@@ -247,22 +321,112 @@ function formatTimestamp(value) {
 }
 
 function normalizeStatus(status) {
-  if (status === "ok") {
+  if (status === "ok" || status === "sent") {
     return "ok";
   }
-  if (status === "degraded" || status === "warning") {
+  if (status === "degraded" || status === "warning" || status === "pending" || status === "ready") {
     return "warning";
   }
-  if (status === "unhealthy" || status === "critical" || status === "error") {
+  if (status === "unhealthy" || status === "critical" || status === "error" || status === "failed" || status === "rejected" || status === "dead") {
     return "critical";
   }
   return "muted";
 }
 
+function statusLabel(status) {
+  return STATUS_LABELS[String(status || "").toLowerCase()] || status || "未知";
+}
+
+function componentLabel(component) {
+  return COMPONENT_LABELS[String(component || "")] || component || "未标记模块";
+}
+
+function eventLabel(event) {
+  const type = typeof event === "string" ? event : event?.type;
+  return EVENT_LABELS[String(type || "")] || type || "运行事件";
+}
+
+function formatShortTime(value) {
+  if (!value) {
+    return "--";
+  }
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+function shortId(value, head = 10, tail = 6) {
+  const text = String(value || "");
+  if (!text || text.length <= head + tail + 3) {
+    return text || "--";
+  }
+  return `${text.slice(0, head)}...${text.slice(-tail)}`;
+}
+
+function describeEventContext(event) {
+  const parts = [];
+  if (event.component) {
+    parts.push(componentLabel(event.component));
+  }
+  if (event.channel) {
+    parts.push(`通道 ${event.channel}`);
+  }
+  if (event.agent_id) {
+    parts.push(`智能体 ${event.agent_id}`);
+  }
+  if (event.job_id) {
+    parts.push(`任务 ${event.job_id}`);
+  }
+  if (event.delivery_id) {
+    parts.push(`投递 ${shortId(event.delivery_id, 8, 4)}`);
+  }
+  return parts.join(" / ") || "暂无上下文";
+}
+
+function describeEventOutcome(event) {
+  if (event.error) {
+    return `失败原因：${String(event.error).split("\n")[0]}`;
+  }
+  if (event.message) {
+    return event.message;
+  }
+  if (event.metadata?.failure_reason) {
+    return `失败原因：${event.metadata.failure_reason}`;
+  }
+  return "该节点已记录，无额外说明。";
+}
+
+function operatorHint(event) {
+  const type = String(event.type || "");
+  const component = String(event.component || "");
+  const status = normalizeStatus(event.status);
+  if (status !== "critical" && status !== "warning") {
+    return "无需处理，仅作为链路记录。";
+  }
+  if (component === "delivery" || type.startsWith("delivery.")) {
+    return "优先查看投递队列，确认目标 ID、通道凭证和重试状态。";
+  }
+  if (component === "tools" || type.startsWith("tool.")) {
+    return "检查工具参数、工作目录权限和工具输出长度。";
+  }
+  if (component === "agent_loop" || type.startsWith("agent.")) {
+    return "检查模型配置、会话上下文和最近一次工具调用结果。";
+  }
+  if (component === "cron" || type.startsWith("cron.")) {
+    return "检查 CRON 配置、主动投递目标和任务提示词。";
+  }
+  if (component === "feishu" || type.startsWith("feishu.")) {
+    return "检查飞书事件类型、验签配置、权限和机器人可见范围。";
+  }
+  return "按链路 ID 过滤最近事件，定位上游和下游节点。";
+}
+
 function badge(status) {
   const span = document.createElement("span");
   span.className = `status-badge status-${normalizeStatus(status)}`;
-  span.textContent = status || "unknown";
+  span.textContent = statusLabel(status);
   return span;
 }
 
@@ -481,19 +645,19 @@ function renderSummary(health, runtime, deliveryStats) {
   const delivery = deliveryStats || runtime.delivery || {};
 
   dom.metricHealth.textContent = health.status || "--";
-  dom.metricHealthDetail.textContent = `${health.summary?.critical || 0} critical / ${health.summary?.warning || 0} warning`;
+  dom.metricHealthDetail.textContent = `${health.summary?.critical || 0} 个严重 / ${health.summary?.warning || 0} 个注意`;
   const healthCard = dom.metricHealth.closest(".metric-health");
   healthCard.classList.remove("is-ok", "is-warning", "is-critical");
   healthCard.classList.add(`is-${normalizeStatus(health.status)}`);
 
   dom.metricUptime.textContent = formatDuration(server.uptime_seconds);
-  dom.metricServer.textContent = server.running ? "server running" : "server not running";
+  dom.metricServer.textContent = server.running ? "服务正在运行" : "服务未运行";
   dom.metricDelivery.textContent = `${delivery.pending ?? "--"} / ${delivery.failed ?? "--"}`;
   dom.metricDeliveryDetail.textContent = `${delivery.retry_ready ?? 0} 条可立即重试`;
   dom.metricChannels.textContent = `${channels.active ?? "--"} / ${channels.count ?? "--"}`;
-  dom.metricChannelsDetail.textContent = "active / total";
+  dom.metricChannelsDetail.textContent = "活跃通道 / 已配置通道";
   dom.metricProfiles.textContent = `${profiles.available ?? "--"} / ${profiles.count ?? "--"}`;
-  dom.metricProfilesDetail.textContent = "available / total";
+  dom.metricProfilesDetail.textContent = "可用 Profile / 已配置 Profile";
   dom.metricCron.textContent = `${cron.enabled ?? "--"} / ${cron.count ?? "--"}`;
   dom.metricCronDetail.textContent = `${cron.errored ?? 0} 个任务有错误`;
 }
@@ -504,7 +668,7 @@ function renderHealth(health) {
     .slice()
     .sort((left, right) => severityWeight(left.status) - severityWeight(right.status));
   dom.healthList.className = checks.length ? "check-list" : "check-list empty";
-  dom.healthSummary.textContent = `${health.status || "unknown"} | ok ${health.summary?.ok || 0}`;
+  dom.healthSummary.textContent = `${statusLabel(health.status)} | ${health.summary?.ok || 0} 项正常`;
   if (!checks.length) {
     dom.healthList.textContent = "没有健康检查数据";
     return;
@@ -534,80 +698,80 @@ function renderRuntime(runtime) {
   const sections = [
     {
       icon: "AG",
-      title: "Agents",
+      title: "智能体",
       value: `${runtime.agents?.count ?? 0} 个`,
       status: Number(runtime.agents?.count || 0) > 0 ? "ok" : "critical",
       summary: `${runtime.bindings?.count ?? 0} 条路由绑定`,
       chips: [
-        `agents ${runtime.agents?.count ?? 0}`,
-        `bindings ${runtime.bindings?.count ?? 0}`,
+        `智能体 ${runtime.agents?.count ?? 0}`,
+        `路由 ${runtime.bindings?.count ?? 0}`,
       ],
       rows: [
-        ["Agent IDs", (runtime.agents?.ids || []).join(", ") || "无"],
-        ["Route Bindings", `${runtime.bindings?.count ?? 0} 条`],
+        ["智能体 ID", (runtime.agents?.ids || []).join(", ") || "无"],
+        ["路由绑定", `${runtime.bindings?.count ?? 0} 条`],
       ],
     },
     {
       icon: "CH",
-      title: "Channels",
+      title: "通道",
       value: `${channels.active ?? 0}/${channels.count ?? 0}`,
       status: Number(channels.active || 0) > 0 ? "ok" : "warning",
       summary: "活跃通道 / 已配置通道",
       chips: [
-        `active ${channels.active ?? 0}`,
-        `total ${channels.count ?? 0}`,
+        `活跃 ${channels.active ?? 0}`,
+        `总数 ${channels.count ?? 0}`,
       ],
       rows: (channels.items || []).map((row) => [
         `${row.channel}:${row.account_id}`,
-        `${row.active ? "active" : "inactive"} | enabled=${row.enabled} | token=${row.has_token ? "configured" : "missing"}`,
+        `${row.active ? "活跃" : "未活跃"} | ${row.enabled ? "已启用" : "已停用"} | 密钥${row.has_token ? "已配置" : "缺失"}`,
       ]),
     },
     {
       icon: "AI",
-      title: "Profiles",
+      title: "模型 Profile",
       value: `${profiles.available ?? 0}/${profiles.count ?? 0}`,
       status: Number(profiles.available || 0) > 0 ? "ok" : "critical",
       summary: "可用模型 Profile / 总数",
       chips: [
-        `available ${profiles.available ?? 0}`,
-        `total ${profiles.count ?? 0}`,
+        `可用 ${profiles.available ?? 0}`,
+        `总数 ${profiles.count ?? 0}`,
       ],
       rows: (profiles.items || []).map((row) => [
         row.name || "profile",
-        `key=${row.has_key ? "configured" : "missing"} | cooldown=${row.cooldown_remaining || 0}s`,
+        `密钥${row.has_key ? "已配置" : "缺失"} | 冷却剩余 ${row.cooldown_remaining || 0}s`,
       ]),
     },
     {
       icon: "FX",
-      title: "Features",
+      title: "能力开关",
       value: features.web_search_enabled ? "Search On" : "Search Off",
       status: features.web_search_enabled && !features.web_search_has_key ? "warning" : "ok",
       summary: proactive.peer_id_configured ? "主动投递目标已配置" : "主动投递目标未完整配置",
       chips: [
-        features.web_search_enabled ? "web search on" : "web search off",
-        proactive.peer_id_configured ? "proactive ready" : "proactive missing",
+        features.web_search_enabled ? "联网搜索已开" : "联网搜索关闭",
+        proactive.peer_id_configured ? "主动投递可用" : "主动投递缺配置",
       ],
       rows: [
         [
-          "Web Search",
-          `${features.web_search_provider || "--"} | key=${features.web_search_has_key ? "configured" : "missing"}`,
+          "联网搜索",
+          `${features.web_search_provider || "--"} | 密钥${features.web_search_has_key ? "已配置" : "缺失"}`,
         ],
         [
-          "Proactive",
-          `${proactive.channel || "--"}:${proactive.account_id || "--"} -> ${proactive.agent_id || "--"} | peer=${proactive.peer_id_configured ? "configured" : "missing"}`,
+          "主动投递",
+          `${proactive.channel || "--"}:${proactive.account_id || "--"} -> ${proactive.agent_id || "--"} | 目标${proactive.peer_id_configured ? "已配置" : "缺失"}`,
         ],
       ],
     },
     {
       icon: "FS",
-      title: "Paths",
+      title: "本地目录",
       value: paths.workspace_exists && paths.data_dir_exists && paths.config_dir_exists ? "OK" : "Check",
       status: paths.workspace_exists && paths.data_dir_exists && paths.config_dir_exists ? "ok" : "critical",
       summary: "workspace / data / config",
       chips: [
-        paths.workspace_exists ? "workspace ok" : "workspace missing",
-        paths.data_dir_exists ? "data ok" : "data missing",
-        paths.config_dir_exists ? "config ok" : "config missing",
+        paths.workspace_exists ? "workspace 正常" : "workspace 缺失",
+        paths.data_dir_exists ? "data 正常" : "data 缺失",
+        paths.config_dir_exists ? "config 正常" : "config 缺失",
       ],
       rows: [
         ["workspace", paths.workspace_root || "--"],
@@ -642,7 +806,7 @@ function renderRuntime(runtime) {
     const details = document.createElement("details");
     details.className = "runtime-details";
     const summary = document.createElement("summary");
-    summary.textContent = "查看详情";
+    summary.textContent = "查看技术详情";
     details.appendChild(summary);
     const rows = section.rows.length ? section.rows : [["empty", "无数据"]];
     for (const [label, value] of rows) {
@@ -715,93 +879,138 @@ function renderDelivery(deliveryList) {
   clearNode(dom.deliveryTable);
   const items = Array.isArray(deliveryList.items) ? deliveryList.items : [];
   if (!items.length) {
-    dom.deliveryTable.className = "table-card empty";
-    dom.deliveryTable.textContent = `当前 ${deliveryList.state || dom.deliveryState.value} 队列为空`;
+    dom.deliveryTable.className = "delivery-cards empty";
+    dom.deliveryTable.textContent = `当前“${statusLabel(deliveryList.state || dom.deliveryState.value)}”队列为空`;
     return;
   }
-  dom.deliveryTable.className = "table-card";
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const headerRow = document.createElement("tr");
-  ["ID", "状态", "通道", "目标", "重试", "下次重试", "错误", "内容预览", "操作"].forEach((label) => {
-    appendText(headerRow, "th", label);
-  });
-  thead.appendChild(headerRow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
+  dom.deliveryTable.className = "delivery-cards";
   for (const item of items) {
-    const row = document.createElement("tr");
-    appendText(row, "td", item.id || "", "mono");
-    const stateCell = document.createElement("td");
-    stateCell.appendChild(badge(item.state));
-    row.appendChild(stateCell);
-    appendText(row, "td", item.channel || "--");
-    appendText(row, "td", item.to || "--", "mono");
-    appendText(row, "td", String(item.retry_count ?? 0));
-    appendText(
-      row,
-      "td",
-      item.retry_ready ? "ready" : `${item.next_retry_in_seconds ?? "--"}s`,
-    );
     const classification = classifyDeliveryError(item);
-    const errorCell = document.createElement("td");
-    const errorWrap = document.createElement("div");
-    errorWrap.className = "error-summary";
-    errorWrap.appendChild(badge(classification.severity));
-    appendText(errorWrap, "strong", classification.label);
-    appendText(errorWrap, "small", classification.suggestion);
-    if (item.last_error) {
-      appendText(errorWrap, "span", item.last_error, "preview");
-    }
-    errorCell.appendChild(errorWrap);
-    row.appendChild(errorCell);
-    appendText(row, "td", item.text || item.text_preview || "", "preview");
+    const card = document.createElement("article");
+    card.className = `delivery-card delivery-${normalizeStatus(item.state || classification.severity)}`;
 
-    const actions = document.createElement("td");
-    const actionWrap = document.createElement("div");
-    actionWrap.className = "row-actions";
-    appendButton(actionWrap, "详情", "button button-small", () => showDeliveryDetail(item));
-    appendButton(actionWrap, "复制ID", "button button-small", () => copyText(item.id || ""));
-    appendButton(actionWrap, "重试", "button button-small", () => retryDelivery(item.id, classification));
-    appendButton(actionWrap, "丢弃", "button button-small button-danger", () => discardDelivery(item.id, item.state, classification));
-    actions.appendChild(actionWrap);
-    row.appendChild(actions);
-    tbody.appendChild(row);
+    const head = document.createElement("div");
+    head.className = "delivery-card-head";
+    head.appendChild(badge(item.state || classification.severity));
+    const title = document.createElement("div");
+    appendText(title, "strong", `${item.channel || "未知通道"} -> ${shortId(item.to, 14, 6)}`, "delivery-title");
+    appendText(
+      title,
+      "small",
+      `投递 ${shortId(item.id, 10, 5)} · 已重试 ${item.retry_count ?? 0} 次 · ${
+        item.retry_ready ? "现在可重试" : `下次重试 ${item.next_retry_in_seconds ?? "--"} 秒后`
+      }`,
+      "delivery-meta",
+    );
+    head.appendChild(title);
+
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    appendButton(actions, "详情", "button button-small", () => showDeliveryDetail(item));
+    appendButton(actions, "复制 ID", "button button-small", () => copyText(item.id || ""));
+    appendButton(actions, "重试", "button button-small", () => retryDelivery(item.id, classification));
+    appendButton(actions, "丢弃", "button button-small button-danger", () => discardDelivery(item.id, item.state, classification));
+    head.appendChild(actions);
+    card.appendChild(head);
+
+    const reason = document.createElement("div");
+    reason.className = "delivery-reason";
+    reason.appendChild(badge(classification.severity));
+    const reasonText = document.createElement("div");
+    appendText(reasonText, "strong", classification.label);
+    appendText(reasonText, "small", classification.suggestion);
+    if (item.last_error) {
+      appendText(reasonText, "span", String(item.last_error).split("\n")[0], "preview");
+    }
+    reason.appendChild(reasonText);
+    card.appendChild(reason);
+
+    const text = item.text || item.text_preview || "";
+    if (text) {
+      appendText(card, "p", text, "delivery-preview");
+    }
+    dom.deliveryTable.appendChild(card);
   }
-  table.appendChild(tbody);
-  dom.deliveryTable.appendChild(table);
 }
 
 function renderCron(cronJobs) {
   clearNode(dom.cronList);
   const jobs = Array.isArray(cronJobs) ? cronJobs : [];
   dom.cronList.className = jobs.length ? "cron-list" : "cron-list empty";
-  dom.cronSummary.textContent = `${jobs.filter((job) => job.enabled).length}/${jobs.length} enabled`;
+  dom.cronSummary.textContent = `${jobs.filter((job) => job.enabled).length}/${jobs.length} 已启用`;
   if (!jobs.length) {
     dom.cronList.textContent = "没有 Cron 任务";
     return;
   }
-  for (const job of jobs) {
-    const item = document.createElement("div");
-    item.className = "cron-item";
-    const body = document.createElement("div");
-    appendText(body, "div", `${job.name || job.id || "unnamed"} (${job.id || "--"})`, "item-title");
-    appendText(
-      body,
-      "div",
-      `enabled=${Boolean(job.enabled)} | errors=${job.errors ?? 0} | next=${formatTimestamp(job.next_run)} | last=${formatTimestamp(job.last_run)}`,
-      "item-meta",
-    );
-    const trigger = document.createElement("button");
-    trigger.className = "button button-small";
-    trigger.type = "button";
-    trigger.textContent = "立即触发";
-    trigger.disabled = !job.id;
-    trigger.addEventListener("click", () => triggerCron(job.id, job.name || job.id));
-    item.append(body, trigger);
-    dom.cronList.appendChild(item);
+  for (const group of groupCronJobs(jobs)) {
+    const section = document.createElement("section");
+    section.className = "cron-group";
+    const head = document.createElement("div");
+    head.className = "cron-group-head";
+    appendText(head, "strong", group.title);
+    appendText(head, "span", `${group.jobs.filter((job) => job.enabled).length}/${group.jobs.length} 已启用`);
+    section.appendChild(head);
+    for (const job of group.jobs) {
+      const item = document.createElement("div");
+      item.className = `cron-item cron-${normalizeStatus(job.enabled ? "ok" : "muted")}`;
+      const body = document.createElement("div");
+      appendText(body, "div", job.name || job.config_id || job.id || "未命名任务", "item-title");
+      appendText(
+        body,
+        "div",
+        [
+          job.enabled ? "已启用" : "已停用",
+          `智能体 ${job.agent_id || "--"}`,
+          `任务 ${job.config_id || job.id || "--"}`,
+          `错误 ${job.errors ?? 0} 次`,
+        ].join(" · "),
+        "item-meta",
+      );
+      appendText(
+        body,
+        "div",
+        `下次运行：${formatTimestamp(job.next_run)} · 上次运行：${formatTimestamp(job.last_run)}`,
+        "item-meta",
+      );
+      if (job.source_file) {
+        appendText(body, "div", `配置来源：${job.source_file}`, "item-meta mono");
+      }
+      const trigger = document.createElement("button");
+      trigger.className = "button button-small";
+      trigger.type = "button";
+      trigger.textContent = "立即触发";
+      trigger.disabled = !job.id;
+      trigger.addEventListener("click", () => triggerCron(job.id, job.name || job.id));
+      item.append(body, trigger);
+      section.appendChild(item);
+    }
+    dom.cronList.appendChild(section);
   }
+}
+
+function groupCronJobs(jobs) {
+  const groups = new Map();
+  for (const job of jobs) {
+    const scope = job.scope || "global";
+    if (!groups.has(scope)) {
+      groups.set(scope, []);
+    }
+    groups.get(scope).push(job);
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => {
+      if (left === "global") {
+        return -1;
+      }
+      if (right === "global") {
+        return 1;
+      }
+      return left.localeCompare(right);
+    })
+    .map(([scope, rows]) => ({
+      title: scope === "global" ? "全局任务" : `智能体 ${scope}`,
+      jobs: rows.slice().sort((left, right) => String(left.config_id || left.id).localeCompare(String(right.config_id || right.id))),
+    }));
 }
 
 function renderEvents(payload) {
@@ -811,6 +1020,13 @@ function renderEvents(payload) {
     payload,
     emptyText: "暂无运行事件。发送一条消息、触发 Cron 或 flush 投递队列后会出现链路事件。",
     summaryLabel: "条事件",
+    collapsible: true,
+    expanded: state.eventsExpanded,
+    collapsedLimit: 8,
+    onToggle: () => {
+      state.eventsExpanded = !state.eventsExpanded;
+      renderEvents(payload);
+    },
   });
 }
 
@@ -831,35 +1047,26 @@ function renderTraces(payload) {
     summary.className = "trace-summary";
     summary.appendChild(badge(trace.severity === "critical" ? "error" : trace.severity));
     const title = document.createElement("div");
-    appendText(title, "strong", trace.correlationId, "mono");
+    appendText(title, "strong", trace.title);
     appendText(
       title,
       "small",
-      `${trace.events.length} events | ${trace.components.join(", ") || "no component"} | ${formatTimestamp(trace.start)} -> ${formatTimestamp(trace.end)}`,
+      `${trace.events.length} 个节点 · ${trace.componentLabels.join("、") || "未标记模块"} · ${formatShortTime(trace.start)} - ${formatShortTime(trace.end)} · 链路 ${shortId(trace.correlationId, 12, 6)}`,
     );
     summary.appendChild(title);
-    appendText(summary, "span", trace.lastType || "event", "trace-last-type");
+    appendText(summary, "span", eventLabel(trace.lastType), "trace-last-type");
     details.appendChild(summary);
     if (trace.lastError) {
-      appendText(details, "pre", trace.lastError, "event-error");
+      appendText(details, "pre", `最近错误：${trace.lastError}`, "event-error");
     }
     const timeline = document.createElement("div");
     timeline.className = "trace-timeline";
     for (const event of trace.events) {
       const row = document.createElement("div");
       row.className = `trace-event trace-event-${normalizeStatus(event.status)}`;
-      appendText(row, "span", formatTimestamp(event.timestamp), "event-time");
-      appendText(row, "strong", event.type || "event");
-      appendText(
-        row,
-        "small",
-        [
-          event.component || "",
-          event.agent_id ? `agent=${event.agent_id}` : "",
-          event.delivery_id ? `delivery=${event.delivery_id}` : "",
-          event.job_id ? `job=${event.job_id}` : "",
-        ].filter(Boolean).join(" | ") || event.message || "",
-      );
+      appendText(row, "span", formatShortTime(event.timestamp), "event-time");
+      appendText(row, "strong", eventLabel(event));
+      appendText(row, "small", `${statusLabel(event.status)} · ${describeEventContext(event)}`);
       timeline.appendChild(row);
     }
     details.appendChild(timeline);
@@ -892,8 +1099,10 @@ function buildTraces(events) {
       end: last.timestamp,
       lastType: last.type || "",
       lastError: errorEvents[errorEvents.length - 1]?.error || "",
+      title: `${eventLabel(sorted[0])} -> ${eventLabel(last)}`,
       severity: errorEvents.length ? "critical" : hasWarning ? "warning" : "ok",
       components: [...new Set(sorted.map((event) => event.component).filter(Boolean))],
+      componentLabels: [...new Set(sorted.map((event) => componentLabel(event.component)).filter(Boolean))],
     });
   }
   return traces.sort((left, right) => {
@@ -915,51 +1124,82 @@ function renderErrors(payload) {
   });
 }
 
-function renderEventList({ container, summary, payload, emptyText, summaryLabel }) {
+function renderEventList({
+  container,
+  summary,
+  payload,
+  emptyText,
+  summaryLabel,
+  collapsible = false,
+  expanded = true,
+  collapsedLimit = 8,
+  onToggle = null,
+}) {
   clearNode(container);
   const items = Array.isArray(payload?.items) ? payload.items.slice().reverse() : [];
-  summary.textContent = `${items.length} ${summaryLabel}`;
+  const visibleItems = collapsible && !expanded ? items.slice(0, collapsedLimit) : items;
+  summary.textContent = collapsible && items.length > collapsedLimit
+    ? `${items.length} ${summaryLabel}，当前显示 ${visibleItems.length} 条`
+    : `${items.length} ${summaryLabel}`;
   container.className = items.length ? "event-list" : "event-list empty";
   if (!items.length) {
     container.textContent = emptyText;
     return;
   }
-  for (const event of items) {
+  for (const event of visibleItems) {
     const item = document.createElement("div");
     item.className = `event-item event-${normalizeStatus(event.status)}`;
     const head = document.createElement("div");
     head.className = "event-head";
     head.appendChild(badge(event.status || "ok"));
-    appendText(head, "strong", event.type || "event");
-    appendText(head, "span", formatTimestamp(event.timestamp), "event-time");
+    const title = document.createElement("div");
+    appendText(title, "strong", eventLabel(event));
+    appendText(title, "small", describeEventContext(event), "event-context");
+    head.appendChild(title);
+    appendText(head, "span", formatShortTime(event.timestamp), "event-time");
     item.appendChild(head);
 
-    appendText(item, "div", event.message || "", "item-title");
-    const meta = [
-      event.component ? `component=${event.component}` : "",
-      event.correlation_id ? `corr=${event.correlation_id}` : "",
-      event.agent_id ? `agent=${event.agent_id}` : "",
-      event.session_key ? `session=${event.session_key}` : "",
-      event.channel ? `channel=${event.channel}` : "",
-      event.delivery_id ? `delivery=${event.delivery_id}` : "",
-      event.job_id ? `job=${event.job_id}` : "",
-    ].filter(Boolean);
-    appendText(item, "div", meta.join(" | ") || "no context", "item-meta");
+    appendText(item, "div", describeEventOutcome(event), "item-title");
+    appendText(item, "div", operatorHint(event), "item-meta");
     if (event.error) {
       appendText(item, "pre", event.error, "event-error");
     }
     const details = document.createElement("details");
     details.className = "runtime-details";
     const detailsSummary = document.createElement("summary");
-    detailsSummary.textContent = "事件详情";
+    detailsSummary.textContent = "查看技术详情";
     details.appendChild(detailsSummary);
-    const row = document.createElement("div");
-    row.className = "kv-row";
-    appendText(row, "span", "metadata");
-    appendText(row, "code", JSON.stringify(event.metadata || {}, null, 2));
-    details.appendChild(row);
+    const rows = [
+      ["correlation_id", event.correlation_id],
+      ["component", componentLabel(event.component)],
+      ["agent_id", event.agent_id],
+      ["session_key", event.session_key],
+      ["channel", event.channel],
+      ["account_id", event.account_id],
+      ["peer_id", event.peer_id],
+      ["delivery_id", event.delivery_id],
+      ["job_id", event.job_id],
+      ["metadata", JSON.stringify(event.metadata || {}, null, 2)],
+    ].filter(([, value]) => value !== undefined && value !== null && String(value) !== "");
+    for (const [label, value] of rows) {
+      const row = document.createElement("div");
+      row.className = "kv-row";
+      appendText(row, "span", DETAIL_LABELS[label] || label);
+      appendText(row, "code", value || "--");
+      details.appendChild(row);
+    }
     item.appendChild(details);
     container.appendChild(item);
+  }
+  if (collapsible && items.length > collapsedLimit) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "event-collapse-toggle";
+    more.textContent = expanded
+      ? "收起最近事件"
+      : `展开全部 ${items.length} 条事件`;
+    more.addEventListener("click", () => onToggle?.());
+    container.appendChild(more);
   }
 }
 
@@ -1060,19 +1300,19 @@ function showDeliveryDetail(item) {
   clearNode(dom.deliveryDetailBody);
   const classification = classifyDeliveryError(item);
   const rows = [
-    ["delivery_id", item.id || ""],
-    ["state", item.state || ""],
-    ["channel", item.channel || ""],
-    ["to", item.to || ""],
-    ["error_type", classification.code],
-    ["suggestion", classification.suggestion],
-    ["retry_count", String(item.retry_count ?? 0)],
-    ["retry_ready", String(Boolean(item.retry_ready))],
-    ["next_retry_at", formatTimestamp(item.next_retry_at)],
-    ["enqueued_at", formatTimestamp(item.enqueued_at)],
-    ["last_error", item.last_error || ""],
-    ["text", item.text || item.text_preview || ""],
-    ["metadata", JSON.stringify(item.metadata || {}, null, 2)],
+    ["投递 ID", item.id || ""],
+    ["当前状态", statusLabel(item.state)],
+    ["通道", item.channel || ""],
+    ["目标", item.to || ""],
+    ["问题类型", classification.label],
+    ["处理建议", classification.suggestion],
+    ["重试次数", String(item.retry_count ?? 0)],
+    ["是否可立即重试", item.retry_ready ? "是" : "否"],
+    ["下次重试时间", formatTimestamp(item.next_retry_at)],
+    ["入队时间", formatTimestamp(item.enqueued_at)],
+    ["最近错误", item.last_error || ""],
+    ["正文", item.text || item.text_preview || ""],
+    ["技术元数据", JSON.stringify(item.metadata || {}, null, 2)],
   ];
   for (const [label, value] of rows) {
     const row = document.createElement("div");

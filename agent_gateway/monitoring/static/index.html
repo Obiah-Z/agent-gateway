@@ -154,24 +154,24 @@
           </div>
           <div class="event-filters">
             <select id="event-component" aria-label="事件组件">
-              <option value="">all components</option>
-              <option value="dispatcher">dispatcher</option>
-              <option value="agent_loop">agent_loop</option>
-              <option value="tools">tools</option>
-              <option value="delivery">delivery</option>
-              <option value="cron">cron</option>
-              <option value="feishu">feishu</option>
+              <option value="">全部模块</option>
+              <option value="dispatcher">消息分发</option>
+              <option value="agent_loop">智能体执行</option>
+              <option value="tools">工具调用</option>
+              <option value="delivery">可靠投递</option>
+              <option value="cron">定时任务</option>
+              <option value="feishu">飞书接入</option>
             </select>
             <select id="event-status" aria-label="事件状态">
-              <option value="">all status</option>
-              <option value="ok">ok</option>
-              <option value="failed">failed</option>
-              <option value="error">error</option>
-              <option value="rejected">rejected</option>
-              <option value="ignored">ignored</option>
-              <option value="duplicate">duplicate</option>
+              <option value="">全部状态</option>
+              <option value="ok">正常</option>
+              <option value="failed">失败</option>
+              <option value="error">错误</option>
+              <option value="rejected">拒绝</option>
+              <option value="ignored">忽略</option>
+              <option value="duplicate">重复</option>
             </select>
-            <input id="event-correlation" type="text" placeholder="correlation_id" autocomplete="off" spellcheck="false" />
+            <input id="event-correlation" type="text" placeholder="按链路 ID 过滤" autocomplete="off" spellcheck="false" />
           </div>
           <div id="events-list" class="event-list empty">尚未加载运行事件</div>
         </article>
@@ -196,15 +196,15 @@
           </div>
           <div class="actions">
             <select id="delivery-state" aria-label="投递队列状态">
-              <option value="failed">failed</option>
-              <option value="pending">pending</option>
-              <option value="all">all</option>
+              <option value="failed">失败</option>
+              <option value="pending">待投递</option>
+              <option value="all">全部</option>
             </select>
             <label class="toggle compact">
               <input id="include-text" type="checkbox" />
               <span>完整正文</span>
             </label>
-            <button id="delivery-flush-btn" class="button" type="button">Flush</button>
+            <button id="delivery-flush-btn" class="button" type="button">立即投递</button>
           </div>
         </div>
         <div id="delivery-table" class="table-card empty">尚未加载投递队列</div>

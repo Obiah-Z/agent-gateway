@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover
 
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
+from agent_gateway.core.ids import normalize_agent_id
 from agent_gateway.core.models import ProactiveTarget
 from agent_gateway.news.collector import NewsCollector
 from agent_gateway.news.digest import build_digest_prompt
@@ -73,12 +74,15 @@ class CronJob:
     """从 CRON.json 解析出来的一条计划任务。"""
 
     id: str
+    config_id: str
     name: str
     enabled: bool
     schedule_kind: str
     schedule_config: dict[str, Any]
     payload: dict[str, Any]
     target: ProactiveTarget
+    scope: str = "global"
+    source_file: str = ""
     delete_after_run: bool = False
     consecutive_errors: int = 0
     last_run_at: float = 0.0
@@ -240,7 +244,7 @@ class HeartbeatService:
 
         stats = self.dispatcher.command_queue.stats()
         for lane_name, lane_stats in stats.items():
-            if lane_name.startswith("system:") or lane_name in {"heartbeat", "cron"}:
+            if lane_name.startswith("system:") or lane_name.startswith("cron:") or lane_name in {"heartbeat", "cron"}:
                 continue
             if lane_stats.get("active", 0) > 0 or lane_stats.get("queue_depth", 0) > 0:
                 return True
@@ -317,33 +321,72 @@ class CronService:
             self._task = None
 
     def load_jobs(self) -> None:
-        """从 CRON.json 加载任务定义并计算下一次运行时间。"""
+        """从全局 CRON.json 和 agents/<agent_id>/CRON.json 加载任务。"""
 
         self.jobs.clear()
-        if not self.cron_file.exists():
+        cron_files = self._discover_cron_files()
+        if not cron_files:
             return
+        seen_ids: set[str] = set()
         try:
-            payload = json.loads(self.cron_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return
-        now = time.time()
-        for row in payload.get("jobs", []):
-            schedule = row.get("schedule", {})
-            kind = schedule.get("kind", "")
-            if kind not in {"at", "every", "cron"}:
-                continue
-            job = CronJob(
-                id=row.get("id", ""),
-                name=row.get("name", ""),
-                enabled=row.get("enabled", True),
-                schedule_kind=kind,
-                schedule_config=schedule,
-                payload=row.get("payload", {}),
-                target=self._target_from_row(row),
-                delete_after_run=row.get("delete_after_run", False),
-            )
-            job.next_run_at = self._compute_next(job, now)
-            self.jobs.append(job)
+            now = time.time()
+            for cron_path, owner_agent_id in cron_files:
+                try:
+                    payload = json.loads(cron_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                for row in payload.get("jobs", []):
+                    schedule = row.get("schedule", {})
+                    kind = schedule.get("kind", "")
+                    if kind not in {"at", "every", "cron"}:
+                        continue
+                    config_id = str(row.get("id", "")).strip()
+                    if not config_id:
+                        continue
+                    scope = owner_agent_id or "global"
+                    job_id = self._build_job_id(config_id, owner_agent_id)
+                    if job_id in seen_ids:
+                        continue
+                    seen_ids.add(job_id)
+                    job = CronJob(
+                        id=job_id,
+                        config_id=config_id,
+                        name=row.get("name", ""),
+                        enabled=row.get("enabled", True),
+                        schedule_kind=kind,
+                        schedule_config=schedule,
+                        payload=row.get("payload", {}),
+                        target=self._target_from_row(row, owner_agent_id=owner_agent_id),
+                        scope=scope,
+                        source_file=str(cron_path.relative_to(self.settings.workspace_root)),
+                        delete_after_run=row.get("delete_after_run", False),
+                    )
+                    job.next_run_at = self._compute_next(job, now)
+                    self.jobs.append(job)
+        finally:
+            self.jobs.sort(key=lambda item: (item.scope, item.config_id))
+
+    def _discover_cron_files(self) -> list[tuple[Path, str]]:
+        """返回待加载的 Cron 文件；第二项为空表示全局任务。"""
+
+        files: list[tuple[Path, str]] = []
+        if self.cron_file.exists():
+            files.append((self.cron_file, ""))
+        agents_root = self.settings.workspace_root / "agents"
+        if agents_root.exists():
+            for cron_path in sorted(agents_root.glob("*/CRON.json")):
+                agent_id = normalize_agent_id(cron_path.parent.name)
+                if agent_id:
+                    files.append((cron_path, agent_id))
+        return files
+
+    @staticmethod
+    def _build_job_id(config_id: str, owner_agent_id: str = "") -> str:
+        if not owner_agent_id:
+            return config_id
+        if config_id.startswith(f"{owner_agent_id}:"):
+            return config_id
+        return f"{owner_agent_id}:{config_id}"
 
     def list_jobs(self) -> list[dict[str, Any]]:
         """导出任务状态给 control plane。"""
@@ -355,9 +398,13 @@ class CronService:
             result.append(
                 {
                     "id": job.id,
+                    "config_id": job.config_id,
                     "name": job.name,
                     "enabled": job.enabled,
                     "kind": job.schedule_kind,
+                    "agent_id": job.target.agent_id,
+                    "scope": job.scope,
+                    "source_file": job.source_file,
                     "errors": job.consecutive_errors,
                     "last_run": (
                         datetime.fromtimestamp(job.last_run_at, tz=timezone.utc).isoformat()
@@ -377,11 +424,25 @@ class CronService:
     async def trigger_job(self, job_id: str) -> str:
         """手动触发指定任务。"""
 
-        for job in self.jobs:
-            if job.id == job_id:
-                await self._run_job(job, time.time())
-                return f"'{job.name}' triggered (errors={job.consecutive_errors})"
+        job = self._resolve_job(job_id)
+        if job is not None:
+            await self._run_job(job, time.time())
+            return f"'{job.name}' triggered (errors={job.consecutive_errors})"
         return f"Job '{job_id}' not found"
+
+    def _resolve_job(self, job_id: str) -> CronJob | None:
+        """按完整 ID 查找；若原始配置 ID 不冲突，也允许按 config_id 查找。"""
+
+        normalized = str(job_id or "").strip()
+        if not normalized:
+            return None
+        for job in self.jobs:
+            if job.id == normalized:
+                return job
+        matches = [job for job in self.jobs if job.config_id == normalized]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     async def _loop(self) -> None:
         """后台轮询入口。"""
@@ -436,7 +497,7 @@ class CronService:
                         prompt=message,
                         channel="cron",
                         mode="minimal",
-                        lane_name="cron",
+                        lane_name=f"cron:{job.target.agent_id}",
                         correlation_id=correlation_id,
                     )
                     output = reply.text
@@ -470,6 +531,9 @@ class CronService:
 
         entry = {
             "job_id": job.id,
+            "config_id": job.config_id,
+            "agent_id": job.target.agent_id,
+            "scope": job.scope,
             "run_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "status": status,
             "output_preview": output[:200],
@@ -483,7 +547,13 @@ class CronService:
             pass
 
         if output and status != "skipped":
-            metadata: dict[str, object] = {"kind": "cron", "job_id": job.id}
+            metadata: dict[str, object] = {
+                "kind": "cron",
+                "job_id": job.id,
+                "cron_config_id": job.config_id,
+                "cron_scope": job.scope,
+                "agent_id": job.target.agent_id,
+            }
             metadata["correlation_id"] = correlation_id
             if delivered_news_items:
                 metadata.update(
@@ -562,7 +632,7 @@ class CronService:
             prompt=prompt,
             channel="cron",
             mode="minimal",
-            lane_name="cron",
+            lane_name=f"cron:{job.target.agent_id}",
             correlation_id=correlation_id,
         )
         return reply.text, "ok", list(result.items)
@@ -607,7 +677,7 @@ class CronService:
 
         return 0.0
 
-    def _target_from_row(self, row: dict[str, Any]) -> ProactiveTarget:
+    def _target_from_row(self, row: dict[str, Any], *, owner_agent_id: str = "") -> ProactiveTarget:
         """从任务定义中恢复主动投递目标。"""
 
         target = row.get("target") or row.get("payload", {}).get("target") or {}
@@ -615,7 +685,7 @@ class CronService:
             channel=target.get("channel", self.default_target.channel),
             account_id=target.get("account_id", self.default_target.account_id),
             peer_id=target.get("peer_id", self.default_target.peer_id),
-            agent_id=target.get("agent_id", self.default_target.agent_id),
+            agent_id=normalize_agent_id(target.get("agent_id", owner_agent_id or self.default_target.agent_id)),
         )
 
     def _record_cron_event(
@@ -646,6 +716,9 @@ class CronService:
                 error=error,
                 metadata={
                     "job_name": job.name,
+                    "config_id": job.config_id,
+                    "scope": job.scope,
+                    "source_file": job.source_file,
                     "schedule_kind": job.schedule_kind,
                     **(metadata or {}),
                 },

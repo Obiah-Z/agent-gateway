@@ -16,55 +16,6 @@
       "delete_after_run": false
     },
     {
-      "id": "dep-security-scan",
-      "name": "依赖安全扫描",
-      "enabled": true,
-      "schedule": {
-        "kind": "cron",
-        "expr": "0 9 * * 1",
-        "tz": "Asia/Shanghai"
-      },
-      "payload": {
-        "kind": "agent_turn",
-        "message": "对项目依赖执行一次安全审计，如果发现严重漏洞，给出明确报告。"
-      },
-      "delete_after_run": false
-    },
-    {
-      "id": "agent-news-digest",
-      "name": "AI Agent 每日简报",
-      "enabled": true,
-      "schedule": {
-        "kind": "cron",
-        "expr": "30 9 * * *",
-        "tz": "Asia/Shanghai"
-      },
-      "payload": {
-        "kind": "agent_news_digest",
-        "sources_file": "agent-news-sources.json",
-        "lookback_hours": 24,
-        "max_items": 6,
-        "per_source_max_items": 3,
-        "skip_if_empty": true,
-        "timeout_seconds": 12
-      },
-      "delete_after_run": false
-    },
-    {
-      "id": "remind-meeting",
-      "name": "会议提醒",
-      "enabled": true,
-      "schedule": {
-        "kind": "at",
-        "at": "2026-02-25T09:30:00+08:00"
-      },
-      "payload": {
-        "kind": "system_event",
-        "text": "提醒：你今天上午 10:00 有一场团队会议。"
-      },
-      "delete_after_run": true
-    },
-    {
       "id": "health-check",
       "name": "系统健康检查",
       "enabled": true,
