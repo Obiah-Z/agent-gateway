@@ -514,12 +514,21 @@ class GatewayServer:
             event_type=str(params.get("type", "")),
             component=str(params.get("component", "")),
             status=str(params.get("status", "")),
+            correlation_id=str(params.get("correlation_id", "")),
+            agent_id=str(params.get("agent_id", "")),
+            channel=str(params.get("channel", "")),
+            job_id=str(params.get("job_id", "")),
+            delivery_id=str(params.get("delivery_id", "")),
         )
 
     async def _m_errors_recent(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
-        return self.control_plane.recent_errors(limit=int(params.get("limit", 50)))
+        return self.control_plane.recent_errors(
+            limit=int(params.get("limit", 50)),
+            component=str(params.get("component", "")),
+            correlation_id=str(params.get("correlation_id", "")),
+        )
 
     async def _m_ingest(self, params: dict[str, Any]) -> dict[str, Any]:
         inbound = InboundMessage(

@@ -132,6 +132,9 @@ const dom = {
   runtimeList: $("#runtime-list"),
   tracesSummary: $("#traces-summary"),
   tracesList: $("#traces-list"),
+  eventComponent: $("#event-component"),
+  eventStatus: $("#event-status"),
+  eventCorrelation: $("#event-correlation"),
   eventsSummary: $("#events-summary"),
   eventsList: $("#events-list"),
   errorsSummary: $("#errors-summary"),
@@ -331,6 +334,36 @@ async function rpc(method, params = {}) {
   return state.client.call(method, params);
 }
 
+function buildEventQuery(base = {}) {
+  const params = { ...base };
+  const component = dom.eventComponent.value.trim();
+  const status = dom.eventStatus.value.trim();
+  const correlationId = dom.eventCorrelation.value.trim();
+  if (component) {
+    params.component = component;
+  }
+  if (status) {
+    params.status = status;
+  }
+  if (correlationId) {
+    params.correlation_id = correlationId;
+  }
+  return params;
+}
+
+function buildErrorQuery(base = {}) {
+  const params = { ...base };
+  const component = dom.eventComponent.value.trim();
+  const correlationId = dom.eventCorrelation.value.trim();
+  if (component) {
+    params.component = component;
+  }
+  if (correlationId) {
+    params.correlation_id = correlationId;
+  }
+  return params;
+}
+
 async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
@@ -345,8 +378,8 @@ async function refreshAll() {
         include_text: dom.includeText.checked,
       }),
       rpc("cron.list"),
-      rpc("events.tail", { limit: 80 }),
-      rpc("errors.recent", { limit: 40 }),
+      rpc("events.tail", buildEventQuery({ limit: 80 })),
+      rpc("errors.recent", buildErrorQuery({ limit: 40 })),
     ]);
     renderSummary(health, runtime, deliveryStats);
     renderIssues(buildIssues(health, runtime, deliveryStats));
@@ -1085,6 +1118,13 @@ async function bootstrap() {
   dom.refreshBtn.addEventListener("click", refreshAll);
   dom.deliveryState.addEventListener("change", refreshAll);
   dom.includeText.addEventListener("change", refreshAll);
+  dom.eventComponent.addEventListener("change", refreshAll);
+  dom.eventStatus.addEventListener("change", refreshAll);
+  dom.eventCorrelation.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      refreshAll();
+    }
+  });
   dom.deliveryFlushBtn.addEventListener("click", flushDelivery);
   dom.autoRefresh.addEventListener("change", restartAutoRefresh);
   dom.deliveryDetailClose.addEventListener("click", closeDeliveryDetail);

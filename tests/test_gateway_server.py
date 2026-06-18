@@ -162,6 +162,7 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
         status="ok",
         component="dispatcher",
         message="resolved",
+        correlation_id="corr-route",
         agent_id="main",
     )
     event_store.record(
@@ -169,6 +170,7 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
         status="failed",
         component="delivery",
         message="failed",
+        correlation_id="corr-delivery",
         error="channel unavailable",
     )
     control = GatewayControlPlane(
@@ -189,10 +191,30 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
 
     events = asyncio.run(server._m_events_tail({"limit": 10}))
     errors = asyncio.run(server._m_errors_recent({"limit": 10}))
+    filtered_events = asyncio.run(
+        server._m_events_tail(
+            {
+                "limit": 10,
+                "component": "delivery",
+                "correlation_id": "corr-delivery",
+            }
+        )
+    )
+    filtered_errors = asyncio.run(
+        server._m_errors_recent(
+            {
+                "limit": 10,
+                "component": "delivery",
+                "correlation_id": "corr-delivery",
+            }
+        )
+    )
 
     assert events["configured"] is True
     assert [event["type"] for event in events["items"]] == ["route.resolved", "delivery.failed"]
     assert [event["type"] for event in errors["items"]] == ["delivery.failed"]
+    assert [event["type"] for event in filtered_events["items"]] == ["delivery.failed"]
+    assert [event["type"] for event in filtered_errors["items"]] == ["delivery.failed"]
 
 
 def test_gateway_server_ignores_websocket_disconnect_during_send(tmp_path) -> None:

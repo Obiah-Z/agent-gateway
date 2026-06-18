@@ -34,12 +34,32 @@ def test_runtime_event_store_tails_events_and_filters_errors(tmp_path: Path) -> 
 def test_runtime_event_store_supports_tail_filters(tmp_path: Path) -> None:
     store = RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl")
     store.record("agent.turn.started", status="ok", component="agent_loop", message="start")
-    store.record("cron.failed", status="error", component="cron", message="fail")
+    store.record(
+        "cron.failed",
+        status="error",
+        component="cron",
+        message="fail",
+        correlation_id="corr-cron",
+        agent_id="research",
+        channel="cron",
+        job_id="agent-news-digest",
+    )
 
-    events = store.tail(limit=10, component="cron")
+    events = store.tail(
+        limit=10,
+        component="cron",
+        correlation_id="corr-cron",
+        agent_id="research",
+        channel="cron",
+        job_id="agent-news-digest",
+    )
 
     assert len(events) == 1
     assert events[0]["type"] == "cron.failed"
+
+    assert store.tail(limit=10, component="delivery") == []
+    assert store.recent_errors(limit=10, component="cron")[0]["type"] == "cron.failed"
+    assert store.recent_errors(limit=10, correlation_id="missing") == []
 
 
 def test_ensure_correlation_id_reuses_or_generates_value() -> None:

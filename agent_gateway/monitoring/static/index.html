@@ -152,6 +152,27 @@
             </div>
             <span id="events-summary" class="pill">暂无数据</span>
           </div>
+          <div class="event-filters">
+            <select id="event-component" aria-label="事件组件">
+              <option value="">all components</option>
+              <option value="dispatcher">dispatcher</option>
+              <option value="agent_loop">agent_loop</option>
+              <option value="tools">tools</option>
+              <option value="delivery">delivery</option>
+              <option value="cron">cron</option>
+              <option value="feishu">feishu</option>
+            </select>
+            <select id="event-status" aria-label="事件状态">
+              <option value="">all status</option>
+              <option value="ok">ok</option>
+              <option value="failed">failed</option>
+              <option value="error">error</option>
+              <option value="rejected">rejected</option>
+              <option value="ignored">ignored</option>
+              <option value="duplicate">duplicate</option>
+            </select>
+            <input id="event-correlation" type="text" placeholder="correlation_id" autocomplete="off" spellcheck="false" />
+          </div>
           <div id="events-list" class="event-list empty">尚未加载运行事件</div>
         </article>
 

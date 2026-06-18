@@ -128,8 +128,14 @@ class RuntimeEventStore:
         event_type: str = "",
         component: str = "",
         status: str = "",
+        correlation_id: str = "",
+        agent_id: str = "",
+        channel: str = "",
+        job_id: str = "",
+        delivery_id: str = "",
     ) -> list[dict[str, Any]]:
-        rows = self._read_tail(max(1, min(int(limit), 500)))
+        safe_limit = max(1, min(int(limit), 500))
+        rows = self._read_tail(max(safe_limit, min(safe_limit * 5, 2000)))
         filtered = []
         for row in rows:
             if event_type and row.get("type") != event_type:
@@ -138,16 +144,36 @@ class RuntimeEventStore:
                 continue
             if status and row.get("status") != status:
                 continue
+            if correlation_id and row.get("correlation_id") != correlation_id:
+                continue
+            if agent_id and row.get("agent_id") != agent_id:
+                continue
+            if channel and row.get("channel") != channel:
+                continue
+            if job_id and row.get("job_id") != job_id:
+                continue
+            if delivery_id and row.get("delivery_id") != delivery_id:
+                continue
             filtered.append(row)
-        return filtered[-max(1, min(int(limit), 500)) :]
+        return filtered[-safe_limit:]
 
-    def recent_errors(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def recent_errors(
+        self,
+        *,
+        limit: int = 50,
+        component: str = "",
+        correlation_id: str = "",
+    ) -> list[dict[str, Any]]:
         rows = self._read_tail(max(50, min(int(limit) * 5, 1000)))
         errors = [
             row
             for row in rows
             if row.get("error") or str(row.get("status", "")).lower() in ERROR_STATUSES
         ]
+        if component:
+            errors = [row for row in errors if row.get("component") == component]
+        if correlation_id:
+            errors = [row for row in errors if row.get("correlation_id") == correlation_id]
         return errors[-max(1, min(int(limit), 200)) :]
 
     def _append(self, row: dict[str, Any]) -> None:

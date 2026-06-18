@@ -587,6 +587,23 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.event-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, 1.4fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.event-filters input,
+.event-filters select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
 .check-list,
 .runtime-list,
 .cron-list,

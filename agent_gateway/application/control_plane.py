@@ -146,6 +146,11 @@ class GatewayControlPlane:
         event_type: str = "",
         component: str = "",
         status: str = "",
+        correlation_id: str = "",
+        agent_id: str = "",
+        channel: str = "",
+        job_id: str = "",
+        delivery_id: str = "",
     ) -> dict[str, Any]:
         if self.event_store is None:
             return {"items": [], "count": 0, "configured": False}
@@ -154,6 +159,11 @@ class GatewayControlPlane:
             event_type=event_type,
             component=component,
             status=status,
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            channel=channel,
+            job_id=job_id,
+            delivery_id=delivery_id,
         )
         return {
             "items": items,
@@ -162,10 +172,20 @@ class GatewayControlPlane:
             "limit": max(1, min(int(limit), 500)),
         }
 
-    def recent_errors(self, *, limit: int = 50) -> dict[str, Any]:
+    def recent_errors(
+        self,
+        *,
+        limit: int = 50,
+        component: str = "",
+        correlation_id: str = "",
+    ) -> dict[str, Any]:
         if self.event_store is None:
             return {"items": [], "count": 0, "configured": False}
-        items = self.event_store.recent_errors(limit=limit)
+        items = self.event_store.recent_errors(
+            limit=limit,
+            component=component,
+            correlation_id=correlation_id,
+        )
         return {
             "items": items,
             "count": len(items),

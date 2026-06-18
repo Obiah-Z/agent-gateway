@@ -187,21 +187,11 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 13.3：事件筛选与查询参数增强
 
-目标：
-
-- 让事件查询从“只看最近列表”升级为“按条件定位问题”。
-
-计划项：
-
-1. `events.tail` 支持 `correlation_id`、`agent_id`、`channel`、`job_id`、`delivery_id` 过滤。
-2. Dashboard 增加 component/status/type/correlation_id 基础筛选。
-3. 最近错误面板支持只看 delivery、model、tool、feishu、cron。
-4. 增加测试覆盖组合过滤。
-
-完成标准：
-
-- 可以通过控制面按链路 ID 或资源 ID 查到相关事件。
-- Dashboard 中事件量增加后仍能快速收敛范围。
+- 已完成事件筛选与查询参数增强。
+- `events.tail` 支持 `component`、`status`、`correlation_id`、`agent_id`、`channel`、`job_id`、`delivery_id` 过滤。
+- `errors.recent` 支持 `component` 和 `correlation_id` 过滤。
+- Dashboard 增加 component/status/correlation_id 基础筛选。
+- 测试覆盖事件存储过滤和控制面参数透传。
 
 ### Phase 13.4：事件文件轮转与保留策略
 
