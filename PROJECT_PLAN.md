@@ -167,6 +167,29 @@ cd ~/Desktop/claw0/gateway
 - Dashboard 新增最近事件与最近错误视图。
 - 测试覆盖事件存储、控制面入口和投递事件。
 
+### Phase 13.1：事件链路关联增强
+
+目标：
+
+- 让一次消息或一次后台任务从入站到投递结果具备同一个 `correlation_id`。
+- Dashboard 后续可以按链路聚合，而不是只展示散列事件列表。
+
+计划项：
+
+1. 入站消息进入 dispatcher 时生成或复用 `correlation_id`。
+2. 将 `correlation_id` 写入 `InboundMessage.metadata`。
+3. `route.resolved`、`agent.turn.*`、`tool.call.*`、`delivery.enqueued` 复用同一个 `correlation_id`。
+4. 投递队列 metadata 持久化 `correlation_id`，`delivery.sent/failed` 从队列恢复。
+5. Cron、Heartbeat 等主动任务生成任务级 `correlation_id`。
+6. 飞书 Webhook 优先使用 `event_id/message_id` 派生 `correlation_id`。
+7. 增加测试覆盖同一轮消息的事件链路关联。
+
+完成标准：
+
+- 一条用户消息产生的主要事件拥有相同 `correlation_id`。
+- 一条投递失败事件可以反查到对应入站、路由和 Agent 执行事件。
+- 后续 Dashboard 可以基于 `correlation_id` 做链路折叠展示。
+
 ## 当前主要边界
 
 - 当前仍是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。

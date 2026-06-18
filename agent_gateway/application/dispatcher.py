@@ -21,7 +21,7 @@ from agent_gateway.core.models import (
 from agent_gateway.core.router import BindingTable, resolve_route
 from agent_gateway.application.lanes import CommandQueue
 from agent_gateway.application.loop import AgentLoopRunner
-from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.events import RuntimeEventStore, ensure_correlation_id, new_correlation_id
 
 
 class GatewayDispatcher:
@@ -56,11 +56,13 @@ class GatewayDispatcher:
         写入，避免并发消息互相覆盖会话历史。
         """
 
+        correlation_id = ensure_correlation_id(inbound.metadata, prefix=inbound.channel or "inbound")
         self._record(
             "inbound.received",
             status="ok",
             component="dispatcher",
             message="Inbound message received",
+            correlation_id=correlation_id,
             channel=inbound.channel,
             account_id=inbound.account_id,
             peer_id=inbound.peer_id,
@@ -77,6 +79,7 @@ class GatewayDispatcher:
             status="ok",
             component="dispatcher",
             message=f"Route resolved to agent '{route.agent_id}'",
+            correlation_id=correlation_id,
             agent_id=route.agent_id,
             session_key=route.session_key,
             channel=inbound.channel,
@@ -97,6 +100,7 @@ class GatewayDispatcher:
                     route.session_key,
                     inbound.text,
                     channel=inbound.channel,
+                    correlation_id=correlation_id,
                 ),
             )
         except Exception as exc:
@@ -105,6 +109,7 @@ class GatewayDispatcher:
                 status="error",
                 component="dispatcher",
                 message="Agent turn failed",
+                correlation_id=correlation_id,
                 agent_id=route.agent_id,
                 session_key=route.session_key,
                 channel=inbound.channel,
@@ -124,14 +129,17 @@ class GatewayDispatcher:
         channel: str,
         mode: str = "minimal",
         lane_name: str = "",
+        correlation_id: str = "",
     ) -> AgentReply:
         """处理 heartbeat、cron 等系统主动任务。"""
 
+        correlation_id = correlation_id or new_correlation_id(channel or "task")
         self._record(
             "agent.task.started",
             status="ok",
             component="dispatcher",
             message="Background agent task queued",
+            correlation_id=correlation_id,
             agent_id=agent_id,
             session_key=session_key,
             channel=channel,
@@ -145,6 +153,7 @@ class GatewayDispatcher:
                 user_text=prompt,
                 channel=channel,
                 mode=mode,
+                correlation_id=correlation_id,
             ),
         )
 
@@ -179,6 +188,7 @@ class GatewayDispatcher:
 
         del channels
         metadata = dict(result.inbound.metadata)
+        correlation_id = ensure_correlation_id(metadata, prefix=result.inbound.channel or "reply")
         metadata.update(
             {
                 "account_id": result.inbound.account_id,
@@ -201,6 +211,7 @@ class GatewayDispatcher:
             status="ok",
             component="dispatcher",
             message="Reply enqueued for delivery",
+            correlation_id=correlation_id,
             agent_id=result.reply.agent_id,
             session_key=result.reply.session_key,
             channel=result.inbound.channel,
@@ -230,6 +241,10 @@ class GatewayDispatcher:
 
         del channels
         payload = dict(metadata or {})
+        correlation_id = ensure_correlation_id(
+            payload,
+            prefix=f"{target.channel}-{target.agent_id}" if target.channel else "proactive",
+        )
         payload.update(
             {
                 "account_id": target.account_id,
@@ -249,6 +264,7 @@ class GatewayDispatcher:
             status="ok",
             component="dispatcher",
             message="Proactive message enqueued for delivery",
+            correlation_id=correlation_id,
             agent_id=target.agent_id,
             channel=target.channel,
             account_id=target.account_id,

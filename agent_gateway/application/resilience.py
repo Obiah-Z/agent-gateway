@@ -394,6 +394,7 @@ class ResilienceRunner:
                 status=status,
                 component="tools",
                 message=message,
+                correlation_id=str(context.get("correlation_id", "")),
                 agent_id=str(context.get("agent_id", "")),
                 session_key=str(context.get("session_key", "")),
                 channel=str(context.get("channel", "")),

@@ -27,11 +27,45 @@ from agent_gateway.news.digest import build_digest_prompt
 from agent_gateway.news.models import NewsItem
 from agent_gateway.news.store import NewsDigestStore
 from agent_gateway.application.dispatcher import GatewayDispatcher
-from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.events import RuntimeEventStore, new_correlation_id
 
 
 DEFAULT_CRON_DISABLE_THRESHOLD = 5
 NEWS_DIGEST_ACK_METADATA_KEY = "news_digest_items"
+
+
+async def _dispatch_background_with_correlation(
+    dispatcher: GatewayDispatcher,
+    *,
+    agent_id: str,
+    session_key: str,
+    prompt: str,
+    channel: str,
+    mode: str,
+    lane_name: str,
+    correlation_id: str,
+) -> AgentReply:
+    try:
+        return await dispatcher.dispatch_background(
+            agent_id=agent_id,
+            session_key=session_key,
+            prompt=prompt,
+            channel=channel,
+            mode=mode,
+            lane_name=lane_name,
+            correlation_id=correlation_id,
+        )
+    except TypeError as exc:
+        if "correlation_id" not in str(exc):
+            raise
+        return await dispatcher.dispatch_background(
+            agent_id=agent_id,
+            session_key=session_key,
+            prompt=prompt,
+            channel=channel,
+            mode=mode,
+            lane_name=lane_name,
+        )
 
 
 @dataclass(slots=True)
@@ -164,14 +198,17 @@ class HeartbeatService:
             return "HEARTBEAT.md is empty"
 
         self.running = True
+        correlation_id = new_correlation_id("heartbeat")
         try:
-            reply = await self.dispatcher.dispatch_background(
+            reply = await _dispatch_background_with_correlation(
+                self.dispatcher,
                 agent_id=self.default_target.agent_id,
                 session_key=f"system:heartbeat:{self.default_target.agent_id}",
                 prompt=instructions,
                 channel="heartbeat",
                 mode="minimal",
                 lane_name="heartbeat",
+                correlation_id=correlation_id,
             )
             meaningful = self._parse_response(reply.text)
             self.last_run_at = time.time()
@@ -184,7 +221,7 @@ class HeartbeatService:
                 self.channels,
                 self.default_target,
                 meaningful,
-                metadata={"kind": "heartbeat"},
+                metadata={"kind": "heartbeat", "correlation_id": correlation_id},
             )
             return f"heartbeat delivered ({len(meaningful)} chars)"
         finally:
@@ -377,11 +414,13 @@ class CronService:
         kind = payload.get("kind", "")
         output, status, error = "", "ok", ""
         delivered_news_items: list[NewsItem] = []
+        correlation_id = new_correlation_id(f"cron-{job.id}" if job.id else "cron")
         self._record_cron_event(
             "cron.triggered",
             job,
             status="ok",
             message=f"Cron job triggered: {job.id}",
+            correlation_id=correlation_id,
             metadata={"payload_kind": kind},
         )
         try:
@@ -390,13 +429,15 @@ class CronService:
                 if not message:
                     output, status = "[empty message]", "skipped"
                 else:
-                    reply = await self.dispatcher.dispatch_background(
+                    reply = await _dispatch_background_with_correlation(
+                        self.dispatcher,
                         agent_id=job.target.agent_id,
                         session_key=f"system:cron:{job.id}",
                         prompt=message,
                         channel="cron",
                         mode="minimal",
                         lane_name="cron",
+                        correlation_id=correlation_id,
                     )
                     output = reply.text
             elif kind == "system_event":
@@ -407,6 +448,7 @@ class CronService:
                 output, status, delivered_news_items = await self._run_agent_news_digest(
                     job,
                     payload,
+                    correlation_id=correlation_id,
                 )
             else:
                 output = f"[unknown kind: {kind}]"
@@ -442,6 +484,7 @@ class CronService:
 
         if output and status != "skipped":
             metadata: dict[str, object] = {"kind": "cron", "job_id": job.id}
+            metadata["correlation_id"] = correlation_id
             if delivered_news_items:
                 metadata.update(
                     {
@@ -462,6 +505,7 @@ class CronService:
             job,
             status="ok" if status != "error" else "error",
             message=f"Cron job {status}: {job.id}",
+            correlation_id=correlation_id,
             error=error,
             metadata={
                 "payload_kind": kind,
@@ -474,6 +518,8 @@ class CronService:
         self,
         job: CronJob,
         payload: dict[str, Any],
+        *,
+        correlation_id: str,
     ) -> tuple[str, str, list[NewsItem]]:
         """拉取新闻源、生成摘要 prompt，并把摘要交给目标 Agent 处理。"""
 
@@ -509,13 +555,15 @@ class CronService:
             max_output_items=max_items,
             errors=result.errors,
         )
-        reply = await self.dispatcher.dispatch_background(
+        reply = await _dispatch_background_with_correlation(
+            self.dispatcher,
             agent_id=job.target.agent_id,
             session_key=f"system:cron:{job.id}",
             prompt=prompt,
             channel="cron",
             mode="minimal",
             lane_name="cron",
+            correlation_id=correlation_id,
         )
         return reply.text, "ok", list(result.items)
 
@@ -577,6 +625,7 @@ class CronService:
         *,
         status: str,
         message: str,
+        correlation_id: str = "",
         error: str | Exception = "",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -588,6 +637,7 @@ class CronService:
                 status=status,
                 component="cron",
                 message=message,
+                correlation_id=correlation_id,
                 agent_id=job.target.agent_id,
                 channel=job.target.channel,
                 account_id=job.target.account_id,

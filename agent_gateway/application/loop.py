@@ -50,6 +50,7 @@ class AgentLoopRunner:
         user_text: str,
         *,
         channel: str = "gateway",
+        correlation_id: str = "",
     ) -> AgentReply:
         """用户对话入口，默认使用完整 prompt 和记忆上下文。"""
 
@@ -59,6 +60,7 @@ class AgentLoopRunner:
             user_text=user_text,
             channel=channel,
             mode="full",
+            correlation_id=correlation_id,
         )
 
     async def run_task_turn(
@@ -69,6 +71,7 @@ class AgentLoopRunner:
         user_text: str,
         channel: str,
         mode: str,
+        correlation_id: str = "",
     ) -> AgentReply:
         """执行一次 Agent 轮次。
 
@@ -86,6 +89,7 @@ class AgentLoopRunner:
             status="ok",
             component="agent_loop",
             message=f"Agent turn started: {agent_id}",
+            correlation_id=correlation_id,
             agent_id=agent_id,
             session_key=session_key,
             channel=channel,
@@ -113,6 +117,7 @@ class AgentLoopRunner:
             "agent_id": agent_id,
             "session_key": session_key,
             "channel": channel,
+            "correlation_id": correlation_id,
         }
         try:
             result = await asyncio.to_thread(
@@ -129,6 +134,7 @@ class AgentLoopRunner:
                 status="ok",
                 component="agent_loop",
                 message=f"Agent turn completed: {agent_id}",
+                correlation_id=correlation_id,
                 agent_id=agent_id,
                 session_key=session_key,
                 channel=channel,
@@ -154,6 +160,7 @@ class AgentLoopRunner:
                 status="error",
                 component="agent_loop",
                 message=f"Agent turn failed: {agent_id}",
+                correlation_id=correlation_id,
                 agent_id=agent_id,
                 session_key=session_key,
                 channel=channel,

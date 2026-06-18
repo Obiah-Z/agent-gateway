@@ -7,10 +7,20 @@ from agent_gateway.models import AgentConfig, Binding, InboundMessage
 from agent_gateway.router import BindingTable
 from agent_gateway.application.dispatcher import GatewayDispatcher
 from agent_gateway.application.lanes import CommandQueue
+from agent_gateway.observability.events import RuntimeEventStore
 
 
 class FakeRunner:
-    async def run_turn(self, agent_id: str, session_key: str, user_text: str, *, channel: str):
+    async def run_turn(
+        self,
+        agent_id: str,
+        session_key: str,
+        user_text: str,
+        *,
+        channel: str,
+        correlation_id: str = "",
+    ):
+        self.correlation_id = correlation_id
         from agent_gateway.models import AgentReply
 
         return AgentReply(
@@ -51,3 +61,39 @@ def test_dispatcher_routes_executes_and_enqueues_reply(tmp_path) -> None:
     assert queued[0].text == "echo:hello"
     assert queued[0].metadata["account_id"] == "cli-local"
     assert queued[0].metadata["session_key"] == result.reply.session_key
+
+
+def test_dispatcher_propagates_correlation_id_to_events_and_delivery(tmp_path) -> None:
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    queue = DeliveryQueue(tmp_path / "delivery")
+    store = RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl")
+    runner = FakeRunner()
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        runner,
+        CommandQueue(),
+        queue,
+        event_store=store,
+    )
+    inbound = InboundMessage(
+        text="hello",
+        sender_id="u1",
+        channel="cli",
+        account_id="cli-local",
+        peer_id="u1",
+        metadata={"correlation_id": "corr-test-1"},
+    )
+
+    result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+    asyncio.run(dispatcher.deliver_reply(ChannelManager(), result))
+
+    events = store.tail(limit=10)
+    queued = queue.pending_entries()
+
+    assert runner.correlation_id == "corr-test-1"
+    assert {event["correlation_id"] for event in events} == {"corr-test-1"}
+    assert queued[0].metadata["correlation_id"] == "corr-test-1"

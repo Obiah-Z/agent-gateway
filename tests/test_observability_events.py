@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.events import RuntimeEventStore, ensure_correlation_id
 
 
 def test_runtime_event_store_tails_events_and_filters_errors(tmp_path: Path) -> None:
@@ -40,3 +40,14 @@ def test_runtime_event_store_supports_tail_filters(tmp_path: Path) -> None:
 
     assert len(events) == 1
     assert events[0]["type"] == "cron.failed"
+
+
+def test_ensure_correlation_id_reuses_or_generates_value() -> None:
+    metadata = {"correlation_id": "corr-existing"}
+    assert ensure_correlation_id(metadata, prefix="cli") == "corr-existing"
+
+    empty: dict[str, object] = {}
+    generated = ensure_correlation_id(empty, prefix="CLI")
+
+    assert generated.startswith("cli_")
+    assert empty["correlation_id"] == generated

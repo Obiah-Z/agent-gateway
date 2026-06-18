@@ -810,6 +810,7 @@ function renderEventList({ container, summary, payload, emptyText, summaryLabel 
     appendText(item, "div", event.message || "", "item-title");
     const meta = [
       event.component ? `component=${event.component}` : "",
+      event.correlation_id ? `corr=${event.correlation_id}` : "",
       event.agent_id ? `agent=${event.agent_id}` : "",
       event.session_key ? `session=${event.session_key}` : "",
       event.channel ? `channel=${event.channel}` : "",

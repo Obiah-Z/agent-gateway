@@ -102,7 +102,12 @@ def test_delivery_runtime_records_success_and_failure_events(tmp_path: Path) -> 
         "cli",
         "peer-1",
         "hello",
-        {"account_id": "cli-local", "kind": "reply", "agent_id": "main"},
+        {
+            "account_id": "cli-local",
+            "kind": "reply",
+            "agent_id": "main",
+            "correlation_id": "corr-delivery-ok",
+        },
     )
 
     asyncio.run(runtime.flush_once())
@@ -117,7 +122,12 @@ def test_delivery_runtime_records_success_and_failure_events(tmp_path: Path) -> 
         "cli",
         "peer-2",
         "retry me",
-        {"account_id": "cli-local", "kind": "reply", "agent_id": "main"},
+        {
+            "account_id": "cli-local",
+            "kind": "reply",
+            "agent_id": "main",
+            "correlation_id": "corr-delivery-failed",
+        },
     )
 
     asyncio.run(failing_runtime.flush_once())
@@ -125,6 +135,8 @@ def test_delivery_runtime_records_success_and_failure_events(tmp_path: Path) -> 
     events = store.tail(limit=10)
     assert [event["type"] for event in events] == ["delivery.sent", "delivery.failed"]
     assert events[0]["agent_id"] == "main"
+    assert events[0]["correlation_id"] == "corr-delivery-ok"
+    assert events[1]["correlation_id"] == "corr-delivery-failed"
     assert events[1]["status"] == "failed"
 
 

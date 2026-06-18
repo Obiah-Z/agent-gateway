@@ -18,6 +18,21 @@ from typing import Any
 
 
 ERROR_STATUSES = {"error", "failed", "rejected", "critical"}
+CORRELATION_ID_KEY = "correlation_id"
+
+
+def new_correlation_id(prefix: str = "evt") -> str:
+    normalized = "".join(ch for ch in prefix.lower() if ch.isalnum() or ch in {"-", "_"}) or "evt"
+    return f"{normalized}_{uuid.uuid4().hex[:16]}"
+
+
+def ensure_correlation_id(metadata: dict[str, Any], *, prefix: str = "evt") -> str:
+    current = str(metadata.get(CORRELATION_ID_KEY, "") or "").strip()
+    if current:
+        return current
+    current = new_correlation_id(prefix)
+    metadata[CORRELATION_ID_KEY] = current
+    return current
 
 
 @dataclass(slots=True)

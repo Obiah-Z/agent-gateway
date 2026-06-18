@@ -131,6 +131,7 @@ class DeliveryRuntime:
                 status=status,
                 component="delivery",
                 message=message,
+                correlation_id=str(metadata.get("correlation_id", "")),
                 agent_id=str(metadata.get("agent_id", "")),
                 session_key=str(metadata.get("session_key", "")),
                 channel=entry.channel,

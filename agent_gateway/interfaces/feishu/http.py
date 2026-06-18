@@ -22,7 +22,7 @@ from agent_gateway.interfaces.feishu.security import (
     FeishuWebhookAuditLog,
     extract_event_id,
 )
-from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.events import RuntimeEventStore, new_correlation_id
 
 
 class FeishuWebhookServer:
@@ -204,6 +204,7 @@ class FeishuWebhookServer:
                 return
 
             event_id = extract_event_id(body)
+            correlation_id = f"feishu_{event_id}" if event_id else new_correlation_id("feishu")
             dedup_key = f"{account_id}:{event_id}" if event_id else ""
             if not self.dedup.mark_if_new(dedup_key):
                 print(f"[feishu] webhook duplicate ignored: event_id={event_id}")
@@ -220,6 +221,7 @@ class FeishuWebhookServer:
                     status="duplicate",
                     message="Feishu duplicate event ignored",
                     account_id=account_id,
+                    correlation_id=correlation_id,
                     reason="duplicate event",
                     metadata={"event_id": event_id},
                 )
@@ -248,6 +250,7 @@ class FeishuWebhookServer:
                             status="error",
                             message="Feishu card control action failed",
                             account_id=account_id,
+                            correlation_id=correlation_id,
                             reason=str(exc),
                             metadata={"event_type": event_type},
                         )
@@ -280,6 +283,7 @@ class FeishuWebhookServer:
                         status="ok",
                         message="Feishu card control action accepted",
                         account_id=account_id,
+                        correlation_id=correlation_id,
                         metadata={"event_type": event_type},
                     )
                     await self._write_json(writer, HTTPStatus.OK, response_payload)
@@ -300,11 +304,13 @@ class FeishuWebhookServer:
                         status="ignored",
                         message="Feishu card action ignored",
                         account_id=account_id,
+                        correlation_id=correlation_id,
                         reason="card action ignored by parser",
                         metadata={"event_type": event_type},
                     )
                     await self._write_json(writer, HTTPStatus.ACCEPTED, {"toast": {"type": "warning", "content": "action ignored"}})
                     return
+                inbound.metadata["correlation_id"] = correlation_id
                 print(
                     "[feishu] webhook card action accepted:"
                     f" account={inbound.account_id}"
@@ -345,6 +351,7 @@ class FeishuWebhookServer:
                     status="ok",
                     message="Feishu card action accepted",
                     account_id=account_id,
+                    correlation_id=correlation_id,
                     inbound=inbound,
                     metadata={"event_type": event_type},
                 )
@@ -367,12 +374,14 @@ class FeishuWebhookServer:
                     status="ignored",
                     message="Feishu event ignored",
                     account_id=account_id,
+                    correlation_id=correlation_id,
                     reason="event ignored by parser",
                     metadata={"event_type": event_type},
                 )
                 await self._write_json(writer, HTTPStatus.ACCEPTED, {"ok": True, "ignored": True})
                 return
 
+            inbound.metadata["correlation_id"] = correlation_id
             print(
                 "[feishu] webhook event accepted:"
                 f" account={inbound.account_id}"
@@ -399,6 +408,7 @@ class FeishuWebhookServer:
                 status="ok",
                 message="Feishu event accepted",
                 account_id=account_id,
+                correlation_id=correlation_id,
                 inbound=inbound,
                 metadata={"event_type": event_type},
             )
@@ -551,6 +561,7 @@ class FeishuWebhookServer:
         status: str,
         message: str,
         account_id: str = "",
+        correlation_id: str = "",
         reason: str = "",
         inbound: Any = None,
         metadata: dict[str, Any] | None = None,
@@ -566,6 +577,7 @@ class FeishuWebhookServer:
                 status=status,
                 component="feishu",
                 message=message,
+                correlation_id=correlation_id,
                 channel="feishu",
                 account_id=account_id,
                 peer_id=str(getattr(inbound, "peer_id", "")),

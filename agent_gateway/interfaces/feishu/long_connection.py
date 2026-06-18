@@ -19,6 +19,7 @@ from typing import Any, Protocol
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.core.models import InboundMessage
+from agent_gateway.observability.events import new_correlation_id
 from agent_gateway.application.channel_runtime import ChannelRuntime
 
 
@@ -368,6 +369,11 @@ class FeishuLongConnectionRuntime:
         metadata = {
             "receive_id_type": receive_id_type,
             "connection_mode": "long_connection",
+            "correlation_id": (
+                f"feishu_{event_id or message_id}"
+                if (event_id or message_id)
+                else new_correlation_id("feishu-long")
+            ),
             "feishu_event_type": str(payload.get("type", DEFAULT_FEISHU_EVENT_KEY) or ""),
             "feishu_event_id": event_id,
             "feishu_message_id": message_id,
