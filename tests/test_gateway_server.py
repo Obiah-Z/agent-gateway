@@ -11,6 +11,7 @@ from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable
 from agent_gateway.application.control_plane import GatewayControlPlane
 from agent_gateway.interfaces.websocket.server import GatewayServer
+from agent_gateway.observability.events import RuntimeEventStore
 from agent_gateway.application.resilience import AuthProfile, ProfileManager
 from agent_gateway.sessions.store import SessionStore
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
@@ -141,6 +142,57 @@ def test_gateway_server_exposes_control_plane_methods(tmp_path) -> None:
     assert profiles_result[0]["name"] == "primary"
     assert channels_result == []
     assert source_result == {"bindings": []}
+
+
+def test_gateway_server_exposes_event_methods(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main"))
+    bindings = BindingTable()
+    profiles = ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")])
+    event_store = RuntimeEventStore(settings.data_dir / "events" / "runtime-events.jsonl")
+    event_store.record(
+        "route.resolved",
+        status="ok",
+        component="dispatcher",
+        message="resolved",
+        agent_id="main",
+    )
+    event_store.record(
+        "delivery.failed",
+        status="failed",
+        component="delivery",
+        message="failed",
+        error="channel unavailable",
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=ChannelManager(),
+        event_store=event_store,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    events = asyncio.run(server._m_events_tail({"limit": 10}))
+    errors = asyncio.run(server._m_errors_recent({"limit": 10}))
+
+    assert events["configured"] is True
+    assert [event["type"] for event in events["items"]] == ["route.resolved", "delivery.failed"]
+    assert [event["type"] for event in errors["items"]] == ["delivery.failed"]
 
 
 def test_gateway_server_ignores_websocket_disconnect_during_send(tmp_path) -> None:

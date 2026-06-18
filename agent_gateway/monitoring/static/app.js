@@ -130,6 +130,10 @@ const dom = {
   healthList: $("#health-list"),
   runtimeUpdated: $("#runtime-updated"),
   runtimeList: $("#runtime-list"),
+  eventsSummary: $("#events-summary"),
+  eventsList: $("#events-list"),
+  errorsSummary: $("#errors-summary"),
+  errorsList: $("#errors-list"),
   deliveryState: $("#delivery-state"),
   includeText: $("#include-text"),
   deliveryFlushBtn: $("#delivery-flush-btn"),
@@ -329,7 +333,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -339,11 +343,15 @@ async function refreshAll() {
         include_text: dom.includeText.checked,
       }),
       rpc("cron.list"),
+      rpc("events.tail", { limit: 80 }),
+      rpc("errors.recent", { limit: 40 }),
     ]);
     renderSummary(health, runtime, deliveryStats);
     renderIssues(buildIssues(health, runtime, deliveryStats));
     renderHealth(health);
     renderRuntime(runtime);
+    renderEvents(events);
+    renderErrors(errors);
     renderDelivery(deliveryList);
     renderCron(cronJobs);
   } catch (error) {
@@ -757,6 +765,73 @@ function renderCron(cronJobs) {
     trigger.addEventListener("click", () => triggerCron(job.id, job.name || job.id));
     item.append(body, trigger);
     dom.cronList.appendChild(item);
+  }
+}
+
+function renderEvents(payload) {
+  renderEventList({
+    container: dom.eventsList,
+    summary: dom.eventsSummary,
+    payload,
+    emptyText: "暂无运行事件。发送一条消息、触发 Cron 或 flush 投递队列后会出现链路事件。",
+    summaryLabel: "条事件",
+  });
+}
+
+function renderErrors(payload) {
+  renderEventList({
+    container: dom.errorsList,
+    summary: dom.errorsSummary,
+    payload,
+    emptyText: "最近没有错误、失败或拒绝事件。",
+    summaryLabel: "条错误",
+  });
+}
+
+function renderEventList({ container, summary, payload, emptyText, summaryLabel }) {
+  clearNode(container);
+  const items = Array.isArray(payload?.items) ? payload.items.slice().reverse() : [];
+  summary.textContent = `${items.length} ${summaryLabel}`;
+  container.className = items.length ? "event-list" : "event-list empty";
+  if (!items.length) {
+    container.textContent = emptyText;
+    return;
+  }
+  for (const event of items) {
+    const item = document.createElement("div");
+    item.className = `event-item event-${normalizeStatus(event.status)}`;
+    const head = document.createElement("div");
+    head.className = "event-head";
+    head.appendChild(badge(event.status || "ok"));
+    appendText(head, "strong", event.type || "event");
+    appendText(head, "span", formatTimestamp(event.timestamp), "event-time");
+    item.appendChild(head);
+
+    appendText(item, "div", event.message || "", "item-title");
+    const meta = [
+      event.component ? `component=${event.component}` : "",
+      event.agent_id ? `agent=${event.agent_id}` : "",
+      event.session_key ? `session=${event.session_key}` : "",
+      event.channel ? `channel=${event.channel}` : "",
+      event.delivery_id ? `delivery=${event.delivery_id}` : "",
+      event.job_id ? `job=${event.job_id}` : "",
+    ].filter(Boolean);
+    appendText(item, "div", meta.join(" | ") || "no context", "item-meta");
+    if (event.error) {
+      appendText(item, "pre", event.error, "event-error");
+    }
+    const details = document.createElement("details");
+    details.className = "runtime-details";
+    const detailsSummary = document.createElement("summary");
+    detailsSummary.textContent = "事件详情";
+    details.appendChild(detailsSummary);
+    const row = document.createElement("div");
+    row.className = "kv-row";
+    appendText(row, "span", "metadata");
+    appendText(row, "code", JSON.stringify(event.metadata || {}, null, 2));
+    details.appendChild(row);
+    item.appendChild(details);
+    container.appendChild(item);
   }
 }
 

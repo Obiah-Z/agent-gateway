@@ -21,6 +21,7 @@ from agent_gateway.intelligence.bootstrap import PromptAssembler
 from agent_gateway.intelligence.memory import MemoryStore, register_memory_tools
 from agent_gateway.intelligence.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
+from agent_gateway.observability.events import RuntimeEventStore
 from agent_gateway.onboarding.feishu import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
@@ -63,6 +64,7 @@ class GatewayApplication:
     delivery_runtime: DeliveryRuntime
     command_queue: CommandQueue
     control_plane: GatewayControlPlane
+    event_store: RuntimeEventStore
 
 
 def build_dashboard_websocket_url(settings: GatewaySettings) -> str:
@@ -120,13 +122,22 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     command_queue = CommandQueue()
     delivery_queue = DeliveryQueue(settings.delivery_queue_dir)
-    dispatcher = GatewayDispatcher(agents, bindings, runner, command_queue, delivery_queue)
+    event_store = RuntimeEventStore(settings.data_dir / "events" / "runtime-events.jsonl")
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        runner,
+        command_queue,
+        delivery_queue,
+        event_store=event_store,
+    )
     channel_manager = build_channel_manager(settings, load_channel_accounts(settings))
-    autonomy_runtime = AutonomyRuntime(settings, dispatcher, channel_manager)
+    autonomy_runtime = AutonomyRuntime(settings, dispatcher, channel_manager, event_store=event_store)
     delivery_runtime = DeliveryRuntime(
         delivery_queue,
         channel_manager,
         on_success=autonomy_runtime.cron.on_delivery_success,
+        event_store=event_store,
     )
     control_plane = GatewayControlPlane(
         settings=settings,
@@ -138,6 +149,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         autonomy=autonomy_runtime,
         delivery_queue=delivery_queue,
         delivery_runtime=delivery_runtime,
+        event_store=event_store,
     )
 
     return GatewayApplication(
@@ -158,6 +170,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         delivery_runtime=delivery_runtime,
         command_queue=command_queue,
         control_plane=control_plane,
+        event_store=event_store,
     )
 
 
@@ -201,6 +214,7 @@ async def serve(app: GatewayApplication) -> None:
         state_dir=app.settings.feishu_webhook_dir,
         signature_window_seconds=app.settings.feishu_signature_window_seconds,
         dedup_ttl_seconds=app.settings.feishu_event_dedup_ttl_seconds,
+        event_store=app.event_store,
     )
     feishu_long_connection = FeishuLongConnectionRuntime(
         channels=app.channel_manager,

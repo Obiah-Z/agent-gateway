@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - dependency may be absent during scaffo
     httpx = None  # type: ignore[assignment]
 
 from agent_gateway.config import GatewaySettings
+from agent_gateway.observability.events import RuntimeEventStore
 from agent_gateway.sessions.context import ContextGuard
 from agent_gateway.tools.registry import ToolRegistry
 
@@ -180,10 +181,13 @@ class ResilienceRunner:
         profile_manager: ProfileManager,
         tools: ToolRegistry,
         context_guard: ContextGuard | None = None,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         self.settings = settings
         self.profile_manager = profile_manager
         self.tools = tools
+        self.event_store = event_store
+        self.runtime_context: dict[str, Any] = {}
         self.context_guard = context_guard or ContextGuard(
             safe_limit=settings.context_safe_limit,
             max_tool_chars=settings.max_tool_output_chars,
@@ -323,7 +327,36 @@ class ResilienceRunner:
                     continue
                 tool_calls.append(block["name"])
                 # 工具结果会以 user/tool_result 形式回灌给模型，维持 Anthropic Messages 语义。
-                result = self.tools.dispatch(block["name"], block.get("input", {}))
+                tool_name = block["name"]
+                started_at = time.time()
+                self._record_tool_event(
+                    "tool.call.started",
+                    status="ok",
+                    message=f"Tool call started: {tool_name}",
+                    tool_name=tool_name,
+                )
+                try:
+                    result = self.tools.dispatch(tool_name, block.get("input", {}))
+                except Exception as exc:
+                    self._record_tool_event(
+                        "tool.call.failed",
+                        status="error",
+                        message=f"Tool call failed: {tool_name}",
+                        tool_name=tool_name,
+                        error=exc,
+                        metadata={"duration_ms": round((time.time() - started_at) * 1000, 1)},
+                    )
+                    raise
+                self._record_tool_event(
+                    "tool.call.completed",
+                    status="ok",
+                    message=f"Tool call completed: {tool_name}",
+                    tool_name=tool_name,
+                    metadata={
+                        "duration_ms": round((time.time() - started_at) * 1000, 1),
+                        "result_length": len(str(result)),
+                    },
+                )
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -339,6 +372,36 @@ class ResilienceRunner:
             "messages": current_messages,
             "tool_calls": tool_calls,
         }
+
+    def _record_tool_event(
+        self,
+        event_type: str,
+        *,
+        status: str,
+        message: str,
+        tool_name: str,
+        error: str | Exception = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self.event_store is None:
+            return
+        context = self.runtime_context
+        payload = dict(metadata or {})
+        payload["tool_name"] = tool_name
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="tools",
+                message=message,
+                agent_id=str(context.get("agent_id", "")),
+                session_key=str(context.get("session_key", "")),
+                channel=str(context.get("channel", "")),
+                error=error,
+                metadata=payload,
+            )
+        except Exception:
+            pass
 
     def _build_client(self, profile: AuthProfile) -> Any:
         """构建一个关闭环境代理影响的 Anthropic 客户端。"""

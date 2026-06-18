@@ -6,6 +6,7 @@ from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.delivery.queue import DeliveryQueue, DeliveryRunner, PermanentDeliveryError
 from agent_gateway.models import InboundMessage, OutboundMessage
 from agent_gateway.application.delivery_runtime import DeliveryRuntime
+from agent_gateway.observability.events import RuntimeEventStore
 
 
 class DummyChannel(Channel):
@@ -91,6 +92,40 @@ def test_delivery_runtime_retries_failed_message(tmp_path: Path) -> None:
     assert len(pending) == 1
     assert pending[0].retry_count == 1
     assert pending[0].last_error == "delivery failed"
+
+
+def test_delivery_runtime_records_success_and_failure_events(tmp_path: Path) -> None:
+    store = RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl")
+    queue, _channel, runtime = _build_runtime(tmp_path / "success")
+    runtime.event_store = store
+    queue.enqueue(
+        "cli",
+        "peer-1",
+        "hello",
+        {"account_id": "cli-local", "kind": "reply", "agent_id": "main"},
+    )
+
+    asyncio.run(runtime.flush_once())
+
+    failing_queue, _failing_channel, failing_runtime = _build_runtime(
+        tmp_path / "failure",
+        fail_times=1,
+        max_retries=3,
+    )
+    failing_runtime.event_store = store
+    failing_queue.enqueue(
+        "cli",
+        "peer-2",
+        "retry me",
+        {"account_id": "cli-local", "kind": "reply", "agent_id": "main"},
+    )
+
+    asyncio.run(failing_runtime.flush_once())
+
+    events = store.tail(limit=10)
+    assert [event["type"] for event in events] == ["delivery.sent", "delivery.failed"]
+    assert events[0]["agent_id"] == "main"
+    assert events[1]["status"] == "failed"
 
 
 def test_delivery_queue_can_retry_failed_and_discard_entries(tmp_path: Path) -> None:

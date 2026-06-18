@@ -22,6 +22,7 @@ from agent_gateway.interfaces.feishu.security import (
     FeishuWebhookAuditLog,
     extract_event_id,
 )
+from agent_gateway.observability.events import RuntimeEventStore
 
 
 class FeishuWebhookServer:
@@ -38,6 +39,7 @@ class FeishuWebhookServer:
         state_dir: Path,
         signature_window_seconds: int = 300,
         dedup_ttl_seconds: int = 86400,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -50,6 +52,7 @@ class FeishuWebhookServer:
             ttl_seconds=dedup_ttl_seconds,
         )
         self.signature_window_seconds = max(30, signature_window_seconds)
+        self.event_store = event_store
         self._server: asyncio.base_events.Server | None = None
 
     async def start(self) -> None:
@@ -87,6 +90,12 @@ class FeishuWebhookServer:
                     http_status=status.value,
                     reason=payload.get("error", "request rejected"),
                 )
+                self._record_feishu_event(
+                    "feishu.event.rejected",
+                    status="rejected",
+                    message="Feishu webhook request rejected",
+                    reason=str(payload.get("error", "request rejected")),
+                )
                 await self._write_json(writer, status, payload)
                 return
 
@@ -98,6 +107,12 @@ class FeishuWebhookServer:
                     body=request_body,
                     headers=request_headers,
                     http_status=HTTPStatus.NOT_FOUND.value,
+                    reason="feishu channel not configured",
+                )
+                self._record_feishu_event(
+                    "feishu.event.rejected",
+                    status="rejected",
+                    message="Feishu channel not configured",
                     reason="feishu channel not configured",
                 )
                 await self._write_json(writer, HTTPStatus.NOT_FOUND, {"error": "feishu channel not configured"})
@@ -116,6 +131,13 @@ class FeishuWebhookServer:
                             http_status=HTTPStatus.UNAUTHORIZED.value,
                             reason="verification token mismatch",
                             channel_account=account_id,
+                        )
+                        self._record_feishu_event(
+                            "feishu.event.rejected",
+                            status="rejected",
+                            message="Feishu challenge verification token mismatch",
+                            account_id=account_id,
+                            reason="verification token mismatch",
                         )
                         await self._write_json(
                             writer,
@@ -143,6 +165,13 @@ class FeishuWebhookServer:
                     reason=reason,
                     channel_account=account_id,
                 )
+                self._record_feishu_event(
+                    "feishu.event.rejected",
+                    status="rejected",
+                    message="Feishu signature rejected",
+                    account_id=account_id,
+                    reason=reason,
+                )
                 await self._write_json(writer, HTTPStatus.UNAUTHORIZED, {"error": reason})
                 return
 
@@ -157,6 +186,13 @@ class FeishuWebhookServer:
                         http_status=HTTPStatus.UNAUTHORIZED.value,
                         reason="verification token mismatch",
                         channel_account=account_id,
+                    )
+                    self._record_feishu_event(
+                        "feishu.event.rejected",
+                        status="rejected",
+                        message="Feishu challenge verification token mismatch",
+                        account_id=account_id,
+                        reason="verification token mismatch",
                     )
                     await self._write_json(
                         writer,
@@ -179,6 +215,14 @@ class FeishuWebhookServer:
                     reason="duplicate event",
                     channel_account=account_id,
                 )
+                self._record_feishu_event(
+                    "feishu.event.ignored",
+                    status="duplicate",
+                    message="Feishu duplicate event ignored",
+                    account_id=account_id,
+                    reason="duplicate event",
+                    metadata={"event_id": event_id},
+                )
                 await self._write_json(writer, HTTPStatus.ACCEPTED, {"ok": True, "duplicate": True})
                 return
 
@@ -198,6 +242,14 @@ class FeishuWebhookServer:
                             http_status=HTTPStatus.OK.value,
                             reason=f"card control action failed: {exc}",
                             channel_account=account_id,
+                        )
+                        self._record_feishu_event(
+                            "feishu.event.error",
+                            status="error",
+                            message="Feishu card control action failed",
+                            account_id=account_id,
+                            reason=str(exc),
+                            metadata={"event_type": event_type},
                         )
                         await self._write_json(
                             writer,
@@ -223,6 +275,13 @@ class FeishuWebhookServer:
                         reason="card control action accepted",
                         channel_account=account_id,
                     )
+                    self._record_feishu_event(
+                        "feishu.event.accepted",
+                        status="ok",
+                        message="Feishu card control action accepted",
+                        account_id=account_id,
+                        metadata={"event_type": event_type},
+                    )
                     await self._write_json(writer, HTTPStatus.OK, response_payload)
                     return
                 inbound = channel.parse_card_action(body, token=token)
@@ -235,6 +294,14 @@ class FeishuWebhookServer:
                         http_status=HTTPStatus.ACCEPTED.value,
                         reason="card action ignored by parser",
                         channel_account=account_id,
+                    )
+                    self._record_feishu_event(
+                        "feishu.event.ignored",
+                        status="ignored",
+                        message="Feishu card action ignored",
+                        account_id=account_id,
+                        reason="card action ignored by parser",
+                        metadata={"event_type": event_type},
                     )
                     await self._write_json(writer, HTTPStatus.ACCEPTED, {"toast": {"type": "warning", "content": "action ignored"}})
                     return
@@ -273,6 +340,14 @@ class FeishuWebhookServer:
                         "kind": inbound.metadata.get("kind", ""),
                     },
                 )
+                self._record_feishu_event(
+                    "feishu.event.accepted",
+                    status="ok",
+                    message="Feishu card action accepted",
+                    account_id=account_id,
+                    inbound=inbound,
+                    metadata={"event_type": event_type},
+                )
                 asyncio.create_task(self.channel_runtime.ingest_external(inbound))
                 return
 
@@ -286,6 +361,14 @@ class FeishuWebhookServer:
                     http_status=HTTPStatus.ACCEPTED.value,
                     reason="event ignored by parser",
                     channel_account=account_id,
+                )
+                self._record_feishu_event(
+                    "feishu.event.ignored",
+                    status="ignored",
+                    message="Feishu event ignored",
+                    account_id=account_id,
+                    reason="event ignored by parser",
+                    metadata={"event_type": event_type},
                 )
                 await self._write_json(writer, HTTPStatus.ACCEPTED, {"ok": True, "ignored": True})
                 return
@@ -311,6 +394,14 @@ class FeishuWebhookServer:
                     "receive_id_type": inbound.metadata.get("receive_id_type", ""),
                 },
             )
+            self._record_feishu_event(
+                "feishu.event.accepted",
+                status="ok",
+                message="Feishu event accepted",
+                account_id=account_id,
+                inbound=inbound,
+                metadata={"event_type": event_type},
+            )
             await self._write_json(writer, HTTPStatus.OK, {"ok": True})
         except Exception as exc:
             print("[feishu] webhook request failed during processing")
@@ -322,6 +413,13 @@ class FeishuWebhookServer:
                 http_status=HTTPStatus.BAD_REQUEST.value,
                 reason=str(exc),
                 channel_account=account_id,
+            )
+            self._record_feishu_event(
+                "feishu.event.error",
+                status="error",
+                message="Feishu webhook request failed",
+                account_id=account_id,
+                reason=str(exc),
             )
             try:
                 await self._write_json(writer, HTTPStatus.BAD_REQUEST, {"error": "bad request"})
@@ -445,6 +543,41 @@ class FeishuWebhookServer:
             or headers.get("x-lark-request-nonce")
             or headers.get("x-lark-signature")
         )
+
+    def _record_feishu_event(
+        self,
+        event_type: str,
+        *,
+        status: str,
+        message: str,
+        account_id: str = "",
+        reason: str = "",
+        inbound: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self.event_store is None:
+            return
+        payload = dict(metadata or {})
+        if reason:
+            payload["reason"] = reason
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="feishu",
+                message=message,
+                channel="feishu",
+                account_id=account_id,
+                peer_id=str(getattr(inbound, "peer_id", "")),
+                error=reason if status in {"error", "rejected"} else "",
+                metadata={
+                    **payload,
+                    "sender_id": str(getattr(inbound, "sender_id", "")),
+                    "is_group": bool(getattr(inbound, "is_group", False)),
+                },
+            )
+        except Exception:
+            pass
 
     def _challenge_token_matches(
         self,

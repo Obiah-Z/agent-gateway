@@ -109,6 +109,8 @@ class GatewayServer:
             "status": self._m_status,
             "runtime.status": self._m_runtime_status,
             "health.check": self._m_health_check,
+            "events.tail": self._m_events_tail,
+            "errors.recent": self._m_errors_recent,
             "ingest": self._m_ingest,
             "heartbeat.status": self._m_heartbeat_status,
             "heartbeat.trigger": self._m_heartbeat_trigger,
@@ -503,6 +505,21 @@ class GatewayServer:
                 result["ok"] = False
                 result["status"] = "degraded"
         return result
+
+    async def _m_events_tail(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.tail_events(
+            limit=int(params.get("limit", 100)),
+            event_type=str(params.get("type", "")),
+            component=str(params.get("component", "")),
+            status=str(params.get("status", "")),
+        )
+
+    async def _m_errors_recent(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.recent_errors(limit=int(params.get("limit", 50)))
 
     async def _m_ingest(self, params: dict[str, Any]) -> dict[str, Any]:
         inbound = InboundMessage(

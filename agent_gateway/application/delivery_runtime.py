@@ -5,6 +5,7 @@ import asyncio
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.delivery.queue import DeliveryQueue, DeliveryRunner, QueuedDelivery
 from agent_gateway.core.models import OutboundMessage
+from agent_gateway.observability.events import RuntimeEventStore
 
 
 class DeliveryRuntime:
@@ -16,16 +17,19 @@ class DeliveryRuntime:
         poll_interval: float = 1.0,
         max_retries: int = 5,
         on_success=None,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         self.queue = queue
         self.channels = channels
         self.poll_interval = poll_interval
+        self.event_store = event_store
         self.runner = DeliveryRunner(
             queue,
             self._deliver_entry,
             max_retries=max_retries,
-            on_success=on_success,
+            on_success=self._on_success,
         )
+        self.on_success = on_success
         self._task: asyncio.Task[None] | None = None
         self._stopped = False
 
@@ -62,13 +66,83 @@ class DeliveryRuntime:
     def _deliver_entry(self, entry: QueuedDelivery) -> bool:
         channel = self.channels.get(entry.channel, str(entry.metadata.get("account_id", "")))
         if channel is None:
-            raise RuntimeError(
-                f"channel unavailable: {entry.channel}/{entry.metadata.get('account_id', '')}"
+            error = f"channel unavailable: {entry.channel}/{entry.metadata.get('account_id', '')}"
+            self._record_delivery_event(
+                "delivery.failed",
+                entry,
+                status="failed",
+                message="Delivery channel unavailable",
+                error=error,
             )
+            raise RuntimeError(error)
         outbound = OutboundMessage(
             channel=entry.channel,
             to=entry.to,
             text=entry.text,
             metadata=dict(entry.metadata),
         )
-        return channel.send(outbound)
+        try:
+            success = channel.send(outbound)
+        except Exception as exc:
+            self._record_delivery_event(
+                "delivery.failed",
+                entry,
+                status="failed",
+                message="Delivery send raised an exception",
+                error=exc,
+            )
+            raise
+        if not success:
+            self._record_delivery_event(
+                "delivery.failed",
+                entry,
+                status="failed",
+                message="Delivery send returned false",
+                error="channel send returned false",
+            )
+        return success
+
+    def _on_success(self, entry: QueuedDelivery) -> None:
+        self._record_delivery_event(
+            "delivery.sent",
+            entry,
+            status="ok",
+            message="Delivery sent",
+        )
+        if self.on_success is None:
+            return
+        self.on_success(entry)
+
+    def _record_delivery_event(
+        self,
+        event_type: str,
+        entry: QueuedDelivery,
+        *,
+        status: str,
+        message: str,
+        error: str | Exception = "",
+    ) -> None:
+        if self.event_store is None:
+            return
+        metadata = dict(entry.metadata)
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="delivery",
+                message=message,
+                agent_id=str(metadata.get("agent_id", "")),
+                session_key=str(metadata.get("session_key", "")),
+                channel=entry.channel,
+                account_id=str(metadata.get("account_id", "")),
+                peer_id=entry.to,
+                delivery_id=entry.id,
+                error=error,
+                metadata={
+                    "kind": metadata.get("kind", ""),
+                    "retry_count": entry.retry_count,
+                    "text_length": len(entry.text),
+                },
+            )
+        except Exception:
+            pass

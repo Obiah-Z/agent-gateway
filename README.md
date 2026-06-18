@@ -14,7 +14,7 @@
 - 记忆与技能注入：从 `workspace/` 加载提示词、长期记忆、skills 和 Agent 局部配置。
 - 主动任务：支持 Heartbeat、Cron 和 AI Agent 每日简报推送。
 - 可靠投递：普通回复、heartbeat、cron 输出先写入本地队列，再由后台 runtime 发送和重试。
-- 运维控制面：通过 WebSocket JSON-RPC 和本地 Dashboard 查看健康状态、投递队列、Cron 与运行态。
+- 运维控制面：通过 WebSocket JSON-RPC 和本地 Dashboard 查看健康状态、投递队列、Cron、运行态、最近事件与最近错误。
 - 飞书安全接入：支持 challenge、加密事件、签名校验、时间窗校验、事件去重和审计日志。
 
 ## 目录结构
@@ -30,6 +30,7 @@ gateway/
     intelligence/           Prompt、记忆、技能发现
     monitoring/             本地运维 Dashboard
     news/                   AI Agent 简报采集与摘要
+    observability/          运行事件 JSONL 与最近错误视图
     sessions/               JSONL 会话存储与上下文保护
     tools/                  工具注册表与内置工具
     app.py                  应用装配与命令入口
@@ -258,6 +259,7 @@ Dashboard 不依赖 npm、前端构建或外部 CDN，通过 WebSocket JSON-RPC 
 - 查看 pending / failed 投递队列。
 - 对投递消息执行 retry、discard、flush。
 - 查看 Cron 任务并手动触发。
+- 查看最近运行事件和最近错误，快速定位路由、模型、工具、投递、Cron 或飞书入口问题。
 
 相关配置：
 
@@ -285,6 +287,8 @@ GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=15
 
 - `runtime.status`：运行态快照。
 - `health.check`：健康检查。
+- `events.tail`：查看最近运行事件。
+- `errors.recent`：查看最近错误、失败或拒绝事件。
 - `delivery.stats/list/retry/discard/flush`：可靠投递队列运维。
 - `cron.list/trigger`：主动任务查看与触发。
 - `feishu.onboarding.start/status/list`：飞书扫码绑定会话管理。
@@ -304,12 +308,11 @@ cd ~/Desktop/claw0/gateway
 - 当前是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。
 - Dashboard 默认无鉴权，仅建议本机访问。
 - Agent 权限模型已支持工具策略和 capability tags，但仍需要继续增强审计、校验和权限预览。
-- 运行态观测已具备 Dashboard 和健康检查接口，但还未接入长期趋势指标和告警渠道。
+- 运行态观测已具备 Dashboard、健康检查、最近事件和最近错误接口，但还未接入长期趋势指标和告警渠道。
 
 ## 后续方向
 
 - Dashboard token 鉴权与角色分级。
-- 运行事件 JSONL 与最近错误视图。
 - 指标快照、趋势图和飞书告警。
 - Agent 权限预览、配置审计和回滚。
 - 多 Agent handoff 与任务实例状态机。

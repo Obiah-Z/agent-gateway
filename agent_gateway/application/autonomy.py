@@ -27,6 +27,7 @@ from agent_gateway.news.digest import build_digest_prompt
 from agent_gateway.news.models import NewsItem
 from agent_gateway.news.store import NewsDigestStore
 from agent_gateway.application.dispatcher import GatewayDispatcher
+from agent_gateway.observability.events import RuntimeEventStore
 
 
 DEFAULT_CRON_DISABLE_THRESHOLD = 5
@@ -59,11 +60,13 @@ class HeartbeatService:
         dispatcher: GatewayDispatcher,
         channels: ChannelManager,
         default_target: ProactiveTarget,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.channels = channels
         self.default_target = default_target
+        self.event_store = event_store
         self.heartbeat_path = settings.workspace_root / "HEARTBEAT.md"
         self.interval = settings.heartbeat_interval_seconds
         self.active_hours = (settings.heartbeat_active_start, settings.heartbeat_active_end)
@@ -216,11 +219,13 @@ class CronService:
         dispatcher: GatewayDispatcher,
         channels: ChannelManager,
         default_target: ProactiveTarget,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.channels = channels
         self.default_target = default_target
+        self.event_store = event_store
         self.cron_file = settings.workspace_root / "CRON.json"
         self.run_log_dir = settings.workspace_root / "cron"
         self.run_log_dir.mkdir(parents=True, exist_ok=True)
@@ -372,6 +377,13 @@ class CronService:
         kind = payload.get("kind", "")
         output, status, error = "", "ok", ""
         delivered_news_items: list[NewsItem] = []
+        self._record_cron_event(
+            "cron.triggered",
+            job,
+            status="ok",
+            message=f"Cron job triggered: {job.id}",
+            metadata={"payload_kind": kind},
+        )
         try:
             if kind == "agent_turn":
                 message = payload.get("message", "")
@@ -445,6 +457,18 @@ class CronService:
                 f"[{job.name}] {output}",
                 metadata=metadata,
             )
+        self._record_cron_event(
+            "cron.completed" if status != "error" else "cron.failed",
+            job,
+            status="ok" if status != "error" else "error",
+            message=f"Cron job {status}: {job.id}",
+            error=error,
+            metadata={
+                "payload_kind": kind,
+                "output_length": len(output),
+                "cron_status": status,
+            },
+        )
 
     async def _run_agent_news_digest(
         self,
@@ -546,6 +570,39 @@ class CronService:
             agent_id=target.get("agent_id", self.default_target.agent_id),
         )
 
+    def _record_cron_event(
+        self,
+        event_type: str,
+        job: CronJob,
+        *,
+        status: str,
+        message: str,
+        error: str | Exception = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="cron",
+                message=message,
+                agent_id=job.target.agent_id,
+                channel=job.target.channel,
+                account_id=job.target.account_id,
+                peer_id=job.target.peer_id,
+                job_id=job.id,
+                error=error,
+                metadata={
+                    "job_name": job.name,
+                    "schedule_kind": job.schedule_kind,
+                    **(metadata or {}),
+                },
+            )
+        except Exception:
+            pass
+
 
 class AutonomyRuntime:
     """把 heartbeat 和 cron 组合成统一的主动任务运行时。"""
@@ -555,6 +612,7 @@ class AutonomyRuntime:
         settings: GatewaySettings,
         dispatcher: GatewayDispatcher,
         channels: ChannelManager,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         target = ProactiveTarget(
             channel=settings.proactive_channel,
@@ -562,8 +620,20 @@ class AutonomyRuntime:
             peer_id=settings.proactive_peer_id,
             agent_id=settings.proactive_agent_id,
         )
-        self.heartbeat = HeartbeatService(settings, dispatcher, channels, target)
-        self.cron = CronService(settings, dispatcher, channels, target)
+        self.heartbeat = HeartbeatService(
+            settings,
+            dispatcher,
+            channels,
+            target,
+            event_store=event_store,
+        )
+        self.cron = CronService(
+            settings,
+            dispatcher,
+            channels,
+            target,
+            event_store=event_store,
+        )
 
     def set_channels(self, channels: ChannelManager) -> None:
         self.heartbeat.set_channels(channels)

@@ -20,6 +20,7 @@
           <a href="#issue-panel"><span class="side-dot"></span>问题摘要</a>
           <a href="#overview-panel"><span class="side-dot"></span>运行总览</a>
           <a href="#health-panel"><span class="side-dot"></span>健康检查</a>
+          <a href="#events-panel"><span class="side-dot"></span>事件流</a>
           <a href="#delivery-panel"><span class="side-dot"></span>投递队列</a>
           <a href="#cron-panel"><span class="side-dot"></span>主动任务</a>
         </nav>
@@ -128,6 +129,30 @@
             <span id="runtime-updated" class="pill">未刷新</span>
           </div>
           <div id="runtime-list" class="runtime-list empty">尚未加载运行态数据</div>
+        </article>
+      </section>
+
+      <section id="events-panel" class="grid-two">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Events</p>
+              <h2>最近事件</h2>
+            </div>
+            <span id="events-summary" class="pill">暂无数据</span>
+          </div>
+          <div id="events-list" class="event-list empty">尚未加载运行事件</div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Errors</p>
+              <h2>最近错误</h2>
+            </div>
+            <span id="errors-summary" class="pill">暂无数据</span>
+          </div>
+          <div id="errors-list" class="event-list empty">尚未加载错误事件</div>
         </article>
       </section>
 

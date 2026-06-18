@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from agent_gateway.core.agents import AgentManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.intelligence.bootstrap import PromptAssembler
 from agent_gateway.core.models import AgentReply
+from agent_gateway.observability.events import RuntimeEventStore
 from agent_gateway.application.resilience import ResilienceRunner
 from agent_gateway.sessions.context import ContextGuard
 from agent_gateway.sessions.store import SessionStore
@@ -35,6 +37,7 @@ class AgentLoopRunner:
         self.sessions = sessions
         self.prompt_assembler = prompt_assembler
         self.resilience_runner = resilience_runner
+        self.event_store: RuntimeEventStore | None = None
         self.context_guard = context_guard or ContextGuard(
             safe_limit=settings.context_safe_limit,
             max_tool_chars=settings.max_tool_output_chars,
@@ -77,6 +80,17 @@ class AgentLoopRunner:
         if agent is None:
             raise ValueError(f"agent '{agent_id}' not found")
 
+        started_at = time.time()
+        self._record(
+            "agent.turn.started",
+            status="ok",
+            component="agent_loop",
+            message=f"Agent turn started: {agent_id}",
+            agent_id=agent_id,
+            session_key=session_key,
+            channel=channel,
+            metadata={"mode": mode, "input_length": len(user_text)},
+        )
         messages = self.sessions.load_messages(agent_id, session_key)
         messages.append({"role": "user", "content": user_text})
         allowed_tools = agent.allowed_tool_names(self.resilience_runner.tools.names())
@@ -94,20 +108,67 @@ class AgentLoopRunner:
             },
         )
 
-        result = await asyncio.to_thread(
-            self.resilience_runner.run,
-            system_prompt,
-            messages,
-            model=agent.effective_model(self.settings.model_id),
-            allowed_tools=allowed_tools,
-        )
-        # ResilienceRunner 返回的是经过工具调用闭环后的完整历史，用它覆盖会话文件。
-        self.sessions.rewrite_messages(agent_id, session_key, result.messages)
+        self.resilience_runner.event_store = self.event_store
+        self.resilience_runner.runtime_context = {
+            "agent_id": agent_id,
+            "session_key": session_key,
+            "channel": channel,
+        }
+        try:
+            result = await asyncio.to_thread(
+                self.resilience_runner.run,
+                system_prompt,
+                messages,
+                model=agent.effective_model(self.settings.model_id),
+                allowed_tools=allowed_tools,
+            )
+            # ResilienceRunner 返回的是经过工具调用闭环后的完整历史，用它覆盖会话文件。
+            self.sessions.rewrite_messages(agent_id, session_key, result.messages)
+            self._record(
+                "agent.turn.completed",
+                status="ok",
+                component="agent_loop",
+                message=f"Agent turn completed: {agent_id}",
+                agent_id=agent_id,
+                session_key=session_key,
+                channel=channel,
+                metadata={
+                    "mode": mode,
+                    "duration_ms": round((time.time() - started_at) * 1000, 1),
+                    "stop_reason": result.stop_reason,
+                    "tool_calls": list(result.tool_calls),
+                    "profile": getattr(result, "profile_name", ""),
+                    "model": getattr(result, "model", ""),
+                },
+            )
+            return AgentReply(
+                agent_id=agent_id,
+                session_key=session_key,
+                text=result.text,
+                stop_reason=result.stop_reason,
+                tool_calls=result.tool_calls,
+            )
+        except Exception as exc:
+            self._record(
+                "agent.turn.failed",
+                status="error",
+                component="agent_loop",
+                message=f"Agent turn failed: {agent_id}",
+                agent_id=agent_id,
+                session_key=session_key,
+                channel=channel,
+                error=exc,
+                metadata={
+                    "mode": mode,
+                    "duration_ms": round((time.time() - started_at) * 1000, 1),
+                },
+            )
+            raise
 
-        return AgentReply(
-            agent_id=agent_id,
-            session_key=session_key,
-            text=result.text,
-            stop_reason=result.stop_reason,
-            tool_calls=result.tool_calls,
-        )
+    def _record(self, event_type: str, **kwargs) -> None:
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(event_type, **kwargs)
+        except Exception:
+            pass

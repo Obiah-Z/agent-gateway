@@ -40,6 +40,7 @@
 | 飞书扫码接入 | 已完成 | 支持 `/onboarding/feishu` 页面、绑定码、机器人会话入口和自动创建个人 Agent。 |
 | AI Agent 简报 | 已完成 | 支持 RSS、官网 HTML、GitHub Releases、arXiv 等来源采集和每日摘要推送。 |
 | Dashboard | 已完成 | 支持本地健康检查、运行态快照、投递队列、Cron 触发和飞书接入状态查看。 |
+| 运行事件流 | 已完成 | 支持 runtime event JSONL、`events.tail`、`errors.recent` 和 Dashboard 最近事件/错误视图。 |
 | 架构分层 | 已完成 | 已将运行时兼容层移除，主实现迁移到 `core/application/interfaces` 等分层目录。 |
 
 ### 当前可运行入口
@@ -150,13 +151,29 @@ cd ~/Desktop/claw0/gateway
 - 移除旧 `runtime/` 兼容层，避免后续开发继续依赖过期路径。
 - README 已同步新的目录结构和运行方式。
 
+### Phase 13：运行事件流与最近错误视图
+
+- 新增 `observability/` 模块和 `RuntimeEventStore`。
+- 定义统一 runtime event JSONL schema。
+- 接入关键链路事件：
+  - inbound received
+  - route resolved
+  - agent turn started / completed / failed
+  - tool call started / completed / failed
+  - delivery enqueued / sent / failed
+  - cron triggered / completed / failed
+  - feishu event accepted / ignored / rejected / error
+- 控制面新增 `events.tail` 和 `errors.recent`。
+- Dashboard 新增最近事件与最近错误视图。
+- 测试覆盖事件存储、控制面入口和投递事件。
+
 ## 当前主要边界
 
 - 当前仍是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。
 - Dashboard 默认无鉴权，仅适合本机访问，不应直接暴露公网。
 - 配置变更已经能保存和 reload，但配置审计、快照和回滚仍不完整。
 - Agent 权限模型已有 tool policy 和 capability tags，但缺少最终权限预览和强校验报告。
-- 运行态观测已有 Dashboard 和健康检查，但缺少长期指标、趋势图、告警和统一事件流。
+- 运行态观测已有 Dashboard、健康检查、最近事件和最近错误，但缺少长期指标、趋势图和告警。
 - 飞书长连接依赖本机 `lark-cli` 配置和子进程消费，适合本地/单机部署；生产多实例仍建议优先 Webhook。
 - 新闻简报能力已可运行，但来源质量评估、内容去重精度和摘要可解释性仍有提升空间。
 
@@ -182,32 +199,6 @@ cd ~/Desktop/claw0/gateway
 - 未携带 token 时无法访问管理数据和控制操作。
 - 本机默认体验不被明显破坏。
 - 高风险操作在接口层有明确保护。
-
-### Phase 13：运行事件流与最近错误视图
-
-目标：
-
-- 将排障从“翻 print 和文件目录”升级为“按事件查看运行链路”。
-
-计划项：
-
-1. 定义统一 runtime event schema。
-2. 将关键事件写入 JSONL：
-   - inbound received
-   - route resolved
-   - agent turn started / completed / failed
-   - tool call started / completed / failed
-   - delivery enqueued / sent / failed
-   - cron triggered / completed / failed
-   - feishu event accepted / ignored / rejected
-3. Dashboard 增加最近事件列表。
-4. Dashboard 增加最近错误列表。
-5. 控制面增加 `events.tail` 和 `errors.recent`。
-
-完成标准：
-
-- 可以通过 Dashboard 看到最近一次消息从入站到投递的关键节点。
-- 出错时能直接定位是路由、模型、工具、投递还是通道问题。
 
 ### Phase 14：指标快照、趋势与告警
 
@@ -330,17 +321,16 @@ cd ~/Desktop/claw0/gateway
 建议按以下优先级推进：
 
 1. Phase 12：Dashboard 鉴权与安全边界
-2. Phase 13：运行事件流与最近错误视图
-3. Phase 14：指标快照、趋势与告警
-4. Phase 15：Agent 权限预览与配置治理
-5. Phase 16：会话与记忆治理
-6. Phase 17：多 Agent 协作与任务实例状态机
-7. Phase 18：生产部署形态
+2. Phase 14：指标快照、趋势与告警
+3. Phase 15：Agent 权限预览与配置治理
+4. Phase 16：会话与记忆治理
+5. Phase 17：多 Agent 协作与任务实例状态机
+6. Phase 18：生产部署形态
 
 这个顺序的依据是：
 
 - 先补安全边界，避免 Dashboard 和控制面成为风险点。
-- 再补事件与指标，降低后续复杂功能的排障成本。
+- 再补指标和告警，降低后续复杂功能的排障成本。
 - 然后补配置、权限、会话和记忆治理，提升长期运行质量。
 - 最后再做多 Agent 编排和生产部署，避免在可观测性不足的情况下扩大系统复杂度。
 

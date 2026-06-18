@@ -25,6 +25,7 @@ from agent_gateway.config_loader import (
     write_json_atomic,
 )
 from agent_gateway.delivery.queue import DeliveryQueue, QueuedDelivery
+from agent_gateway.observability.events import RuntimeEventStore
 from agent_gateway.core.ids import normalize_agent_id
 from agent_gateway.core.models import AgentConfig, Binding
 from agent_gateway.core.router import BindingTable
@@ -58,6 +59,7 @@ class GatewayControlPlane:
     delivery_runtime: Any = None
     feishu_long_connection_runtime: Any = None
     feishu_onboarding: Any = None
+    event_store: RuntimeEventStore | None = None
 
     def list_bindings(self) -> list[Binding]:
         return self.bindings.list_all()
@@ -135,6 +137,40 @@ class GatewayControlPlane:
             "retry_ready": sum(1 for entry in pending if not entry.next_retry_at or entry.next_retry_at <= time.time()),
             "oldest_pending_at": min((entry.enqueued_at for entry in pending), default=None),
             "oldest_failed_at": min((entry.enqueued_at for entry in failed), default=None),
+        }
+
+    def tail_events(
+        self,
+        *,
+        limit: int = 100,
+        event_type: str = "",
+        component: str = "",
+        status: str = "",
+    ) -> dict[str, Any]:
+        if self.event_store is None:
+            return {"items": [], "count": 0, "configured": False}
+        items = self.event_store.tail(
+            limit=limit,
+            event_type=event_type,
+            component=component,
+            status=status,
+        )
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": True,
+            "limit": max(1, min(int(limit), 500)),
+        }
+
+    def recent_errors(self, *, limit: int = 50) -> dict[str, Any]:
+        if self.event_store is None:
+            return {"items": [], "count": 0, "configured": False}
+        items = self.event_store.recent_errors(limit=limit)
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": True,
+            "limit": max(1, min(int(limit), 200)),
         }
 
     def list_deliveries(

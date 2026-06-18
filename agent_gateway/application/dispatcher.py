@@ -21,6 +21,7 @@ from agent_gateway.core.models import (
 from agent_gateway.core.router import BindingTable, resolve_route
 from agent_gateway.application.lanes import CommandQueue
 from agent_gateway.application.loop import AgentLoopRunner
+from agent_gateway.observability.events import RuntimeEventStore
 
 
 class GatewayDispatcher:
@@ -33,12 +34,15 @@ class GatewayDispatcher:
         runner: AgentLoopRunner,
         command_queue: CommandQueue,
         delivery_queue: DeliveryQueue,
+        event_store: RuntimeEventStore | None = None,
     ) -> None:
         self.agents = agents
         self.bindings = bindings
         self.runner = runner
         self.command_queue = command_queue
         self.delivery_queue = delivery_queue
+        self.event_store = event_store
+        self.runner.event_store = event_store
 
     async def dispatch_inbound(
         self,
@@ -52,21 +56,63 @@ class GatewayDispatcher:
         写入，避免并发消息互相覆盖会话历史。
         """
 
+        self._record(
+            "inbound.received",
+            status="ok",
+            component="dispatcher",
+            message="Inbound message received",
+            channel=inbound.channel,
+            account_id=inbound.account_id,
+            peer_id=inbound.peer_id,
+            metadata={"sender_id": inbound.sender_id, "text_length": len(inbound.text)},
+        )
         route = resolve_route(
             self.bindings,
             self.agents,
             inbound,
             forced_agent_id=forced_agent_id,
         )
-        reply = await self._execute_lane_task(
-            lane_name=route.session_key,
-            coroutine_factory=lambda: self.runner.run_turn(
-                route.agent_id,
-                route.session_key,
-                inbound.text,
-                channel=inbound.channel,
-            ),
+        self._record(
+            "route.resolved",
+            status="ok",
+            component="dispatcher",
+            message=f"Route resolved to agent '{route.agent_id}'",
+            agent_id=route.agent_id,
+            session_key=route.session_key,
+            channel=inbound.channel,
+            account_id=inbound.account_id,
+            peer_id=inbound.peer_id,
+            metadata={
+                "forced_agent_id": forced_agent_id,
+                "matched_binding": route.matched_binding.display()
+                if route.matched_binding
+                else "",
+            },
         )
+        try:
+            reply = await self._execute_lane_task(
+                lane_name=route.session_key,
+                coroutine_factory=lambda: self.runner.run_turn(
+                    route.agent_id,
+                    route.session_key,
+                    inbound.text,
+                    channel=inbound.channel,
+                ),
+            )
+        except Exception as exc:
+            self._record(
+                "agent.turn.failed",
+                status="error",
+                component="dispatcher",
+                message="Agent turn failed",
+                agent_id=route.agent_id,
+                session_key=route.session_key,
+                channel=inbound.channel,
+                account_id=inbound.account_id,
+                peer_id=inbound.peer_id,
+                error=exc,
+            )
+            raise
         return DispatchResult(inbound=inbound, route=route, reply=reply)
 
     async def dispatch_background(
@@ -81,6 +127,16 @@ class GatewayDispatcher:
     ) -> AgentReply:
         """处理 heartbeat、cron 等系统主动任务。"""
 
+        self._record(
+            "agent.task.started",
+            status="ok",
+            component="dispatcher",
+            message="Background agent task queued",
+            agent_id=agent_id,
+            session_key=session_key,
+            channel=channel,
+            metadata={"mode": mode, "lane_name": lane_name or session_key},
+        )
         return await self._execute_lane_task(
             lane_name=lane_name or session_key,
             coroutine_factory=lambda: self.runner.run_task_turn(
@@ -140,6 +196,19 @@ class GatewayDispatcher:
             result.reply.text,
             metadata,
         )
+        self._record(
+            "delivery.enqueued",
+            status="ok",
+            component="dispatcher",
+            message="Reply enqueued for delivery",
+            agent_id=result.reply.agent_id,
+            session_key=result.reply.session_key,
+            channel=result.inbound.channel,
+            account_id=result.inbound.account_id,
+            peer_id=result.inbound.peer_id,
+            delivery_id=delivery_id,
+            metadata={"kind": metadata.get("kind", "reply")},
+        )
         print(
             "[dispatcher] reply queued:"
             f" delivery_id={delivery_id}"
@@ -175,6 +244,18 @@ class GatewayDispatcher:
             text,
             payload,
         )
+        self._record(
+            "delivery.enqueued",
+            status="ok",
+            component="dispatcher",
+            message="Proactive message enqueued for delivery",
+            agent_id=target.agent_id,
+            channel=target.channel,
+            account_id=target.account_id,
+            peer_id=target.peer_id,
+            delivery_id=delivery_id,
+            metadata={"kind": payload.get("kind", "proactive")},
+        )
         print(
             "[dispatcher] proactive queued:"
             f" delivery_id={delivery_id}"
@@ -182,3 +263,11 @@ class GatewayDispatcher:
             f" to={target.peer_id}"
         )
         return delivery_id
+
+    def _record(self, event_type: str, **kwargs) -> None:
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(event_type, **kwargs)
+        except Exception:
+            pass
