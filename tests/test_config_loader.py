@@ -33,6 +33,7 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "GATEWAY_DASHBOARD_HOST=0.0.0.0",
                 "GATEWAY_DASHBOARD_PORT=8870",
                 "GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=7",
+                "GATEWAY_EVENTS_RETENTION_DAYS=21",
             ]
         ),
         encoding="utf-8",
@@ -54,6 +55,7 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().dashboard_host == "0.0.0.0"
     assert GatewaySettings.from_env().dashboard_port == 8870
     assert GatewaySettings.from_env().dashboard_refresh_interval_seconds == 7
+    assert GatewaySettings.from_env().events_retention_days == 21
 
 
 def test_config_loader_reads_default_files(tmp_path: Path, monkeypatch) -> None:

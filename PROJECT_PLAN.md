@@ -195,21 +195,11 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 13.4：事件文件轮转与保留策略
 
-目标：
-
-- 避免 `runtime-events.jsonl` 长期运行后无限增长。
-
-计划项：
-
-1. 支持按日期写入 `runtime-events-YYYY-MM-DD.jsonl`。
-2. 增加配置项 `GATEWAY_EVENTS_RETENTION_DAYS`。
-3. `events.tail` 支持读取最近多个事件文件。
-4. 启动时或写入时清理过期事件文件。
-
-完成标准：
-
-- 长期运行不会导致事件文件无限膨胀。
-- 最近事件查询仍能跨文件返回最新事件。
+- 已完成事件文件轮转与保留策略。
+- 运行事件按日期写入 `data/events/runtime-events-YYYY-MM-DD.jsonl`。
+- 增加配置项 `GATEWAY_EVENTS_RETENTION_DAYS`，默认保留 14 天。
+- `events.tail` 支持读取最近多个事件文件。
+- 写入事件时自动清理过期事件文件。
 
 ### Phase 13.5：模型调用与 profile 事件增强
 

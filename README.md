@@ -259,7 +259,7 @@ Dashboard 不依赖 npm、前端构建或外部 CDN，通过 WebSocket JSON-RPC 
 - 查看 pending / failed 投递队列。
 - 对投递消息执行 retry、discard、flush。
 - 查看 Cron 任务并手动触发。
-- 查看最近运行事件和最近错误，快速定位路由、模型、工具、投递、Cron 或飞书入口问题。
+- 查看最近运行事件、最近错误和按 `correlation_id` 聚合的链路，快速定位路由、模型、工具、投递、Cron 或飞书入口问题。
 
 相关配置：
 
@@ -268,7 +268,10 @@ GATEWAY_DASHBOARD_ENABLED=true
 GATEWAY_DASHBOARD_HOST=127.0.0.1
 GATEWAY_DASHBOARD_PORT=8780
 GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=15
+GATEWAY_EVENTS_RETENTION_DAYS=14
 ```
+
+运行事件按日期写入 `data/events/runtime-events-YYYY-MM-DD.jsonl`。`events.tail` 会跨最近事件文件读取数据，过期文件会按 `GATEWAY_EVENTS_RETENTION_DAYS` 自动清理。
 
 默认只监听 `127.0.0.1`。当前 Dashboard 已具备投递丢弃、重试和 Cron 触发能力，不建议在未增加 token 鉴权前直接暴露公网。
 
@@ -287,8 +290,8 @@ GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=15
 
 - `runtime.status`：运行态快照。
 - `health.check`：健康检查。
-- `events.tail`：查看最近运行事件。
-- `errors.recent`：查看最近错误、失败或拒绝事件。
+- `events.tail`：查看最近运行事件，支持按 component/status/correlation_id/agent/channel/job/delivery 过滤。
+- `errors.recent`：查看最近错误、失败或拒绝事件，支持按 component/correlation_id 过滤。
 - `delivery.stats/list/retry/discard/flush`：可靠投递队列运维。
 - `cron.list/trigger`：主动任务查看与触发。
 - `feishu.onboarding.start/status/list`：飞书扫码绑定会话管理。

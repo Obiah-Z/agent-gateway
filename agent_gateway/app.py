@@ -122,7 +122,10 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     command_queue = CommandQueue()
     delivery_queue = DeliveryQueue(settings.delivery_queue_dir)
-    event_store = RuntimeEventStore(settings.data_dir / "events" / "runtime-events.jsonl")
+    event_store = RuntimeEventStore(
+        settings.events_dir,
+        retention_days=settings.events_retention_days,
+    )
     dispatcher = GatewayDispatcher(
         agents,
         bindings,

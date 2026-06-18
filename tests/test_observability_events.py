@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 from agent_gateway.observability.events import RuntimeEventStore, ensure_correlation_id
@@ -71,3 +72,89 @@ def test_ensure_correlation_id_reuses_or_generates_value() -> None:
 
     assert generated.startswith("cli_")
     assert empty["correlation_id"] == generated
+
+
+def test_runtime_event_store_rotates_by_day_and_tails_across_files(tmp_path: Path) -> None:
+    store = RuntimeEventStore(tmp_path / "events", retention_days=2000)
+    old_timestamp = 1_704_067_200.0  # 2024-01-01T00:00:00Z
+    new_timestamp = 1_704_153_600.0  # 2024-01-02T00:00:00Z
+
+    store.record(
+        "inbound.received",
+        status="ok",
+        component="dispatcher",
+        message="old",
+        metadata={"index": 1},
+    )
+    store.record(
+        "route.resolved",
+        status="ok",
+        component="dispatcher",
+        message="new",
+        metadata={"index": 2},
+    )
+
+    # Rewrite timestamps through the private append path to keep the public API simple.
+    for path in list((tmp_path / "events").glob("runtime-events-*.jsonl")):
+        path.unlink()
+    store._append(  # noqa: SLF001 - verifies rotation behavior without wall-clock coupling.
+        {
+            "event_id": "old",
+            "timestamp": old_timestamp,
+            "time": "2024-01-01T00:00:00+00:00",
+            "type": "inbound.received",
+            "status": "ok",
+            "component": "dispatcher",
+            "message": "old",
+            "correlation_id": "corr-old",
+            "agent_id": "",
+            "session_key": "",
+            "channel": "",
+            "account_id": "",
+            "peer_id": "",
+            "delivery_id": "",
+            "job_id": "",
+            "error": "",
+            "metadata": {},
+        }
+    )
+    store._append(  # noqa: SLF001
+        {
+            "event_id": "new",
+            "timestamp": new_timestamp,
+            "time": "2024-01-02T00:00:00+00:00",
+            "type": "route.resolved",
+            "status": "ok",
+            "component": "dispatcher",
+            "message": "new",
+            "correlation_id": "corr-new",
+            "agent_id": "",
+            "session_key": "",
+            "channel": "",
+            "account_id": "",
+            "peer_id": "",
+            "delivery_id": "",
+            "job_id": "",
+            "error": "",
+            "metadata": {},
+        }
+    )
+
+    files = sorted(path.name for path in (tmp_path / "events").glob("runtime-events-*.jsonl"))
+    events = store.tail(limit=10)
+
+    assert files == ["runtime-events-2024-01-01.jsonl", "runtime-events-2024-01-02.jsonl"]
+    assert [event["event_id"] for event in events] == ["old", "new"]
+
+
+def test_runtime_event_store_cleans_up_expired_files(tmp_path: Path) -> None:
+    store = RuntimeEventStore(tmp_path / "events", retention_days=2)
+    old_file = tmp_path / "events" / "runtime-events-2024-01-01.jsonl"
+    keep_file = tmp_path / "events" / "runtime-events-2024-01-03.jsonl"
+    old_file.write_text("{}", encoding="utf-8")
+    keep_file.write_text("{}", encoding="utf-8")
+
+    store.cleanup(now=date(2024, 1, 3))
+
+    assert not old_file.exists()
+    assert keep_file.exists()

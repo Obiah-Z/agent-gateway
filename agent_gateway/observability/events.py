@@ -8,7 +8,7 @@ introducing a database dependency.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 from pathlib import Path
 import threading
@@ -77,10 +77,18 @@ class RuntimeEvent:
 
 
 class RuntimeEventStore:
-    def __init__(self, path: Path, *, max_line_bytes: int = 64_000) -> None:
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        path: Path,
+        *,
+        max_line_bytes: int = 64_000,
+        retention_days: int = 14,
+    ) -> None:
+        self.root_dir = path if path.suffix == "" else path.parent
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.path = self._path_for_date(date.today())
         self.max_line_bytes = max(1024, int(max_line_bytes))
+        self.retention_days = max(1, int(retention_days))
         self._lock = threading.Lock()
 
     def record(
@@ -185,27 +193,55 @@ class RuntimeEventStore:
             row["message"] = str(row.get("message", ""))[:1000]
             row["error"] = str(row.get("error", ""))[:1000]
             payload = json.dumps(row, ensure_ascii=False, sort_keys=True)
-        with self._lock, self.path.open("a", encoding="utf-8") as handle:
+        path = self._path_for_timestamp(float(row.get("timestamp", time.time()) or time.time()))
+        with self._lock, path.open("a", encoding="utf-8") as handle:
             handle.write(payload + "\n")
+        self.cleanup()
 
     def _read_tail(self, limit: int) -> list[dict[str, Any]]:
-        if not self.path.exists():
-            return []
-        try:
-            with self.path.open("r", encoding="utf-8") as handle:
-                lines = handle.readlines()
-        except OSError:
-            return []
         rows: list[dict[str, Any]] = []
-        for line in lines[-limit:]:
+        remaining = max(1, int(limit))
+        for path in reversed(self._event_files()):
             try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
+                with path.open("r", encoding="utf-8") as handle:
+                    lines = handle.readlines()
+            except OSError:
                 continue
-            if isinstance(payload, dict):
-                rows.append(payload)
+            for line in lines[-remaining:]:
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+            if len(rows) >= limit:
+                break
         rows.sort(key=lambda row: float(row.get("timestamp", 0.0) or 0.0))
-        return rows
+        return rows[-limit:]
+
+    def cleanup(self, *, now: date | None = None) -> None:
+        cutoff = (now or date.today()) - timedelta(days=self.retention_days - 1)
+        for path in self._event_files():
+            suffix = path.stem.removeprefix("runtime-events-")
+            try:
+                file_date = date.fromisoformat(suffix)
+            except ValueError:
+                continue
+            if file_date < cutoff:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def _event_files(self) -> list[Path]:
+        return sorted(self.root_dir.glob("runtime-events-*.jsonl"))
+
+    def _path_for_timestamp(self, timestamp: float) -> Path:
+        event_date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
+        return self._path_for_date(event_date)
+
+    def _path_for_date(self, event_date: date) -> Path:
+        return self.root_dir / f"runtime-events-{event_date.isoformat()}.jsonl"
 
     @staticmethod
     def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:

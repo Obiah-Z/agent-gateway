@@ -82,6 +82,7 @@ class GatewaySettings:
     web_search_timeout_seconds: float = 15.0
     web_search_max_results: int = 5
     web_search_max_output_chars: int = 12_000
+    events_retention_days: int = 14
 
     @property
     def sessions_dir(self) -> Path:
@@ -94,6 +95,10 @@ class GatewaySettings:
     @property
     def feishu_webhook_dir(self) -> Path:
         return self.data_dir / "feishu-webhook"
+
+    @property
+    def events_dir(self) -> Path:
+        return self.data_dir / "events"
 
     @property
     def agents_config_file(self) -> Path:
@@ -187,6 +192,7 @@ class GatewaySettings:
             web_search_max_output_chars=int(
                 os.getenv("GATEWAY_WEB_SEARCH_MAX_OUTPUT_CHARS", "12000")
             ),
+            events_retention_days=int(os.getenv("GATEWAY_EVENTS_RETENTION_DAYS", "14")),
         )
 
     def ensure_directories(self) -> None:
@@ -195,3 +201,4 @@ class GatewaySettings:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.delivery_queue_dir.mkdir(parents=True, exist_ok=True)
         self.feishu_webhook_dir.mkdir(parents=True, exist_ok=True)
+        self.events_dir.mkdir(parents=True, exist_ok=True)
