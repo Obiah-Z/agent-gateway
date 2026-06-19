@@ -11,7 +11,10 @@ from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable
 from agent_gateway.application.control_plane import GatewayControlPlane
 from agent_gateway.interfaces.websocket.server import GatewayServer
+from agent_gateway.application.alerts_runtime import AlertsRuntime
 from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.alerts import AlertStore
+from agent_gateway.observability.metrics import MetricsStore
 from agent_gateway.application.resilience import AuthProfile, ProfileManager
 from agent_gateway.sessions.store import SessionStore
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
@@ -256,6 +259,96 @@ def test_gateway_server_exposes_recent_memory_writes(tmp_path) -> None:
     assert result["configured"] is True
     assert result["count"] == 1
     assert result["items"][0]["content"] == "cron should not write this often"
+
+
+def test_gateway_server_exposes_metrics_methods(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+
+    metrics = MetricsStore(settings.metrics_dir, retention_days=2000)
+    metrics.record(
+        delivery={"pending": 1, "failed": 0},
+        lanes={"queued": 2},
+        events={"errors_5m": 1},
+        timestamp=1_704_067_200.0,
+    )
+    metrics.record(
+        delivery={"pending": 4, "failed": 1},
+        lanes={"queued": 5},
+        events={"errors_5m": 3},
+        timestamp=1_704_067_260.0,
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        metrics_store=metrics,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": AgentManager(), "bindings": BindingTable()})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    snapshot = asyncio.run(server._m_metrics_snapshot({}))
+    tail = asyncio.run(server._m_metrics_tail({"limit": 10}))
+    summary = asyncio.run(server._m_metrics_summary({"limit": 10}))
+
+    assert snapshot["available"] is True
+    assert snapshot["item"]["delivery"]["pending"] == 4
+    assert tail["count"] == 2
+    assert summary["delivery"]["max_pending"] == 4
+    assert summary["lanes"]["max_queued"] == 5
+    assert summary["events"]["max_errors_5m"] == 3
+
+
+def test_gateway_server_exposes_alert_methods(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+
+    metrics = MetricsStore(settings.metrics_dir, retention_days=2000)
+    alerts = AlertStore(settings.alerts_dir, retention_days=2000)
+    runtime = AlertsRuntime(metrics_store=metrics, alert_store=alerts, interval_seconds=60)
+    metrics.record(delivery={"failed": 1}, lanes={"queued": 0}, profiles={"available": 1})
+    runtime.evaluate_once()
+    metrics.record(delivery={"failed": 2}, lanes={"queued": 0}, profiles={"available": 1})
+    runtime.evaluate_once()
+
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        alert_store=alerts,
+        alerts_runtime=runtime,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": AgentManager(), "bindings": BindingTable()})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    active = asyncio.run(server._m_alerts_active({}))
+    history = asyncio.run(server._m_alerts_history({"limit": 10}))
+
+    assert active["count"] == 1
+    assert active["items"][0]["rule_id"] == "delivery_failed_persisting"
+    assert history["count"] >= 1
 
 
 def test_gateway_server_ignores_websocket_disconnect_during_send(tmp_path) -> None:

@@ -10,6 +10,9 @@ from agent_gateway.delivery.queue import DeliveryQueue
 from agent_gateway.models import AgentConfig, Binding
 from agent_gateway.router import BindingTable
 from agent_gateway.application.control_plane import GatewayControlPlane
+from agent_gateway.observability.metrics import MetricsStore
+from agent_gateway.observability.alerts import AlertStore
+from agent_gateway.application.alerts_runtime import AlertsRuntime
 from agent_gateway.application.resilience import AuthProfile, ProfileManager
 from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
 
@@ -292,6 +295,101 @@ def test_control_plane_lists_and_saves_runtime_state(tmp_path: Path) -> None:
     assert '"name": "primary"' in settings.profiles_config_file.read_text(encoding="utf-8")
     assert '"account_id": "cli-local"' in settings.channels_config_file.read_text(encoding="utf-8")
     assert control.get_source("agents")["agents"][0]["id"] == "main"
+
+
+def test_control_plane_exposes_metrics_views(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    metrics = MetricsStore(settings.metrics_dir, retention_days=2000)
+    metrics.record(
+        runtime={"uptime_seconds": 10},
+        delivery={"pending": 2, "failed": 0, "retry_ready": 1},
+        lanes={"count": 1, "active": 1, "queued": 3, "max_queue_depth": 3},
+        cron={"configured": True, "count": 2, "enabled": 1, "errored": 0},
+        events={"errors_5m": 1, "rejected_5m": 0, "delivery_failed_5m": 0, "tool_failed_5m": 1, "cron_failed_5m": 0},
+        profiles={"count": 2, "available": 1, "cooling_down": 1},
+        timestamp=1_704_067_200.0,
+    )
+    metrics.record(
+        runtime={"uptime_seconds": 20},
+        delivery={"pending": 5, "failed": 1, "retry_ready": 2, "oldest_pending_age_seconds": 30},
+        lanes={"count": 2, "active": 1, "queued": 4, "max_queue_depth": 4},
+        cron={"configured": True, "count": 3, "enabled": 2, "errored": 1},
+        events={"errors_5m": 3, "rejected_5m": 1, "delivery_failed_5m": 2, "tool_failed_5m": 1, "cron_failed_5m": 1},
+        profiles={"count": 2, "available": 2, "cooling_down": 0},
+        timestamp=1_704_067_260.0,
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        metrics_store=metrics,
+    )
+
+    snapshot = control.metrics_snapshot()
+    tail = control.metrics_tail(limit=10)
+    summary = control.metrics_summary(limit=10)
+
+    assert snapshot["configured"] is True
+    assert snapshot["available"] is True
+    assert snapshot["item"]["delivery"]["pending"] == 5
+    assert tail["count"] == 2
+    assert [row["delivery"]["pending"] for row in tail["items"]] == [2, 5]
+    assert summary["available"] is True
+    assert summary["count"] == 2
+    assert summary["latest"]["delivery"]["failed"] == 1
+    assert summary["delivery"]["max_pending"] == 5
+    assert summary["lanes"]["max_queued"] == 4
+    assert summary["events"]["max_errors_5m"] == 3
+    assert summary["cron"]["max_errored"] == 1
+    assert summary["profiles"]["max_available"] == 2
+
+
+def test_control_plane_metrics_views_handle_missing_store(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+    )
+
+    assert control.metrics_snapshot() == {"configured": False}
+    assert control.metrics_tail(limit=5) == {"items": [], "count": 0, "configured": False, "limit": 5}
+    assert control.metrics_summary(limit=5) == {"configured": False, "count": 0, "limit": 5}
+
+
+def test_control_plane_exposes_alert_views(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    metrics = MetricsStore(settings.metrics_dir, retention_days=2000)
+    alerts = AlertStore(settings.alerts_dir, retention_days=2000)
+    runtime = AlertsRuntime(metrics_store=metrics, alert_store=alerts, interval_seconds=60)
+
+    metrics.record(delivery={"failed": 1}, lanes={"queued": 0}, profiles={"available": 1})
+    runtime.evaluate_once()
+    metrics.record(delivery={"failed": 2}, lanes={"queued": 0}, profiles={"available": 1})
+    runtime.evaluate_once()
+
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        alert_store=alerts,
+        alerts_runtime=runtime,
+    )
+
+    active = control.active_alerts()
+    history = control.alert_history(limit=10)
+
+    assert active["configured"] is True
+    assert active["count"] == 1
+    assert active["items"][0]["rule_id"] == "delivery_failed_persisting"
+    assert history["configured"] is True
+    assert history["items"][-1]["event"] == "triggered"
 
 
 def test_control_plane_can_set_and_remove_agent(tmp_path: Path) -> None:

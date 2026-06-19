@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from agent_gateway.application.lanes import CommandQueue
+from agent_gateway.application.metrics_runtime import MetricsRuntime
+from agent_gateway.application.resilience import AuthProfile, ProfileManager
+from agent_gateway.delivery.queue import DeliveryQueue
+from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.metrics import MetricsStore
+
+
+class FakeCron:
+    def list_jobs(self) -> list[dict[str, object]]:
+        return [
+            {"id": "ok", "enabled": True, "errors": 0},
+            {"id": "bad", "enabled": True, "errors": 2},
+            {"id": "off", "enabled": False, "errors": 0},
+        ]
+
+
+class FakeAutonomy:
+    def __init__(self) -> None:
+        self.cron = FakeCron()
+
+
+def test_metrics_runtime_collects_runtime_snapshot(tmp_path: Path) -> None:
+    queue = DeliveryQueue(tmp_path / "delivery")
+    queue.enqueue("cli", "peer-1", "pending", {"account_id": "cli-local"})
+    failed_id = queue.enqueue("cli", "peer-2", "failed", {"account_id": "cli-local"})
+    failed = queue.get_pending(failed_id)
+    assert failed is not None
+    failed.retry_count = 5
+    failed.last_error = "permanent"
+    queue.move_to_failed(failed)
+
+    command_queue = CommandQueue()
+    command_queue.lane("active-lane").enqueue(lambda: "done")
+    profiles = ProfileManager(
+        [
+            AuthProfile(name="primary", provider="anthropic", api_key="k"),
+            AuthProfile(
+                name="cooldown",
+                provider="anthropic",
+                api_key="k",
+                cooldown_until=9_999_999_999.0,
+            ),
+        ]
+    )
+    event_store = RuntimeEventStore(tmp_path / "events")
+    event_store.record(
+        "delivery.failed",
+        status="failed",
+        component="delivery",
+        message="failed",
+        error="channel unavailable",
+    )
+    event_store.record(
+        "feishu.event.rejected",
+        status="rejected",
+        component="feishu",
+        message="rejected",
+        error="method not allowed",
+    )
+    metrics = MetricsStore(tmp_path / "metrics")
+    runtime = MetricsRuntime(
+        metrics_store=metrics,
+        delivery_queue=queue,
+        command_queue=command_queue,
+        profiles=profiles,
+        autonomy=FakeAutonomy(),  # type: ignore[arg-type]
+        event_store=event_store,
+        interval_seconds=60,
+    )
+
+    row = runtime.snapshot_once()
+
+    assert row["delivery"]["pending"] == 1
+    assert row["delivery"]["failed"] == 1
+    assert row["cron"]["count"] == 3
+    assert row["cron"]["enabled"] == 2
+    assert row["cron"]["errored"] == 1
+    assert row["profiles"]["count"] == 2
+    assert row["profiles"]["available"] == 1
+    assert row["profiles"]["cooling_down"] == 1
+    assert row["events"]["delivery_failed_5m"] == 1
+    assert row["events"]["rejected_5m"] == 1
+    assert metrics.latest() == row
+
+
+def test_metrics_runtime_handles_optional_event_and_autonomy_sources(tmp_path: Path) -> None:
+    runtime = MetricsRuntime(
+        metrics_store=MetricsStore(tmp_path / "metrics"),
+        delivery_queue=DeliveryQueue(tmp_path / "delivery"),
+        command_queue=CommandQueue(),
+        profiles=ProfileManager([]),
+        autonomy=None,
+        event_store=None,
+    )
+
+    row = runtime.snapshot_once()
+
+    assert row["cron"] == {"configured": False}
+    assert row["events"] == {"configured": False}
+    assert row["delivery"]["pending"] == 0

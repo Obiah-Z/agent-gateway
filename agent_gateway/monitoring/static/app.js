@@ -127,6 +127,13 @@ const dom = {
   metricProfilesDetail: $("#metric-profiles-detail"),
   metricCron: $("#metric-cron"),
   metricCronDetail: $("#metric-cron-detail"),
+  metricsSummary: $("#metrics-summary"),
+  metricsHighlights: $("#metrics-highlights"),
+  metricsTrends: $("#metrics-trends"),
+  alertsSummary: $("#alerts-summary"),
+  alertsActive: $("#alerts-active"),
+  alertsHistorySummary: $("#alerts-history-summary"),
+  alertsHistory: $("#alerts-history"),
   healthSummary: $("#health-summary"),
   healthList: $("#health-list"),
   runtimeUpdated: $("#runtime-updated"),
@@ -566,7 +573,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -579,11 +586,17 @@ async function refreshAll() {
       rpc("events.tail", buildEventQuery({ limit: 80 })),
       rpc("errors.recent", buildErrorQuery({ limit: 40 })),
       rpc("memory.recent", { limit: 20 }),
+      rpc("metrics.summary", { limit: 60 }),
+      rpc("metrics.tail", { limit: 24 }),
+      rpc("alerts.active"),
+      rpc("alerts.history", { limit: 20 }),
     ]);
-    renderSummary(health, runtime, deliveryStats);
-    renderIssues(buildIssues(health, runtime, deliveryStats));
+    renderSummary(health, runtime, deliveryStats, metricsSummary);
+    renderIssues(buildIssues(health, runtime, deliveryStats, metricsSummary));
     renderHealth(health);
     renderRuntime(runtime);
+    renderMetrics(metricsSummary, metricsTail);
+    renderAlerts(alertsActive, alertsHistory);
     renderTraces(events);
     renderEvents(events);
     renderErrors(errors);
@@ -597,7 +610,7 @@ async function refreshAll() {
   }
 }
 
-function buildIssues(health, runtime, deliveryStats) {
+function buildIssues(health, runtime, deliveryStats, metricsSummary = {}) {
   const issues = [];
   const checks = Array.isArray(health.checks) ? health.checks : [];
   for (const check of checks) {
@@ -629,6 +642,16 @@ function buildIssues(health, runtime, deliveryStats) {
       title: `${pending} 条投递待处理`,
       detail: `${delivery.retry_ready || 0} 条可立即重试或 flush。`,
       target: "#delivery-panel",
+    });
+  }
+
+  const metricEvents = metricsSummary.events || {};
+  if (Number(metricEvents.max_errors_5m || 0) > 0) {
+    issues.push({
+      status: Number(metricEvents.max_errors_5m || 0) >= 3 ? "critical" : "warning",
+      title: `最近窗口出现 ${metricEvents.max_errors_5m} 次错误`,
+      detail: "查看指标趋势和最近错误，确认异常来自模型、工具、投递还是飞书接入。",
+      target: "#metrics-panel",
     });
   }
 
@@ -673,15 +696,20 @@ function renderIssues(issues) {
   }
 }
 
-function renderSummary(health, runtime, deliveryStats) {
+function renderSummary(health, runtime, deliveryStats, metricsSummary = {}) {
   const server = runtime.server || health.server || {};
   const channels = runtime.channels || {};
   const profiles = runtime.profiles || {};
   const cron = runtime.cron || {};
   const delivery = deliveryStats || runtime.delivery || {};
+  const metricEvents = metricsSummary.events || {};
+  const maxErrors = Number(metricEvents.max_errors_5m || 0);
+  const maxRejected = Number(metricEvents.max_rejected_5m || 0);
 
   dom.metricHealth.textContent = health.status || "--";
-  dom.metricHealthDetail.textContent = `${health.summary?.critical || 0} 个严重 / ${health.summary?.warning || 0} 个注意`;
+  dom.metricHealthDetail.textContent = maxErrors > 0
+    ? `最近窗口 ${maxErrors} 次错误 / ${maxRejected} 次拒绝`
+    : `${health.summary?.critical || 0} 个严重 / ${health.summary?.warning || 0} 个注意`;
   const healthCard = dom.metricHealth.closest(".metric-health");
   healthCard.classList.remove("is-ok", "is-warning", "is-critical");
   healthCard.classList.add(`is-${normalizeStatus(health.status)}`);
@@ -695,7 +723,9 @@ function renderSummary(health, runtime, deliveryStats) {
   dom.metricProfiles.textContent = `${profiles.available ?? "--"} / ${profiles.count ?? "--"}`;
   dom.metricProfilesDetail.textContent = "可用 Profile / 已配置 Profile";
   dom.metricCron.textContent = `${cron.enabled ?? "--"} / ${cron.count ?? "--"}`;
-  dom.metricCronDetail.textContent = `${cron.errored ?? 0} 个任务有错误`;
+  dom.metricCronDetail.textContent = maxErrors > 0
+    ? `最近窗口错误峰值 ${maxErrors}`
+    : `${cron.errored ?? 0} 个任务有错误`;
 }
 
 function renderHealth(health) {
@@ -855,6 +885,337 @@ function renderRuntime(runtime) {
     card.appendChild(details);
     dom.runtimeList.appendChild(card);
   }
+}
+
+function renderMetrics(summaryPayload, tailPayload) {
+  clearNode(dom.metricsHighlights);
+  clearNode(dom.metricsTrends);
+
+  const summary = summaryPayload || {};
+  const items = Array.isArray(tailPayload?.items) ? tailPayload.items : [];
+  const latest = summary.latest || items[items.length - 1] || {};
+  const available = Boolean(summary.configured && (summary.available || items.length));
+  dom.metricsSummary.textContent = available
+    ? `最近 ${summary.count || items.length || 0} 个采样点`
+    : "暂无采样";
+
+  if (!available) {
+    dom.metricsHighlights.className = "trend-highlight-list empty";
+    dom.metricsTrends.className = "trend-grid empty";
+    dom.metricsHighlights.textContent = "指标采样尚未产生。等待后台运行一段时间后，这里会出现最近趋势。";
+    dom.metricsTrends.textContent = "暂无趋势数据";
+    return;
+  }
+
+  dom.metricsHighlights.className = "trend-highlight-list";
+  dom.metricsTrends.className = "trend-grid";
+
+  const delivery = summary.delivery || {};
+  const laneMetrics = summary.lanes || {};
+  const eventMetrics = summary.events || {};
+  const cronMetrics = summary.cron || {};
+  const profileMetrics = summary.profiles || {};
+
+  const highlights = [
+    {
+      title: "最近堆积峰值",
+      value: `${delivery.max_pending ?? 0} 条`,
+      detail: `失败峰值 ${delivery.max_failed ?? 0} 条，立即可重试峰值 ${delivery.max_retry_ready ?? 0} 条`,
+      tone: Number(delivery.max_failed || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      title: "最近错误峰值",
+      value: `${eventMetrics.max_errors_5m ?? 0} 次`,
+      detail: `拒绝 ${eventMetrics.max_rejected_5m ?? 0} 次，投递失败 ${eventMetrics.max_delivery_failed_5m ?? 0} 次`,
+      tone: Number(eventMetrics.max_errors_5m || 0) >= 3 ? "critical" : Number(eventMetrics.max_errors_5m || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      title: "并发车道压力",
+      value: `${laneMetrics.max_queued ?? 0} 条`,
+      detail: `活跃峰值 ${laneMetrics.max_active ?? 0}，单车道最深 ${laneMetrics.max_queue_depth ?? 0}`,
+      tone: Number(laneMetrics.max_queued || 0) >= 5 ? "warning" : "ok",
+    },
+    {
+      title: "当前快照",
+      value: formatTimestamp(latest.time || latest.timestamp),
+      detail: `Cron 错误峰值 ${cronMetrics.max_errored ?? 0}，可用 Profile 峰值 ${profileMetrics.max_available ?? 0}`,
+      tone: "ok",
+    },
+  ];
+
+  for (const item of highlights) {
+    const card = document.createElement("article");
+    card.className = `trend-highlight trend-${item.tone}`;
+    appendText(card, "span", item.title, "trend-label");
+    appendText(card, "strong", item.value, "trend-value");
+    appendText(card, "small", item.detail, "trend-detail");
+    dom.metricsHighlights.appendChild(card);
+  }
+
+  const trendCards = [
+    buildTrendCard({
+      title: "投递队列",
+      summary: `当前待投递 ${latest.delivery?.pending ?? 0} 条，失败 ${latest.delivery?.failed ?? 0} 条`,
+      points: items.map((row) => ({
+        label: formatTrendPointTime(row.time || row.timestamp),
+        value: Number(row.delivery?.pending || 0),
+      })),
+      metricLabel: "待投递",
+      detailRows: [
+        ["最近峰值", `${delivery.max_pending ?? 0} 条`],
+        ["失败峰值", `${delivery.max_failed ?? 0} 条`],
+        ["最老待投递", formatSecondsLabel(delivery.max_oldest_pending_age_seconds)],
+      ],
+      tone: Number(delivery.max_failed || 0) > 0 ? "warning" : "ok",
+    }),
+    buildTrendCard({
+      title: "错误热度",
+      summary: `最近 5 分钟错误峰值 ${eventMetrics.max_errors_5m ?? 0} 次`,
+      points: items.map((row) => ({
+        label: formatTrendPointTime(row.time || row.timestamp),
+        value: Number(row.events?.errors_5m || 0),
+      })),
+      metricLabel: "错误数",
+      detailRows: [
+        ["拒绝峰值", `${eventMetrics.max_rejected_5m ?? 0} 次`],
+        ["工具失败峰值", `${eventMetrics.max_tool_failed_5m ?? 0} 次`],
+        ["Cron 失败峰值", `${eventMetrics.max_cron_failed_5m ?? 0} 次`],
+      ],
+      tone: Number(eventMetrics.max_errors_5m || 0) >= 3 ? "critical" : Number(eventMetrics.max_errors_5m || 0) > 0 ? "warning" : "ok",
+    }),
+    buildTrendCard({
+      title: "并发车道",
+      summary: `当前排队 ${latest.lanes?.queued ?? 0} 条，活跃 ${latest.lanes?.active ?? 0} 条`,
+      points: items.map((row) => ({
+        label: formatTrendPointTime(row.time || row.timestamp),
+        value: Number(row.lanes?.queued || 0),
+      })),
+      metricLabel: "排队数",
+      detailRows: [
+        ["活跃峰值", `${laneMetrics.max_active ?? 0} 条`],
+        ["排队峰值", `${laneMetrics.max_queued ?? 0} 条`],
+        ["单车道最深", `${laneMetrics.max_queue_depth ?? 0}`],
+      ],
+      tone: Number(laneMetrics.max_queued || 0) >= 5 ? "warning" : "ok",
+    }),
+    buildTrendCard({
+      title: "定时任务与 Profile",
+      summary: `当前 Cron 错误 ${latest.cron?.errored ?? 0} 个，可用 Profile ${latest.profiles?.available ?? 0} 个`,
+      points: items.map((row) => ({
+        label: formatTrendPointTime(row.time || row.timestamp),
+        value: Number(row.cron?.errored || 0) + Number(row.profiles?.cooling_down || 0),
+      })),
+      metricLabel: "异常负载",
+      detailRows: [
+        ["Cron 错误峰值", `${cronMetrics.max_errored ?? 0} 个`],
+        ["Cron 启用峰值", `${cronMetrics.max_enabled ?? 0} 个`],
+        ["Profile 冷却峰值", `${profileMetrics.max_cooling_down ?? 0} 个`],
+      ],
+      tone: Number(cronMetrics.max_errored || 0) > 0 || Number(profileMetrics.max_cooling_down || 0) > 0 ? "warning" : "ok",
+    }),
+  ];
+
+  for (const card of trendCards) {
+    dom.metricsTrends.appendChild(card);
+  }
+}
+
+function renderAlerts(activePayload, historyPayload) {
+  clearNode(dom.alertsActive);
+  clearNode(dom.alertsHistory);
+
+  const activeItems = Array.isArray(activePayload?.items) ? activePayload.items : [];
+  const historyItems = Array.isArray(historyPayload?.items) ? historyPayload.items.slice().reverse() : [];
+  const target = activePayload?.notification_target || {};
+  dom.alertsSummary.textContent = activeItems.length
+    ? `${activeItems.length} 条活跃告警`
+    : target.peer_id_configured
+      ? "当前无活跃告警"
+      : "未配置主动通知";
+  dom.alertsHistorySummary.textContent = `${historyItems.length} 条历史`;
+
+  dom.alertsActive.className = activeItems.length ? "alert-state-list" : "alert-state-list empty";
+  if (!activeItems.length) {
+    dom.alertsActive.textContent = target.peer_id_configured
+      ? "当前没有活跃告警。告警触发后会在这里显示，并可通过通知目标主动发送。"
+      : "当前没有活跃告警，且尚未配置飞书告警通知目标。";
+  } else {
+    for (const item of activeItems) {
+      const card = document.createElement("article");
+      card.className = `alert-card alert-${normalizeStatus(item.severity)}`;
+      const head = document.createElement("div");
+      head.className = "alert-card-head";
+      head.appendChild(badge(item.severity));
+      const title = document.createElement("div");
+      appendText(title, "strong", item.title || item.rule_id || "告警", "item-title");
+      appendText(
+        title,
+        "small",
+        `${item.description || ""} · 持续 ${formatAlertDuration(item.active_since)} · 当前值 ${item.current_value ?? "--"} / 阈值 ${item.threshold ?? "--"}`,
+        "item-meta",
+      );
+      head.appendChild(title);
+      card.appendChild(head);
+      appendText(card, "div", item.last_message || "暂无补充说明", "item-title");
+      appendText(
+        card,
+        "div",
+        `通知状态：${item.last_notified_time ? `上次通知 ${formatTimestamp(item.last_notified_time)}` : "尚未发送"}${item.last_notification_error ? ` · 发送失败：${item.last_notification_error}` : ""}`,
+        "item-meta",
+      );
+      const details = document.createElement("details");
+      details.className = "runtime-details";
+      const summary = document.createElement("summary");
+      summary.textContent = "查看技术详情";
+      details.appendChild(summary);
+      const rows = [
+        ["规则 ID", item.rule_id],
+        ["首次触发", formatTimestamp(item.active_since)],
+        ["最近评估", formatTimestamp(item.last_evaluated_at)],
+        ["连续命中", String(item.consecutive_hits ?? 0)],
+        ["通知目标", `${target.channel || "--"}:${target.account_id || "--"} -> ${target.agent_id || "--"}`],
+        ["技术元数据", JSON.stringify(item.metadata || {}, null, 2)],
+      ];
+      for (const [label, value] of rows) {
+        const row = document.createElement("div");
+        row.className = "kv-row";
+        appendText(row, "span", label);
+        appendText(row, "code", value || "--");
+        details.appendChild(row);
+      }
+      card.appendChild(details);
+      dom.alertsActive.appendChild(card);
+    }
+  }
+
+  dom.alertsHistory.className = historyItems.length ? "alert-history-list" : "alert-history-list empty";
+  if (!historyItems.length) {
+    dom.alertsHistory.textContent = "最近没有告警触发、提醒或恢复记录。";
+    return;
+  }
+  for (const item of historyItems) {
+    const card = document.createElement("article");
+    const event = String(item.event || "");
+    const severity = item.rule?.severity || (event === "recovered" ? "ok" : "warning");
+    card.className = `alert-card alert-${normalizeStatus(severity)}`;
+    const head = document.createElement("div");
+    head.className = "alert-card-head";
+    head.appendChild(badge(event === "recovered" ? "ok" : severity));
+    const title = document.createElement("div");
+    appendText(title, "strong", `${alertEventLabel(event)}：${item.rule?.title || item.rule?.id || "告警"}`, "item-title");
+    appendText(title, "small", `${formatTimestamp(item.time || item.timestamp)} · 当前值 ${item.value ?? "--"} / 阈值 ${item.rule?.threshold ?? "--"}`, "item-meta");
+    head.appendChild(title);
+    card.appendChild(head);
+    appendText(card, "div", item.message || "无说明", "item-title");
+    appendText(card, "div", `规则 ${item.rule?.id || "--"} · 等级 ${item.rule?.severity || "--"}`, "item-meta");
+    dom.alertsHistory.appendChild(card);
+  }
+}
+
+function formatAlertDuration(value) {
+  if (!value) {
+    return "--";
+  }
+  return formatDuration(Math.max(0, (Date.now() / 1000) - Number(value)));
+}
+
+function alertEventLabel(event) {
+  return {
+    triggered: "告警触发",
+    reminded: "告警持续",
+    recovered: "告警恢复",
+  }[event] || "告警事件";
+}
+
+function buildTrendCard({ title, summary, points, metricLabel, detailRows, tone }) {
+  const card = document.createElement("article");
+  card.className = `trend-card trend-${tone || "ok"}`;
+
+  const head = document.createElement("div");
+  head.className = "trend-card-head";
+  const titleNode = document.createElement("div");
+  appendText(titleNode, "strong", title, "item-title");
+  appendText(titleNode, "small", summary, "item-meta");
+  head.appendChild(titleNode);
+  if (points.length) {
+    appendText(head, "span", `${points[points.length - 1].value}`, "trend-current");
+  }
+  card.appendChild(head);
+
+  card.appendChild(buildSparkline(points, metricLabel));
+
+  const rows = document.createElement("div");
+  rows.className = "trend-rows";
+  for (const [label, value] of detailRows) {
+    const row = document.createElement("div");
+    row.className = "kv-row";
+    appendText(row, "span", label);
+    appendText(row, "code", value || "--");
+    rows.appendChild(row);
+  }
+  card.appendChild(rows);
+  return card;
+}
+
+function buildSparkline(points, metricLabel) {
+  const wrap = document.createElement("div");
+  wrap.className = "sparkline-card";
+  if (!points.length) {
+    wrap.classList.add("empty");
+    wrap.textContent = "暂无采样点";
+    return wrap;
+  }
+
+  const values = points.map((point) => Number(point.value || 0));
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = Math.max(max - min, 1);
+  const coords = values.map((value, index) => {
+    const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 100;
+    const y = 100 - ((value - min) / range) * 100;
+    return `${x},${y}`;
+  }).join(" ");
+
+  wrap.innerHTML = `
+    <div class="sparkline-meta">
+      <span>${metricLabel}</span>
+      <strong>${values[values.length - 1]}</strong>
+    </div>
+    <svg class="sparkline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <polyline class="sparkline-fill" points="0,100 ${coords} 100,100"></polyline>
+      <polyline class="sparkline-line" points="${coords}"></polyline>
+    </svg>
+    <div class="sparkline-axis">
+      <span>${points[0].label}</span>
+      <span>${points[points.length - 1].label}</span>
+    </div>
+  `;
+  return wrap;
+}
+
+function formatTrendPointTime(value) {
+  const date = parseDateValue(value);
+  if (!date) {
+    return "--";
+  }
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== "literal") {
+      acc[part.type] = part.value;
+    }
+    return acc;
+  }, {});
+  return `${parts.hour}:${parts.minute}`;
+}
+
+function formatSecondsLabel(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "--";
+  }
+  return formatDuration(Number(value));
 }
 
 function classifyDeliveryError(item) {

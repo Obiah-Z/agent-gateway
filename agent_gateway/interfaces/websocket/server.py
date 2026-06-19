@@ -112,6 +112,11 @@ class GatewayServer:
             "events.tail": self._m_events_tail,
             "errors.recent": self._m_errors_recent,
             "memory.recent": self._m_memory_recent,
+            "metrics.snapshot": self._m_metrics_snapshot,
+            "metrics.tail": self._m_metrics_tail,
+            "metrics.summary": self._m_metrics_summary,
+            "alerts.active": self._m_alerts_active,
+            "alerts.history": self._m_alerts_history,
             "ingest": self._m_ingest,
             "heartbeat.status": self._m_heartbeat_status,
             "heartbeat.trigger": self._m_heartbeat_trigger,
@@ -535,6 +540,31 @@ class GatewayServer:
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.recent_memories(limit=int(params.get("limit", 20)))
+
+    async def _m_metrics_snapshot(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.metrics_snapshot()
+
+    async def _m_metrics_tail(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.metrics_tail(limit=int(params.get("limit", 60)))
+
+    async def _m_metrics_summary(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.metrics_summary(limit=int(params.get("limit", 60)))
+
+    async def _m_alerts_active(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.active_alerts()
+
+    async def _m_alerts_history(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.alert_history(limit=int(params.get("limit", 50)))
 
     async def _m_ingest(self, params: dict[str, Any]) -> dict[str, Any]:
         inbound = InboundMessage(

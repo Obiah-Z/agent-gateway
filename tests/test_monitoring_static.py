@@ -27,6 +27,10 @@ def test_monitoring_json_rpc_client_covers_first_stage_methods() -> None:
     expected_methods = {
         "health.check",
         "runtime.status",
+        "metrics.summary",
+        "metrics.tail",
+        "alerts.active",
+        "alerts.history",
         "delivery.stats",
         "delivery.list",
         "delivery.retry",
@@ -44,6 +48,8 @@ def test_monitoring_dashboard_includes_triage_and_delivery_detail_ui() -> None:
     index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
     assert "问题摘要" in index
+    assert "指标趋势" in index
+    assert "当前活跃告警" in index
     assert "delivery-detail" in index
     assert "data-jump" in index
     assert "console-sidebar" in index
@@ -70,6 +76,18 @@ def test_monitoring_runtime_snapshot_uses_compact_cards_and_details() -> None:
     assert "document.createElement(\"details\")" in app_js
     assert ".runtime-icon" in styles
     assert ".runtime-chips" in styles
+
+
+def test_monitoring_dashboard_includes_metrics_trend_view() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+
+    assert "function renderMetrics" in app_js
+    assert "function renderAlerts" in app_js
+    assert "function buildSparkline" in app_js
+    assert ".sparkline" in styles
+    assert ".trend-grid" in styles
+    assert ".alert-card" in styles
 
 
 def test_monitoring_static_dir_is_inside_package() -> None:

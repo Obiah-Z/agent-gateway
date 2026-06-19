@@ -22,11 +22,14 @@ from agent_gateway.intelligence.memory import MemoryStore, register_memory_tools
 from agent_gateway.intelligence.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
 from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.alerts import AlertStore
+from agent_gateway.observability.metrics import MetricsStore
 from agent_gateway.onboarding.feishu import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
 )
 from agent_gateway.core.ids import normalize_agent_id
+from agent_gateway.core.models import ProactiveTarget
 from agent_gateway.core.router import BindingTable
 from agent_gateway.application.autonomy import AutonomyRuntime
 from agent_gateway.application.channel_runtime import ChannelRuntime
@@ -35,6 +38,8 @@ from agent_gateway.application.delivery_runtime import DeliveryRuntime
 from agent_gateway.application.dispatcher import GatewayDispatcher
 from agent_gateway.application.lanes import CommandQueue
 from agent_gateway.application.loop import AgentLoopRunner
+from agent_gateway.application.metrics_runtime import MetricsRuntime
+from agent_gateway.application.alerts_runtime import AlertsRuntime
 from agent_gateway.application.resilience import ProfileManager, ResilienceRunner
 from agent_gateway.interfaces.feishu.http import FeishuWebhookServer
 from agent_gateway.interfaces.feishu.long_connection import FeishuLongConnectionRuntime
@@ -65,6 +70,10 @@ class GatewayApplication:
     command_queue: CommandQueue
     control_plane: GatewayControlPlane
     event_store: RuntimeEventStore
+    metrics_store: MetricsStore
+    metrics_runtime: MetricsRuntime
+    alert_store: AlertStore
+    alerts_runtime: AlertsRuntime
 
 
 def build_dashboard_websocket_url(settings: GatewaySettings) -> str:
@@ -126,6 +135,14 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         settings.events_dir,
         retention_days=settings.events_retention_days,
     )
+    metrics_store = MetricsStore(
+        settings.metrics_dir,
+        retention_days=settings.metrics_retention_days,
+    )
+    alert_store = AlertStore(
+        settings.alerts_dir,
+        retention_days=settings.alerts_retention_days,
+    )
     dispatcher = GatewayDispatcher(
         agents,
         bindings,
@@ -142,6 +159,33 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         on_success=autonomy_runtime.cron.on_delivery_success,
         event_store=event_store,
     )
+    metrics_runtime = MetricsRuntime(
+        metrics_store=metrics_store,
+        delivery_queue=delivery_queue,
+        command_queue=command_queue,
+        profiles=profile_manager,
+        autonomy=autonomy_runtime,
+        event_store=event_store,
+        interval_seconds=settings.metrics_interval_seconds,
+    )
+    alerts_runtime = AlertsRuntime(
+        metrics_store=metrics_store,
+        alert_store=alert_store,
+        event_store=event_store,
+        dispatcher=dispatcher,
+        channels=channel_manager,
+        target=(
+            ProactiveTarget(
+                channel=settings.alert_channel,
+                account_id=settings.alert_account_id,
+                peer_id=settings.alert_peer_id,
+                agent_id=normalize_agent_id(settings.alert_agent_id),
+            )
+            if settings.alert_channel and settings.alert_account_id and settings.alert_peer_id
+            else None
+        ),
+        interval_seconds=settings.alerts_interval_seconds,
+    )
     control_plane = GatewayControlPlane(
         settings=settings,
         agents=agents,
@@ -153,6 +197,10 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         delivery_queue=delivery_queue,
         delivery_runtime=delivery_runtime,
         event_store=event_store,
+        metrics_store=metrics_store,
+        metrics_runtime=metrics_runtime,
+        alert_store=alert_store,
+        alerts_runtime=alerts_runtime,
     )
 
     return GatewayApplication(
@@ -174,6 +222,10 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         command_queue=command_queue,
         control_plane=control_plane,
         event_store=event_store,
+        metrics_store=metrics_store,
+        metrics_runtime=metrics_runtime,
+        alert_store=alert_store,
+        alerts_runtime=alerts_runtime,
     )
 
 
@@ -248,6 +300,10 @@ async def serve(app: GatewayApplication) -> None:
         started.append(channel_runtime)
         await app.autonomy_runtime.start()
         started.append(app.autonomy_runtime)
+        await app.metrics_runtime.start()
+        started.append(app.metrics_runtime)
+        await app.alerts_runtime.start()
+        started.append(app.alerts_runtime)
         await feishu_webhook.start()
         started.append(feishu_webhook)
         await feishu_long_connection.start()
@@ -296,6 +352,8 @@ async def serve(app: GatewayApplication) -> None:
         if dashboard_server is not None:
             await dashboard_server.stop()
         await feishu_long_connection.stop()
+        await app.metrics_runtime.stop()
+        await app.alerts_runtime.stop()
         await app.autonomy_runtime.stop()
         await channel_runtime.stop()
         await app.delivery_runtime.stop()

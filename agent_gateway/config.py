@@ -63,6 +63,10 @@ class GatewaySettings:
     proactive_account_id: str = "cli-local"
     proactive_peer_id: str = "cli-user"
     proactive_agent_id: str = "main"
+    alert_channel: str = ""
+    alert_account_id: str = ""
+    alert_peer_id: str = ""
+    alert_agent_id: str = "main"
     feishu_webhook_host: str = "127.0.0.1"
     feishu_webhook_port: int = 8766
     feishu_webhook_path: str = "/webhooks/feishu"
@@ -83,6 +87,10 @@ class GatewaySettings:
     web_search_max_results: int = 5
     web_search_max_output_chars: int = 12_000
     events_retention_days: int = 14
+    metrics_retention_days: int = 14
+    metrics_interval_seconds: float = 60.0
+    alerts_retention_days: int = 14
+    alerts_interval_seconds: float = 60.0
 
     @property
     def sessions_dir(self) -> Path:
@@ -99,6 +107,14 @@ class GatewaySettings:
     @property
     def events_dir(self) -> Path:
         return self.data_dir / "events"
+
+    @property
+    def metrics_dir(self) -> Path:
+        return self.data_dir / "metrics"
+
+    @property
+    def alerts_dir(self) -> Path:
+        return self.data_dir / "alerts"
 
     @property
     def agents_config_file(self) -> Path:
@@ -157,6 +173,10 @@ class GatewaySettings:
             proactive_account_id=os.getenv("GATEWAY_PROACTIVE_ACCOUNT_ID", "cli-local"),
             proactive_peer_id=os.getenv("GATEWAY_PROACTIVE_PEER_ID", "cli-user"),
             proactive_agent_id=os.getenv("GATEWAY_PROACTIVE_AGENT_ID", "main"),
+            alert_channel=os.getenv("GATEWAY_ALERT_CHANNEL", "").strip(),
+            alert_account_id=os.getenv("GATEWAY_ALERT_ACCOUNT_ID", "").strip(),
+            alert_peer_id=os.getenv("GATEWAY_ALERT_PEER_ID", "").strip(),
+            alert_agent_id=os.getenv("GATEWAY_ALERT_AGENT_ID", "main").strip() or "main",
             feishu_webhook_host=os.getenv("FEISHU_WEBHOOK_HOST", "127.0.0.1"),
             feishu_webhook_port=int(os.getenv("FEISHU_WEBHOOK_PORT", "8766")),
             feishu_webhook_path=os.getenv("FEISHU_WEBHOOK_PATH", "/webhooks/feishu"),
@@ -193,6 +213,10 @@ class GatewaySettings:
                 os.getenv("GATEWAY_WEB_SEARCH_MAX_OUTPUT_CHARS", "12000")
             ),
             events_retention_days=int(os.getenv("GATEWAY_EVENTS_RETENTION_DAYS", "14")),
+            metrics_retention_days=int(os.getenv("GATEWAY_METRICS_RETENTION_DAYS", "14")),
+            metrics_interval_seconds=float(os.getenv("GATEWAY_METRICS_INTERVAL_SECONDS", "60")),
+            alerts_retention_days=int(os.getenv("GATEWAY_ALERTS_RETENTION_DAYS", "14")),
+            alerts_interval_seconds=float(os.getenv("GATEWAY_ALERTS_INTERVAL_SECONDS", "60")),
         )
 
     def ensure_directories(self) -> None:
@@ -202,3 +226,5 @@ class GatewaySettings:
         self.delivery_queue_dir.mkdir(parents=True, exist_ok=True)
         self.feishu_webhook_dir.mkdir(parents=True, exist_ok=True)
         self.events_dir.mkdir(parents=True, exist_ok=True)
+        self.metrics_dir.mkdir(parents=True, exist_ok=True)
+        self.alerts_dir.mkdir(parents=True, exist_ok=True)

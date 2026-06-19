@@ -20,6 +20,8 @@
           <a href="#issue-panel"><span class="side-dot"></span>问题摘要</a>
           <a href="#overview-panel"><span class="side-dot"></span>运行总览</a>
           <a href="#health-panel"><span class="side-dot"></span>健康检查</a>
+          <a href="#metrics-panel"><span class="side-dot"></span>指标趋势</a>
+          <a href="#alerts-panel"><span class="side-dot"></span>告警状态</a>
           <a href="#events-panel"><span class="side-dot"></span>事件流</a>
           <a href="#memory-panel"><span class="side-dot"></span>记忆写入</a>
           <a href="#delivery-panel"><span class="side-dot"></span>投递队列</a>
@@ -130,6 +132,42 @@
             <span id="runtime-updated" class="pill">未刷新</span>
           </div>
           <div id="runtime-list" class="runtime-list empty">尚未加载运行态数据</div>
+        </article>
+      </section>
+
+      <section id="metrics-panel" class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Metrics</p>
+            <h2>指标趋势</h2>
+          </div>
+          <span id="metrics-summary" class="pill">暂无数据</span>
+        </div>
+        <div id="metrics-highlights" class="trend-highlight-list empty">尚未加载指标摘要</div>
+        <div id="metrics-trends" class="trend-grid empty">尚未加载趋势数据</div>
+      </section>
+
+      <section id="alerts-panel" class="grid-two">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Alerts</p>
+              <h2>当前活跃告警</h2>
+            </div>
+            <span id="alerts-summary" class="pill">暂无数据</span>
+          </div>
+          <div id="alerts-active" class="alert-state-list empty">尚未加载活跃告警</div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Alert History</p>
+              <h2>最近告警历史</h2>
+            </div>
+            <span id="alerts-history-summary" class="pill">暂无数据</span>
+          </div>
+          <div id="alerts-history" class="alert-history-list empty">尚未加载告警历史</div>
         </article>
       </section>
 

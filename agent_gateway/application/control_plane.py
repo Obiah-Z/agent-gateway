@@ -27,6 +27,8 @@ from agent_gateway.config_loader import (
 from agent_gateway.delivery.queue import DeliveryQueue, QueuedDelivery
 from agent_gateway.intelligence.memory import MemoryStore
 from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.observability.alerts import AlertStore
+from agent_gateway.observability.metrics import MetricsStore
 from agent_gateway.core.ids import normalize_agent_id
 from agent_gateway.core.models import AgentConfig, Binding
 from agent_gateway.core.router import BindingTable
@@ -61,6 +63,10 @@ class GatewayControlPlane:
     feishu_long_connection_runtime: Any = None
     feishu_onboarding: Any = None
     event_store: RuntimeEventStore | None = None
+    metrics_store: MetricsStore | None = None
+    metrics_runtime: Any = None
+    alert_store: AlertStore | None = None
+    alerts_runtime: Any = None
 
     def list_bindings(self) -> list[Binding]:
         return self.bindings.list_all()
@@ -202,6 +208,138 @@ class GatewayControlPlane:
             "count": len(items),
             "configured": True,
             "limit": max(1, min(int(limit), 200)),
+        }
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        if self.metrics_store is None:
+            return {"configured": False}
+        latest = self.metrics_store.latest()
+        if latest is None:
+            return {"configured": True, "available": False, "item": None}
+        return {
+            "configured": True,
+            "available": True,
+            "item": latest,
+        }
+
+    def metrics_tail(self, *, limit: int = 60) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit), 1000))
+        if self.metrics_store is None:
+            return {"items": [], "count": 0, "configured": False, "limit": safe_limit}
+        items = self.metrics_store.tail(limit=safe_limit)
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": True,
+            "limit": safe_limit,
+        }
+
+    def metrics_summary(self, *, limit: int = 60) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit), 1000))
+        if self.metrics_store is None:
+            return {"configured": False, "count": 0, "limit": safe_limit}
+        items = self.metrics_store.tail(limit=safe_limit)
+        if not items:
+            return {
+                "configured": True,
+                "count": 0,
+                "limit": safe_limit,
+                "available": False,
+                "latest": None,
+                "window": None,
+                "delivery": {},
+                "lanes": {},
+                "events": {},
+                "cron": {},
+                "profiles": {},
+            }
+
+        def pick(section: str, key: str, default: int | float = 0) -> int | float:
+            values: list[int | float] = []
+            for row in items:
+                payload = row.get(section, {})
+                if not isinstance(payload, dict):
+                    continue
+                value = payload.get(key, default)
+                if isinstance(value, bool):
+                    values.append(int(value))
+                elif isinstance(value, (int, float)):
+                    values.append(value)
+            return max(values) if values else default
+
+        first = items[0]
+        last = items[-1]
+        return {
+            "configured": True,
+            "available": True,
+            "count": len(items),
+            "limit": safe_limit,
+            "latest": last,
+            "window": {
+                "start_time": first.get("time"),
+                "end_time": last.get("time"),
+                "start_timestamp": first.get("timestamp"),
+                "end_timestamp": last.get("timestamp"),
+            },
+            "delivery": {
+                "max_pending": pick("delivery", "pending"),
+                "max_failed": pick("delivery", "failed"),
+                "max_retry_ready": pick("delivery", "retry_ready"),
+                "max_oldest_pending_age_seconds": pick("delivery", "oldest_pending_age_seconds"),
+                "max_oldest_failed_age_seconds": pick("delivery", "oldest_failed_age_seconds"),
+            },
+            "lanes": {
+                "max_count": pick("lanes", "count"),
+                "max_active": pick("lanes", "active"),
+                "max_queued": pick("lanes", "queued"),
+                "max_queue_depth": pick("lanes", "max_queue_depth"),
+            },
+            "events": {
+                "max_errors_5m": pick("events", "errors_5m"),
+                "max_rejected_5m": pick("events", "rejected_5m"),
+                "max_delivery_failed_5m": pick("events", "delivery_failed_5m"),
+                "max_tool_failed_5m": pick("events", "tool_failed_5m"),
+                "max_cron_failed_5m": pick("events", "cron_failed_5m"),
+            },
+            "cron": {
+                "max_configured": pick("cron", "configured"),
+                "max_count": pick("cron", "count"),
+                "max_enabled": pick("cron", "enabled"),
+                "max_errored": pick("cron", "errored"),
+            },
+            "profiles": {
+                "max_count": pick("profiles", "count"),
+                "max_available": pick("profiles", "available"),
+                "max_cooling_down": pick("profiles", "cooling_down"),
+            },
+        }
+
+    def active_alerts(self) -> dict[str, Any]:
+        if self.alerts_runtime is None:
+            return {"items": [], "count": 0, "configured": False}
+        items = self.alerts_runtime.active_alerts()
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": True,
+            "notification_target": {
+                "channel": self.settings.alert_channel,
+                "account_id": self.settings.alert_account_id,
+                "peer_id_configured": bool(self.settings.alert_peer_id),
+                "agent_id": self.settings.alert_agent_id,
+            },
+        }
+
+    def alert_history(self, *, limit: int = 50) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit), 200))
+        if self.alert_store is None:
+            return {"items": [], "count": 0, "configured": False, "limit": safe_limit}
+        items = self.alert_store.tail(limit=safe_limit)
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": True,
+            "limit": safe_limit,
         }
 
     def list_deliveries(
