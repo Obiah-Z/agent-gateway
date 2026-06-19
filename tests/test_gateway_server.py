@@ -2,13 +2,13 @@ import asyncio
 
 from websockets.exceptions import ConnectionClosedError
 
-from agent_gateway.agents import AgentManager
+from agent_gateway.core.agents import AgentManager
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.delivery.queue import DeliveryQueue
-from agent_gateway.models import AgentConfig, Binding
-from agent_gateway.router import BindingTable
+from agent_gateway.core.models import AgentConfig, Binding
+from agent_gateway.core.router import BindingTable
 from agent_gateway.application.control_plane import GatewayControlPlane
 from agent_gateway.interfaces.websocket.server import GatewayServer
 from agent_gateway.application.alerts_runtime import AlertsRuntime

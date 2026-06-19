@@ -7,7 +7,7 @@ from pathlib import Path
 from agent_gateway.channels.base import ChannelAccount
 from agent_gateway.channels.feishu import FeishuChannel
 from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.models import OutboundMessage
+from agent_gateway.core.models import OutboundMessage
 from agent_gateway.interfaces.feishu.http import FeishuWebhookServer
 
 

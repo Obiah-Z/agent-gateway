@@ -2,7 +2,7 @@ import asyncio
 from threading import Event
 
 from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.models import AgentReply, Binding, InboundMessage, RouteResolution
+from agent_gateway.core.models import AgentReply, Binding, InboundMessage, RouteResolution
 from agent_gateway.application.channel_runtime import ChannelRuntime, PendingInbound
 
 

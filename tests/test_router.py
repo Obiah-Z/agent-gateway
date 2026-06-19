@@ -1,6 +1,6 @@
-from agent_gateway.agents import AgentManager
-from agent_gateway.models import AgentConfig, Binding, InboundMessage
-from agent_gateway.router import BindingTable, build_session_key, resolve_route
+from agent_gateway.core.agents import AgentManager
+from agent_gateway.core.models import AgentConfig, Binding, InboundMessage
+from agent_gateway.core.router import BindingTable, build_session_key, resolve_route
 
 
 def test_binding_priority_prefers_more_specific_match() -> None:

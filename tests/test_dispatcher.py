@@ -1,10 +1,10 @@
 import asyncio
 
-from agent_gateway.agents import AgentManager
+from agent_gateway.core.agents import AgentManager
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.delivery.queue import DeliveryQueue
-from agent_gateway.models import AgentConfig, Binding, InboundMessage
-from agent_gateway.router import BindingTable
+from agent_gateway.core.models import AgentConfig, Binding, InboundMessage
+from agent_gateway.core.router import BindingTable
 from agent_gateway.application.dispatcher import GatewayDispatcher
 from agent_gateway.application.lanes import CommandQueue
 from agent_gateway.observability.events import RuntimeEventStore
@@ -21,7 +21,7 @@ class FakeRunner:
         correlation_id: str = "",
     ):
         self.correlation_id = correlation_id
-        from agent_gateway.models import AgentReply
+        from agent_gateway.core.models import AgentReply
 
         return AgentReply(
             agent_id=agent_id,

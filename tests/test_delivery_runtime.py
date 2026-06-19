@@ -4,7 +4,7 @@ from pathlib import Path
 from agent_gateway.channels.base import Channel, ChannelAccount
 from agent_gateway.channels.manager import ChannelManager
 from agent_gateway.delivery.queue import DeliveryQueue, DeliveryRunner, PermanentDeliveryError
-from agent_gateway.models import InboundMessage, OutboundMessage
+from agent_gateway.core.models import InboundMessage, OutboundMessage
 from agent_gateway.application.delivery_runtime import DeliveryRuntime
 from agent_gateway.observability.events import RuntimeEventStore
 

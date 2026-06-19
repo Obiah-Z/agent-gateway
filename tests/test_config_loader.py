@@ -13,7 +13,7 @@ from agent_gateway.config_loader import (
     save_channel_accounts,
 )
 from agent_gateway.channels.base import ChannelAccount
-from agent_gateway.models import AgentConfig, Binding
+from agent_gateway.core.models import AgentConfig, Binding
 from agent_gateway.application.resilience import AuthProfile
 
 

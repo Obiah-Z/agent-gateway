@@ -2,13 +2,13 @@ import asyncio
 import json
 from pathlib import Path
 
-from agent_gateway.agents import AgentManager
+from agent_gateway.core.agents import AgentManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.config_loader import load_agents, save_agents
 from agent_gateway.intelligence.bootstrap import PromptAssembler
 from agent_gateway.intelligence.memory import MemoryStore
 from agent_gateway.intelligence.skills import SkillsManager
-from agent_gateway.models import AgentConfig
+from agent_gateway.core.models import AgentConfig
 from agent_gateway.application.agent_manifest import build_agent_template, validate_agent_config
 from agent_gateway.application.loop import AgentLoopRunner
 from agent_gateway.application.resilience import ProfileManager
