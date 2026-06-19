@@ -284,20 +284,121 @@ cd ~/Desktop/claw0/gateway
 
 - 从“当前状态可见”升级到“运行趋势可见、异常可通知”。
 
+阶段拆分：
+
+#### Phase 14.1：Metrics Snapshot 存储模型
+
+状态：已完成
+
 计划项：
 
-1. 增加定期 metrics snapshot。
-2. 记录关键指标：
-   - inbound count
-   - agent turn latency
-   - tool call count / failure count
-   - delivery success / failure / retry
-   - lane backlog
-   - cron success / failure
-   - feishu rejected / deduped events
-3. Dashboard 增加基础趋势图。
-4. 增加飞书告警通道，用于通知连续失败、队列堆积、cron 异常。
-5. 增加 `metrics.snapshot` 控制面接口。
+1. 新增 `agent_gateway/observability/metrics.py`。
+2. 定义 metrics snapshot JSONL schema。
+3. 按日期写入 `data/metrics/metrics-YYYY-MM-DD.jsonl`。
+4. 支持 `MetricsStore.record()`、`latest()`、`tail()` 和 `cleanup()`。
+5. 增加保留策略配置 `GATEWAY_METRICS_RETENTION_DAYS`。
+
+完成标准：
+
+- 可以稳定写入和读取最近 N 条指标快照。
+- 指标文件按日期轮转。
+- 过期指标文件能自动清理。
+- 单元测试覆盖写入、读取、轮转和保留策略。
+
+#### Phase 14.2：Metrics Runtime 指标采集
+
+状态：已完成
+
+计划项：
+
+1. 新增后台 `MetricsRuntime`。
+2. 从 delivery queue 采集 pending / failed / retry_ready。
+3. 从 command queue 采集 active / queued / max_queue_depth。
+4. 从 Cron、profiles、event store 采集运行状态和最近错误计数。
+5. 支持 `GATEWAY_METRICS_INTERVAL_SECONDS`。
+
+完成标准：
+
+- `agent-gateway serve` 启动后自动生成 metrics snapshot。
+- 采集失败不会影响主进程。
+
+#### Phase 14.3：Metrics 控制面接口
+
+状态：已完成
+
+计划项：
+
+1. 增加 `metrics.snapshot`。
+2. 增加 `metrics.tail`。
+3. 增加 `metrics.summary`。
+4. 测试覆盖 WebSocket JSON-RPC 方法和参数。
+
+完成标准：
+
+- Dashboard 和外部工具可以读取最新指标与最近趋势。
+
+#### Phase 14.4：Dashboard 指标趋势视图
+
+状态：已完成
+
+计划项：
+
+1. 新增“指标趋势”面板。
+2. 用轻量 DOM/CSS 绘制投递、错误、lane backlog、Cron、profiles 趋势。
+3. 顶部摘要卡增加最近 1 小时错误、堆积和失败趋势提示。
+
+完成标准：
+
+- 不看日志也能判断系统是否变慢、失败率是否升高、队列是否堆积。
+
+#### Phase 14.5：告警规则模型
+
+状态：已完成
+
+计划项：
+
+1. 定义 `AlertRule` / `AlertState`。
+2. 支持阈值、持续时间、冷却时间和恢复状态。
+3. 初始内置规则：
+   - delivery pending 超阈值
+   - delivery failed 持续存在
+   - cron 连续失败
+   - profile 全部不可用
+   - feishu signature rejected 短时间过多
+   - lane backlog 超阈值
+
+完成标准：
+
+- 告警能去抖、冷却和恢复，不会因为单次波动反复触发。
+
+#### Phase 14.6：飞书告警投递
+
+状态：已完成
+
+计划项：
+
+1. 复用 `dispatcher.deliver_text()` 和可靠投递队列发送告警。
+2. 支持 `GATEWAY_ALERT_CHANNEL`、`GATEWAY_ALERT_ACCOUNT_ID`、`GATEWAY_ALERT_PEER_ID`、`GATEWAY_ALERT_AGENT_ID`。
+3. 告警内容包含当前值、阈值、持续时间、建议动作和相关事件线索。
+
+完成标准：
+
+- 关键故障可以主动推送到指定飞书会话。
+- 告警发送失败不会影响主运行时。
+
+#### Phase 14.7：Dashboard 告警视图
+
+状态：已完成
+
+计划项：
+
+1. 增加 `alerts.active` 和 `alerts.history`。
+2. Dashboard 新增“告警状态”面板。
+3. 展示当前活跃告警、最近恢复告警、上次通知时间和冷却状态。
+
+完成标准：
+
+- 可以在 Dashboard 判断问题仍存在还是已经恢复。
 
 完成标准：
 
