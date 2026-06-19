@@ -90,6 +90,15 @@ def test_monitoring_dashboard_includes_metrics_trend_view() -> None:
     assert ".alert-card" in styles
 
 
+def test_monitoring_dashboard_uses_global_panel_collapse_limit() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "const DEFAULT_PANEL_LIMIT = 6;" in app_js
+    assert "function slicePanelItems" in app_js
+    assert "function appendCollapseToggle" in app_js
+    assert "展开剩余" in app_js
+
+
 def test_monitoring_static_dir_is_inside_package() -> None:
     assert Path("agent_gateway/monitoring/static") in STATIC_DIR.relative_to(Path.cwd()).parents or (
         Path.cwd() / "agent_gateway/monitoring/static"

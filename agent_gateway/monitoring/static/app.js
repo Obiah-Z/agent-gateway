@@ -102,7 +102,10 @@ const state = {
   deliveryState: "failed",
   refreshIntervalSeconds: 15,
   eventsExpanded: false,
+  panelExpanded: {},
 };
+
+const DEFAULT_PANEL_LIMIT = 6;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -511,6 +514,38 @@ function appendButton(parent, label, className, onClick) {
   return button;
 }
 
+function isPanelExpanded(key) {
+  return Boolean(state.panelExpanded[key]);
+}
+
+function togglePanelExpanded(key) {
+  state.panelExpanded[key] = !state.panelExpanded[key];
+}
+
+function slicePanelItems(items, key, limit = DEFAULT_PANEL_LIMIT) {
+  if (!Array.isArray(items) || items.length <= limit || isPanelExpanded(key)) {
+    return items;
+  }
+  return items.slice(0, limit);
+}
+
+function appendCollapseToggle(container, key, total, renderFn, limit = DEFAULT_PANEL_LIMIT) {
+  if (!Number.isFinite(total) || total <= limit) {
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "event-collapse-toggle";
+  button.textContent = isPanelExpanded(key)
+    ? "收起"
+    : `展开剩余 ${total - limit} 条`;
+  button.addEventListener("click", () => {
+    togglePanelExpanded(key);
+    renderFn();
+  });
+  container.appendChild(button);
+}
+
 async function connect() {
   clearAlert();
   const url = dom.wsUrl.value.trim() || defaultWsUrl();
@@ -682,7 +717,8 @@ function renderIssues(issues) {
     dom.issueList.textContent = "当前健康检查、投递队列和运行态没有发现需要优先处理的问题。";
     return;
   }
-  for (const issue of issues) {
+  const visibleIssues = slicePanelItems(issues, "issues");
+  for (const issue of visibleIssues) {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `issue-item issue-${issue.status}`;
@@ -694,6 +730,7 @@ function renderIssues(issues) {
     item.appendChild(body);
     dom.issueList.appendChild(item);
   }
+  appendCollapseToggle(dom.issueList, "issues", issues.length, () => renderIssues(issues));
 }
 
 function renderSummary(health, runtime, deliveryStats, metricsSummary = {}) {
@@ -739,7 +776,8 @@ function renderHealth(health) {
     dom.healthList.textContent = "没有健康检查数据";
     return;
   }
-  for (const check of checks) {
+  const visibleChecks = slicePanelItems(checks, "health");
+  for (const check of visibleChecks) {
     const item = document.createElement("div");
     item.className = `check-item check-${normalizeStatus(check.status)}`;
     item.appendChild(badge(check.status));
@@ -749,6 +787,7 @@ function renderHealth(health) {
     item.appendChild(body);
     dom.healthList.appendChild(item);
   }
+  appendCollapseToggle(dom.healthList, "health", checks.length, () => renderHealth(health));
 }
 
 function renderRuntime(runtime) {
@@ -847,7 +886,8 @@ function renderRuntime(runtime) {
     },
   ];
 
-  for (const section of sections) {
+  const visibleSections = slicePanelItems(sections, "runtime");
+  for (const section of visibleSections) {
     const card = document.createElement("div");
     card.className = `runtime-section runtime-${normalizeStatus(section.status)}`;
 
@@ -885,6 +925,7 @@ function renderRuntime(runtime) {
     card.appendChild(details);
     dom.runtimeList.appendChild(card);
   }
+  appendCollapseToggle(dom.runtimeList, "runtime", sections.length, () => renderRuntime(runtime));
 }
 
 function renderMetrics(summaryPayload, tailPayload) {
@@ -1040,7 +1081,8 @@ function renderAlerts(activePayload, historyPayload) {
       ? "当前没有活跃告警。告警触发后会在这里显示，并可通过通知目标主动发送。"
       : "当前没有活跃告警，且尚未配置飞书告警通知目标。";
   } else {
-    for (const item of activeItems) {
+    const visibleActiveItems = slicePanelItems(activeItems, "alerts-active");
+    for (const item of visibleActiveItems) {
       const card = document.createElement("article");
       card.className = `alert-card alert-${normalizeStatus(item.severity)}`;
       const head = document.createElement("div");
@@ -1086,6 +1128,12 @@ function renderAlerts(activePayload, historyPayload) {
       card.appendChild(details);
       dom.alertsActive.appendChild(card);
     }
+    appendCollapseToggle(
+      dom.alertsActive,
+      "alerts-active",
+      activeItems.length,
+      () => renderAlerts(activePayload, historyPayload),
+    );
   }
 
   dom.alertsHistory.className = historyItems.length ? "alert-history-list" : "alert-history-list empty";
@@ -1093,7 +1141,8 @@ function renderAlerts(activePayload, historyPayload) {
     dom.alertsHistory.textContent = "最近没有告警触发、提醒或恢复记录。";
     return;
   }
-  for (const item of historyItems) {
+  const visibleHistoryItems = slicePanelItems(historyItems, "alerts-history");
+  for (const item of visibleHistoryItems) {
     const card = document.createElement("article");
     const event = String(item.event || "");
     const severity = item.rule?.severity || (event === "recovered" ? "ok" : "warning");
@@ -1110,6 +1159,12 @@ function renderAlerts(activePayload, historyPayload) {
     appendText(card, "div", `规则 ${item.rule?.id || "--"} · 等级 ${item.rule?.severity || "--"}`, "item-meta");
     dom.alertsHistory.appendChild(card);
   }
+  appendCollapseToggle(
+    dom.alertsHistory,
+    "alerts-history",
+    historyItems.length,
+    () => renderAlerts(activePayload, historyPayload),
+  );
 }
 
 function formatAlertDuration(value) {
@@ -1281,7 +1336,8 @@ function renderDelivery(deliveryList) {
     return;
   }
   dom.deliveryTable.className = "delivery-cards";
-  for (const item of items) {
+  const visibleItems = slicePanelItems(items, "delivery");
+  for (const item of visibleItems) {
     const classification = classifyDeliveryError(item);
     const card = document.createElement("article");
     card.className = `delivery-card delivery-${normalizeStatus(item.state || classification.severity)}`;
@@ -1328,6 +1384,12 @@ function renderDelivery(deliveryList) {
     }
     dom.deliveryTable.appendChild(card);
   }
+  appendCollapseToggle(
+    dom.deliveryTable,
+    "delivery",
+    items.length,
+    () => renderDelivery(deliveryList),
+  );
 }
 
 function renderCron(cronJobs) {
@@ -1339,7 +1401,9 @@ function renderCron(cronJobs) {
     dom.cronList.textContent = "没有 Cron 任务";
     return;
   }
-  for (const group of groupCronJobs(jobs)) {
+  const groups = groupCronJobs(jobs);
+  const visibleGroups = slicePanelItems(groups, "cron-groups");
+  for (const group of visibleGroups) {
     const section = document.createElement("section");
     section.className = "cron-group";
     const head = document.createElement("div");
@@ -1347,7 +1411,8 @@ function renderCron(cronJobs) {
     appendText(head, "strong", group.title);
     appendText(head, "span", `${group.jobs.filter((job) => job.enabled).length}/${group.jobs.length} 已启用`);
     section.appendChild(head);
-    for (const job of group.jobs) {
+    const visibleJobs = slicePanelItems(group.jobs, `cron-group-${group.title}`);
+    for (const job of visibleJobs) {
       const item = document.createElement("div");
       item.className = `cron-item cron-${normalizeStatus(job.enabled ? "ok" : "muted")}`;
       const body = document.createElement("div");
@@ -1381,8 +1446,15 @@ function renderCron(cronJobs) {
       item.append(body, trigger);
       section.appendChild(item);
     }
+    appendCollapseToggle(
+      section,
+      `cron-group-${group.title}`,
+      group.jobs.length,
+      () => renderCron(cronJobs),
+    );
     dom.cronList.appendChild(section);
   }
+  appendCollapseToggle(dom.cronList, "cron-groups", groups.length, () => renderCron(cronJobs));
 }
 
 function groupCronJobs(jobs) {
@@ -1412,16 +1484,17 @@ function groupCronJobs(jobs) {
 
 function renderEvents(payload) {
   renderEventList({
+    panelKey: "events",
     container: dom.eventsList,
     summary: dom.eventsSummary,
     payload,
     emptyText: "暂无运行事件。发送一条消息、触发 Cron 或 flush 投递队列后会出现链路事件。",
     summaryLabel: "条事件",
     collapsible: true,
-    expanded: state.eventsExpanded,
-    collapsedLimit: 8,
+    expanded: isPanelExpanded("events"),
+    collapsedLimit: DEFAULT_PANEL_LIMIT,
     onToggle: () => {
-      state.eventsExpanded = !state.eventsExpanded;
+      togglePanelExpanded("events");
       renderEvents(payload);
     },
   });
@@ -1437,7 +1510,8 @@ function renderTraces(payload) {
     dom.tracesList.textContent = "暂无可聚合链路。事件需要包含 correlation_id 才会出现在这里。";
     return;
   }
-  for (const trace of traces) {
+  const visibleTraces = slicePanelItems(traces, "traces");
+  for (const trace of visibleTraces) {
     const details = document.createElement("details");
     details.className = `trace-item trace-${trace.severity}`;
     const summary = document.createElement("summary");
@@ -1469,6 +1543,7 @@ function renderTraces(payload) {
     details.appendChild(timeline);
     dom.tracesList.appendChild(details);
   }
+  appendCollapseToggle(dom.tracesList, "traces", traces.length, () => renderTraces(payload));
 }
 
 function buildTraces(events) {
@@ -1513,11 +1588,19 @@ function buildTraces(events) {
 
 function renderErrors(payload) {
   renderEventList({
+    panelKey: "errors",
     container: dom.errorsList,
     summary: dom.errorsSummary,
     payload,
     emptyText: "最近没有错误、失败或拒绝事件。",
     summaryLabel: "条错误",
+    collapsible: true,
+    expanded: isPanelExpanded("errors"),
+    collapsedLimit: DEFAULT_PANEL_LIMIT,
+    onToggle: () => {
+      togglePanelExpanded("errors");
+      renderErrors(payload);
+    },
   });
 }
 
@@ -1530,7 +1613,8 @@ function renderMemories(payload) {
     dom.memoryList.textContent = "最近没有记忆写入。";
     return;
   }
-  for (const item of items) {
+  const visibleItems = slicePanelItems(items, "memories");
+  for (const item of visibleItems) {
     const card = document.createElement("article");
     card.className = "memory-item";
     const head = document.createElement("div");
@@ -1544,9 +1628,11 @@ function renderMemories(payload) {
     appendText(card, "p", item.content || "", "memory-content");
     dom.memoryList.appendChild(card);
   }
+  appendCollapseToggle(dom.memoryList, "memories", items.length, () => renderMemories(payload));
 }
 
 function renderEventList({
+  panelKey = "events",
   container,
   summary,
   payload,
@@ -1618,8 +1704,8 @@ function renderEventList({
     more.type = "button";
     more.className = "event-collapse-toggle";
     more.textContent = expanded
-      ? "收起最近事件"
-      : `展开全部 ${items.length} 条事件`;
+      ? "收起"
+      : `展开剩余 ${items.length - collapsedLimit} 条`;
     more.addEventListener("click", () => onToggle?.());
     container.appendChild(more);
   }
