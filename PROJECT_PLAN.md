@@ -1,34 +1,82 @@
 # AI Agent Gateway 项目计划
 
-## 项目目标
+## 1. 项目定位
 
-将 `gateway/` 持续建设为一个可运行、可维护、可扩展的 AI Agent Gateway 智能体网关系统。
+`gateway/` 是一个基于 Python 的 AI Agent Gateway 智能体网关系统，目标是把早期代码片段持续演进为可运行、可维护、可扩展的智能体运行框架。
 
-系统面向多轮对话、工具调用、多通道接入、主动任务、可靠投递、飞书接入和本地运维监控等场景，目标不是做单一聊天机器人，而是形成一套具备生产化思路的智能体运行框架。
+系统面向以下核心场景：
 
-当前项目已经从早期教学型代码片段，演进为分层清晰的工程项目：
+- 多轮对话与 Agent Loop。
+- Tool Calling 与外部执行能力。
+- 多通道接入与消息路由。
+- 会话持久化、上下文管理与记忆注入。
+- Heartbeat、Cron、新闻简报等主动任务。
+- 可靠投递、失败重试、并发控制与弹性恢复。
+- 飞书接入、本地控制面、Dashboard 运维面板。
+- 运行事件流、指标快照、趋势与告警。
 
-- `core/`：领域层，定义 Agent、消息、路由和 ID 规范。
-- `application/`：应用层，承载 Agent Loop、dispatcher、control plane、并发车道和主动任务编排。
-- `interfaces/`：接入层，承载 WebSocket 控制面、飞书 Webhook 和飞书长连接。
-- `channels/`：通道适配层，封装 CLI、Telegram、Feishu 等消息通道。
-- `delivery/`：可靠投递队列。
-- `intelligence/`：Prompt、记忆和技能注入。
-- `monitoring/`：本地 Dashboard 和静态运维页面。
-- `news/`：AI Agent 新闻采集、去重和摘要生成。
-- `sessions/`：JSONL 会话存储和上下文保护。
-- `tools/`：工具注册表与内置工具。
+当前项目应继续坚持“本地优先、结构清晰、可逐步生产化”的路线。短期内不急于引入数据库、分布式锁或复杂部署系统，优先补齐安全边界、配置治理、数据治理和任务状态管理。
 
-## 当前版本状态
+## 2. 当前架构
 
-### 已完成能力
+核心目录职责如下：
 
-| 方向 | 状态 | 说明 |
+| 目录 | 职责 |
+| --- | --- |
+| `agent_gateway/core/` | 领域层，定义 Agent、消息模型、路由和 ID 规范。 |
+| `agent_gateway/application/` | 应用层，承载 Agent Loop、Dispatcher、主动任务、控制面、投递运行时、指标和告警运行时。 |
+| `agent_gateway/interfaces/` | 外部接口层，承载 WebSocket 控制面、飞书 Webhook 和飞书长连接。 |
+| `agent_gateway/channels/` | 通道适配层，封装 CLI、Telegram、Feishu 等消息通道。 |
+| `agent_gateway/delivery/` | 可靠投递队列，负责消息预写、重试和失败落盘。 |
+| `agent_gateway/intelligence/` | Prompt、记忆、技能和 Agent 局部配置注入。 |
+| `agent_gateway/monitoring/` | Dashboard 静态页面和本地运维视图。 |
+| `agent_gateway/observability/` | 运行事件、错误、指标和告警存储模型。 |
+| `agent_gateway/news/` | AI Agent 新闻采集、去重和摘要生成。 |
+| `agent_gateway/sessions/` | JSONL 会话存储和上下文保护。 |
+| `agent_gateway/tools/` | 工具注册表和内置工具。 |
+| `workspace/` | Prompt、记忆、技能、Cron 和 Agent 局部工作区。 |
+| `config/` | agents、bindings、channels、profiles 等静态配置。 |
+| `data/` | 会话、投递队列、事件、指标、告警等运行期数据。 |
+
+说明：顶层兼容层 `agent_gateway/agents.py`、`router.py`、`models.py`、`ids.py` 已移除。新代码应直接从 `agent_gateway.core` 或具体子模块导入。
+
+## 3. 当前运行入口
+
+本地启动：
+
+```bash
+cd ~/Desktop/claw0/gateway
+source .venv/bin/activate
+agent-gateway serve
+```
+
+默认服务：
+
+| 服务 | 默认地址 |
+| --- | --- |
+| WebSocket 控制面 | `ws://127.0.0.1:8765` |
+| 飞书 Webhook | `http://127.0.0.1:8766/webhooks/feishu` |
+| Dashboard | `http://127.0.0.1:8780` |
+| 飞书扫码接入页 | `http://127.0.0.1:8780/onboarding/feishu` |
+
+进入下一阶段前建议执行：
+
+```bash
+cd ~/Desktop/claw0/gateway
+./.venv/bin/python -m compileall agent_gateway tests
+./.venv/bin/python -m pytest tests -q
+```
+
+当前最近验证基线：`168 passed`。
+
+## 4. 已完成能力
+
+| 能力方向 | 状态 | 说明 |
 | --- | --- | --- |
 | Agent Loop | 已完成 | 支持 Anthropic Messages API 兼容调用、`stop_reason` 驱动的多轮执行和 tool calling。 |
 | Tool Calling | 已完成 | 基于 dispatch table 管理 bash、文件读写、记忆检索、Web Search 等工具。 |
 | 会话持久化 | 已完成 | 基于 JSONL 保存 transcript，支持历史重放和上下文保护。 |
-| 路由系统 | 已完成 | 基于 `bindings.json` 将 channel/account/peer/session 路由到指定 Agent。 |
+| 路由系统 | 已完成 | 基于 `bindings.json` 将 channel、account、peer、session 路由到指定 Agent。 |
 | 配置控制面 | 已完成 | 支持 agents、bindings、channels、profiles 的查看、修改、保存和 reload。 |
 | 记忆与技能 | 已完成 | 支持 `MEMORY.md`、daily memory、`SKILL.md` 扫描和 Agent 局部 prompt 覆盖。 |
 | 主动任务 | 已完成 | Heartbeat、Cron 和 AI Agent 每日简报均接入统一执行链。 |
@@ -39,36 +87,12 @@
 | 飞书发送 | 已完成 | 支持 SDK/HTTP 发送和 `lark-cli` 发送模式。 |
 | 飞书扫码接入 | 已完成 | 支持 `/onboarding/feishu` 页面、绑定码、机器人会话入口和自动创建个人 Agent。 |
 | AI Agent 简报 | 已完成 | 支持 RSS、官网 HTML、GitHub Releases、arXiv 等来源采集和每日摘要推送。 |
-| Dashboard | 已完成 | 支持本地健康检查、运行态快照、投递队列、Cron 触发和飞书接入状态查看。 |
-| 运行事件流 | 已完成 | 支持 runtime event JSONL、`events.tail`、`errors.recent` 和 Dashboard 最近事件/错误视图。 |
-| 架构分层 | 已完成 | 已将运行时兼容层移除，主实现迁移到 `core/application/interfaces` 等分层目录。 |
+| Dashboard | 已完成 | 支持健康检查、运行态快照、投递队列、Cron、飞书接入、事件、错误、指标和告警查看。 |
+| 运行事件流 | 已完成 | 支持 runtime event JSONL、`events.tail`、`errors.recent` 和 Dashboard 最近链路视图。 |
+| 指标与告警 | 已完成 | 支持 metrics snapshot、趋势视图、告警规则、告警历史和飞书告警投递。 |
+| 架构分层 | 已完成 | 已移除兼容层，主实现归入 `core/application/interfaces` 等分层目录。 |
 
-### 当前可运行入口
-
-```bash
-cd ~/Desktop/claw0/gateway
-source .venv/bin/activate
-agent-gateway serve
-```
-
-默认入口：
-
-- WebSocket 控制面：`ws://127.0.0.1:8765`
-- 飞书 Webhook：`http://127.0.0.1:8766/webhooks/feishu`
-- 本地 Dashboard：`http://127.0.0.1:8780`
-- 飞书扫码接入页：`http://127.0.0.1:8780/onboarding/feishu`
-
-### 当前验证基线
-
-建议每次进入下一阶段前至少运行：
-
-```bash
-cd ~/Desktop/claw0/gateway
-./.venv/bin/python -m compileall agent_gateway tests
-./.venv/bin/python -m pytest tests -q
-```
-
-## 已完成阶段回顾
+## 5. 已完成阶段回顾
 
 ### Phase 1：基础工程骨架
 
@@ -120,11 +144,11 @@ cd ~/Desktop/claw0/gateway
 - 支持 `lark-cli` 发送模式。
 - 支持飞书长连接模式，降低本地开发对公网回调地址的依赖。
 
-### Phase 8：运维 Dashboard 与运行时状态
+### Phase 8：Dashboard 与运行态状态
 
 - 新增本地 Dashboard 静态页面。
 - 支持健康检查、运行态状态、投递队列、Cron 任务和飞书接入状态查看。
-- 支持在 Dashboard 中执行投递 retry/discard/flush 和 Cron 手动触发。
+- 支持在 Dashboard 中执行投递 retry、discard、flush 和 Cron 手动触发。
 - Dashboard 默认仅监听 `127.0.0.1`，避免未鉴权情况下暴露公网。
 
 ### Phase 9：飞书扫码接入与用户 Onboarding
@@ -148,116 +172,60 @@ cd ~/Desktop/claw0/gateway
 - 将领域模型迁移到 `core/`。
 - 将应用编排迁移到 `application/`。
 - 将外部接入迁移到 `interfaces/`。
-- 移除旧 `runtime/` 兼容层，避免后续开发继续依赖过期路径。
-- README 已同步新的目录结构和运行方式。
+- 移除旧 `runtime/` 兼容层。
+- 移除 `agent_gateway/agents.py`、`router.py`、`models.py`、`ids.py` 顶层兼容层。
+- README 和架构文档已同步新的目录结构和运行方式。
 
 ### Phase 13：运行事件流与最近错误视图
 
 - 新增 `observability/` 模块和 `RuntimeEventStore`。
 - 定义统一 runtime event JSONL schema。
 - 接入关键链路事件：
-  - inbound received
-  - route resolved
-  - agent turn started / completed / failed
-  - tool call started / completed / failed
-  - delivery enqueued / sent / failed
-  - cron triggered / completed / failed
-  - feishu event accepted / ignored / rejected / error
+  - `inbound.received`
+  - `route.resolved`
+  - `agent.turn.started/completed/failed`
+  - `tool.call.started/completed/failed`
+  - `delivery.enqueued/sent/failed`
+  - `cron.triggered/completed/failed`
+  - `feishu.event.accepted/ignored/rejected/error`
 - 控制面新增 `events.tail` 和 `errors.recent`。
-- Dashboard 新增最近事件与最近错误视图。
-- 测试覆盖事件存储、控制面入口和投递事件。
-
-### Phase 13.1：事件链路关联增强
-
-- 已完成 `correlation_id` 贯穿。
-- 入站消息进入 dispatcher 时生成或复用 `correlation_id`。
-- `route.resolved`、`agent.turn.*`、`tool.call.*`、`delivery.enqueued` 复用同一个 `correlation_id`。
-- 投递队列 metadata 持久化 `correlation_id`，`delivery.sent/failed` 从队列恢复。
-- Cron、Heartbeat 等主动任务生成任务级 `correlation_id`。
-- 飞书 Webhook 和长连接优先使用 `event_id/message_id` 派生 `correlation_id`。
-- 测试覆盖同一轮消息的事件链路关联。
-
-### Phase 13.2：Dashboard 链路聚合视图
-
-- 已完成 Dashboard 按 `correlation_id` 聚合链路。
-- 前端基于 `events.tail` 返回结果按 `correlation_id` 分组。
-- 新增“最近链路”面板，展示每条链路的事件数、状态、首尾时间、关键组件和最后错误。
-- 点击链路后可展开该链路下的完整事件序列。
-- 错误链路优先显示，便于排障。
-
-### Phase 13.3：事件筛选与查询参数增强
-
-- 已完成事件筛选与查询参数增强。
+- Dashboard 新增最近事件、最近错误和最近链路视图。
+- 支持按 `correlation_id` 聚合链路。
 - `events.tail` 支持 `component`、`status`、`correlation_id`、`agent_id`、`channel`、`job_id`、`delivery_id` 过滤。
-- `errors.recent` 支持 `component` 和 `correlation_id` 过滤。
-- Dashboard 增加 component/status/correlation_id 基础筛选。
-- 测试覆盖事件存储过滤和控制面参数透传。
+- 事件文件按日期轮转，并通过 `GATEWAY_EVENTS_RETENTION_DAYS` 控制保留期。
 
-### Phase 13.4：事件文件轮转与保留策略
+### Phase 14：指标快照、趋势与告警
 
-- 已完成事件文件轮转与保留策略。
-- 运行事件按日期写入 `data/events/runtime-events-YYYY-MM-DD.jsonl`。
-- 增加配置项 `GATEWAY_EVENTS_RETENTION_DAYS`，默认保留 14 天。
-- `events.tail` 支持读取最近多个事件文件。
-- 写入事件时自动清理过期事件文件。
+- 新增 `agent_gateway/observability/metrics.py`。
+- 定义 metrics snapshot JSONL schema。
+- 按日期写入 `data/metrics/metrics-YYYY-MM-DD.jsonl`。
+- 新增后台 `MetricsRuntime`，采集 delivery、lane、Cron、profiles、事件错误等指标。
+- 控制面新增 `metrics.snapshot`、`metrics.tail`、`metrics.summary`。
+- Dashboard 新增指标趋势面板。
+- 新增 `AlertRule`、`AlertState`、`AlertStore`。
+- 新增 `AlertsRuntime`，支持阈值、持续时间、冷却、恢复和通知。
+- 内置 delivery backlog、delivery failed、cron failures、profiles unavailable、feishu signature rejected、lane backlog 等规则。
+- 告警通知复用可靠投递链路，可发送到指定飞书会话。
+- 控制面新增 `alerts.active` 和 `alerts.history`。
+- Dashboard 新增当前告警和告警历史视图。
+- Dashboard 各列表类面板默认最多展示 6 条，多余内容折叠。
 
-### Phase 13.5：模型调用与 profile 事件增强
-
-目标：
-
-- 把模型调用、fallback、profile 冷却和上下文压缩纳入可观测链路。
-
-计划项：
-
-1. 增加 `model.call.started/completed/failed`。
-2. 增加 `profile.selected/failed/cooldown`。
-3. 增加 `context.compacted`。
-4. 记录 profile、model、失败分类、耗时和 fallback 次数。
-
-完成标准：
-
-- 可以区分模型慢、模型失败、工具慢、投递失败。
-- 排查 API key、base_url、限流和上下文溢出时有明确事件依据。
-
-### Phase 13.6：错误分类与处理建议
-
-目标：
-
-- 将最近错误从“原始错误列表”升级为“分类后的排障建议”。
-
-计划项：
-
-1. 增加错误分类器：
-   - model_auth_failed
-   - model_rate_limited
-   - model_timeout
-   - tool_failed
-   - delivery_channel_unavailable
-   - delivery_invalid_target
-   - feishu_signature_rejected
-   - cron_failed
-   - config_invalid
-2. `errors.recent` 返回错误类型、影响对象、建议操作。
-3. Dashboard 最近错误面板展示分类和建议。
-
-完成标准：
-
-- 用户看到错误后能快速判断该检查模型、工具、通道、飞书还是配置。
-- 常见错误能给出明确下一步动作。
-
-## 当前主要边界
+## 6. 当前主要边界
 
 - 当前仍是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。
 - Dashboard 默认无鉴权，仅适合本机访问，不应直接暴露公网。
-- 配置变更已经能保存和 reload，但配置审计、快照和回滚仍不完整。
+- 配置变更可以保存和 reload，但配置审计、快照和回滚仍不完整。
 - Agent 权限模型已有 tool policy 和 capability tags，但缺少最终权限预览和强校验报告。
-- 运行态观测已有 Dashboard、健康检查、最近事件和最近错误，但缺少长期指标、趋势图和告警。
+- 会话与记忆已经可持久化，但长期运行后的归档、删除、复审和压缩治理仍不足。
 - 飞书长连接依赖本机 `lark-cli` 配置和子进程消费，适合本地/单机部署；生产多实例仍建议优先 Webhook。
 - 新闻简报能力已可运行，但来源质量评估、内容去重精度和摘要可解释性仍有提升空间。
+- 指标与告警已建立本地闭环，但没有外部 TSDB、Prometheus 或集中日志系统。
 
-## 下一阶段计划
+## 7. 后续路线图
 
 ### Phase 12：Dashboard 鉴权与安全边界
+
+状态：待实现，建议优先。
 
 目标：
 
@@ -278,134 +246,42 @@ cd ~/Desktop/claw0/gateway
 - 本机默认体验不被明显破坏。
 - 高风险操作在接口层有明确保护。
 
-### Phase 14：指标快照、趋势与告警
+### Phase 13 增强项：模型调用与错误分类
+
+状态：待实现，可在 Phase 12 后择机补齐。
 
 目标：
 
-- 从“当前状态可见”升级到“运行趋势可见、异常可通知”。
-
-阶段拆分：
-
-#### Phase 14.1：Metrics Snapshot 存储模型
-
-状态：已完成
+- 把模型调用、fallback、profile 冷却、上下文压缩和错误分类纳入可观测链路。
 
 计划项：
 
-1. 新增 `agent_gateway/observability/metrics.py`。
-2. 定义 metrics snapshot JSONL schema。
-3. 按日期写入 `data/metrics/metrics-YYYY-MM-DD.jsonl`。
-4. 支持 `MetricsStore.record()`、`latest()`、`tail()` 和 `cleanup()`。
-5. 增加保留策略配置 `GATEWAY_METRICS_RETENTION_DAYS`。
+1. 增加 `model.call.started/completed/failed`。
+2. 增加 `profile.selected/failed/cooldown`。
+3. 增加 `context.compacted`。
+4. 记录 profile、model、失败分类、耗时和 fallback 次数。
+5. 增加错误分类器：
+   - `model_auth_failed`
+   - `model_rate_limited`
+   - `model_timeout`
+   - `tool_failed`
+   - `delivery_channel_unavailable`
+   - `delivery_invalid_target`
+   - `feishu_signature_rejected`
+   - `cron_failed`
+   - `config_invalid`
+6. `errors.recent` 返回错误类型、影响对象和建议操作。
+7. Dashboard 最近错误面板展示分类和建议。
 
 完成标准：
 
-- 可以稳定写入和读取最近 N 条指标快照。
-- 指标文件按日期轮转。
-- 过期指标文件能自动清理。
-- 单元测试覆盖写入、读取、轮转和保留策略。
-
-#### Phase 14.2：Metrics Runtime 指标采集
-
-状态：已完成
-
-计划项：
-
-1. 新增后台 `MetricsRuntime`。
-2. 从 delivery queue 采集 pending / failed / retry_ready。
-3. 从 command queue 采集 active / queued / max_queue_depth。
-4. 从 Cron、profiles、event store 采集运行状态和最近错误计数。
-5. 支持 `GATEWAY_METRICS_INTERVAL_SECONDS`。
-
-完成标准：
-
-- `agent-gateway serve` 启动后自动生成 metrics snapshot。
-- 采集失败不会影响主进程。
-
-#### Phase 14.3：Metrics 控制面接口
-
-状态：已完成
-
-计划项：
-
-1. 增加 `metrics.snapshot`。
-2. 增加 `metrics.tail`。
-3. 增加 `metrics.summary`。
-4. 测试覆盖 WebSocket JSON-RPC 方法和参数。
-
-完成标准：
-
-- Dashboard 和外部工具可以读取最新指标与最近趋势。
-
-#### Phase 14.4：Dashboard 指标趋势视图
-
-状态：已完成
-
-计划项：
-
-1. 新增“指标趋势”面板。
-2. 用轻量 DOM/CSS 绘制投递、错误、lane backlog、Cron、profiles 趋势。
-3. 顶部摘要卡增加最近 1 小时错误、堆积和失败趋势提示。
-
-完成标准：
-
-- 不看日志也能判断系统是否变慢、失败率是否升高、队列是否堆积。
-
-#### Phase 14.5：告警规则模型
-
-状态：已完成
-
-计划项：
-
-1. 定义 `AlertRule` / `AlertState`。
-2. 支持阈值、持续时间、冷却时间和恢复状态。
-3. 初始内置规则：
-   - delivery pending 超阈值
-   - delivery failed 持续存在
-   - cron 连续失败
-   - profile 全部不可用
-   - feishu signature rejected 短时间过多
-   - lane backlog 超阈值
-
-完成标准：
-
-- 告警能去抖、冷却和恢复，不会因为单次波动反复触发。
-
-#### Phase 14.6：飞书告警投递
-
-状态：已完成
-
-计划项：
-
-1. 复用 `dispatcher.deliver_text()` 和可靠投递队列发送告警。
-2. 支持 `GATEWAY_ALERT_CHANNEL`、`GATEWAY_ALERT_ACCOUNT_ID`、`GATEWAY_ALERT_PEER_ID`、`GATEWAY_ALERT_AGENT_ID`。
-3. 告警内容包含当前值、阈值、持续时间、建议动作和相关事件线索。
-
-完成标准：
-
-- 关键故障可以主动推送到指定飞书会话。
-- 告警发送失败不会影响主运行时。
-
-#### Phase 14.7：Dashboard 告警视图
-
-状态：已完成
-
-计划项：
-
-1. 增加 `alerts.active` 和 `alerts.history`。
-2. Dashboard 新增“告警状态”面板。
-3. 展示当前活跃告警、最近恢复告警、上次通知时间和冷却状态。
-
-完成标准：
-
-- 可以在 Dashboard 判断问题仍存在还是已经恢复。
-
-完成标准：
-
-- 能看出系统是否正在变慢、失败率是否升高、投递是否堆积。
-- 关键故障可以主动推送到指定飞书会话。
+- 可以区分模型慢、模型失败、工具慢、投递失败。
+- 排查 API key、base_url、限流和上下文溢出时有明确事件依据。
+- 用户看到错误后能快速判断该检查模型、工具、通道、飞书还是配置。
 
 ### Phase 15：Agent 权限预览与配置治理
+
+状态：待实现。
 
 目标：
 
@@ -432,16 +308,18 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 16：会话与记忆治理
 
+状态：待实现。
+
 目标：
 
 - 控制长期运行后的数据膨胀、记忆污染和上下文质量下降。
 
 计划项：
 
-1. 增加 session list/export/archive/delete。
+1. 增加 session list、export、archive、delete。
 2. 增加 session retention 策略。
 3. 增加 memory 来源标记。
-4. 增加 memory review / delete / compact。
+4. 增加 memory review、delete、compact。
 5. 增加长期记忆注入前的质量过滤。
 
 完成标准：
@@ -450,6 +328,8 @@ cd ~/Desktop/claw0/gateway
 - 记忆可追溯、可清理，不会无限污染 prompt。
 
 ### Phase 17：多 Agent 协作与任务实例状态机
+
+状态：待实现。
 
 目标：
 
@@ -477,6 +357,8 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 18：生产部署形态
 
+状态：待实现。
+
 目标：
 
 - 明确从本地单机项目走向可部署服务的最小生产路径。
@@ -495,31 +377,34 @@ cd ~/Desktop/claw0/gateway
 - 项目可以按文档在新机器上稳定部署。
 - 数据、配置、密钥和日志的边界清晰。
 
-## 推荐执行顺序
+## 8. 推荐执行顺序
 
-建议按以下优先级推进：
+建议接下来按以下顺序推进：
 
-1. Phase 12：Dashboard 鉴权与安全边界
-2. Phase 14：指标快照、趋势与告警
-3. Phase 15：Agent 权限预览与配置治理
-4. Phase 16：会话与记忆治理
-5. Phase 17：多 Agent 协作与任务实例状态机
-6. Phase 18：生产部署形态
+1. Phase 12：Dashboard 鉴权与安全边界。
+2. Phase 13 增强项：模型调用事件与错误分类。
+3. Phase 15：Agent 权限预览与配置治理。
+4. Phase 16：会话与记忆治理。
+5. Phase 17：多 Agent 协作与任务实例状态机。
+6. Phase 18：生产部署形态。
 
-这个顺序的依据是：
+排序依据：
 
-- 先补安全边界，避免 Dashboard 和控制面成为风险点。
-- 再补指标和告警，降低后续复杂功能的排障成本。
-- 然后补配置、权限、会话和记忆治理，提升长期运行质量。
-- 最后再做多 Agent 编排和生产部署，避免在可观测性不足的情况下扩大系统复杂度。
+- 先补 Dashboard 和控制面鉴权，避免管理入口暴露风险。
+- 再补模型调用事件和错误分类，让后续排障更直接。
+- 然后做配置、权限、会话和记忆治理，提升长期运行质量。
+- 最后推进多 Agent 协作和生产部署，避免在治理能力不足时扩大复杂度。
 
-## 短期建议
+## 9. 最近一个可执行任务
 
-下一步最适合先实现 Phase 12 的最小闭环：
+建议下一步实现 Phase 12 的最小闭环：
 
 1. 在 `.env.example` 增加 `GATEWAY_DASHBOARD_AUTH_ENABLED` 和 `GATEWAY_DASHBOARD_TOKEN`。
-2. 在 Dashboard 静态服务和 WebSocket 控制面增加 token 校验。
-3. 在 README 中补充本地访问和公网暴露说明。
-4. 增加测试覆盖未授权、授权成功和错误 token 三类路径。
+2. 在 `GatewaySettings` 中读取 Dashboard 鉴权配置。
+3. 在 Dashboard 静态服务和 WebSocket 控制面增加 token 校验。
+4. Dashboard 前端支持配置 token 并随请求发送。
+5. 对 delivery discard、config save、cron trigger 等高风险操作增加确认参数。
+6. README 补充本地访问和公网暴露说明。
+7. 增加测试覆盖未授权、授权成功和错误 token 三类路径。
 
-这一阶段改动小、收益高，并且能为后续控制面能力扩展建立安全前提。
+这一阶段改动范围明确，收益高，并且能为后续控制面能力扩展建立安全前提。
