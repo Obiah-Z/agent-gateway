@@ -5,9 +5,9 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_gateway.core.agents import AgentManager
-from agent_gateway.channels.bootstrap import build_channel_manager
-from agent_gateway.channels.manager import ChannelManager
+from agent_gateway.runtime.domain.agents import AgentManager
+from agent_gateway.gateways.messaging.bootstrap import build_channel_manager
+from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings, load_env
 from agent_gateway.config_loader import (
     ensure_default_project_files,
@@ -16,38 +16,38 @@ from agent_gateway.config_loader import (
     load_bindings,
     load_channel_accounts,
 )
-from agent_gateway.delivery.queue import DeliveryQueue
-from agent_gateway.intelligence.bootstrap import PromptAssembler
-from agent_gateway.intelligence.memory import MemoryStore, register_memory_tools
-from agent_gateway.intelligence.skills import SkillsManager
+from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.ai.context.prompt import PromptAssembler
+from agent_gateway.ai.context.memory import MemoryStore, register_memory_tools
+from agent_gateway.ai.context.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
-from agent_gateway.observability.events import RuntimeEventStore
-from agent_gateway.observability.alerts import AlertStore
-from agent_gateway.observability.metrics import MetricsStore
-from agent_gateway.onboarding.feishu import (
+from agent_gateway.runtime.observability.events import RuntimeEventStore
+from agent_gateway.runtime.observability.alerts import AlertStore
+from agent_gateway.runtime.observability.metrics import MetricsStore
+from agent_gateway.gateways.feishu.onboarding import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
 )
-from agent_gateway.core.ids import normalize_agent_id
-from agent_gateway.core.models import ProactiveTarget
-from agent_gateway.core.router import BindingTable
-from agent_gateway.application.autonomy import AutonomyRuntime
-from agent_gateway.application.channel_runtime import ChannelRuntime
-from agent_gateway.application.control_plane import GatewayControlPlane
-from agent_gateway.application.delivery_runtime import DeliveryRuntime
-from agent_gateway.application.dispatcher import GatewayDispatcher
-from agent_gateway.application.lanes import CommandQueue
-from agent_gateway.application.loop import AgentLoopRunner
-from agent_gateway.application.metrics_runtime import MetricsRuntime
-from agent_gateway.application.alerts_runtime import AlertsRuntime
-from agent_gateway.application.resilience import ProfileManager, ResilienceRunner
-from agent_gateway.interfaces.feishu.http import FeishuWebhookServer
-from agent_gateway.interfaces.feishu.long_connection import FeishuLongConnectionRuntime
-from agent_gateway.interfaces.websocket.server import GatewayServer
-from agent_gateway.sessions.store import SessionStore
-from agent_gateway.tools.builtin import register_builtin_tools
-from agent_gateway.tools.registry import ToolRegistry
-from agent_gateway.tools.web_search import register_web_search_tools
+from agent_gateway.runtime.domain.ids import normalize_agent_id
+from agent_gateway.runtime.domain.models import ProactiveTarget
+from agent_gateway.runtime.domain.router import BindingTable
+from agent_gateway.runtime.execution.autonomy import AutonomyRuntime
+from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime
+from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
+from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
+from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
+from agent_gateway.runtime.execution.lanes import CommandQueue
+from agent_gateway.runtime.execution.loop import AgentLoopRunner
+from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
+from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
+from agent_gateway.runtime.execution.resilience import ProfileManager, ResilienceRunner
+from agent_gateway.gateways.feishu.http import FeishuWebhookServer
+from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
+from agent_gateway.gateways.control.websocket_server import GatewayServer
+from agent_gateway.runtime.state.store import SessionStore
+from agent_gateway.ai.tools.builtin import register_builtin_tools
+from agent_gateway.ai.tools.registry import ToolRegistry
+from agent_gateway.ai.tools.web_search import register_web_search_tools
 
 
 @dataclass(slots=True)

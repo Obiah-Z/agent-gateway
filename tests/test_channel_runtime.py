@@ -1,9 +1,9 @@
 import asyncio
 from threading import Event
 
-from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.core.models import AgentReply, Binding, InboundMessage, RouteResolution
-from agent_gateway.application.channel_runtime import ChannelRuntime, PendingInbound
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.domain.models import AgentReply, Binding, InboundMessage, RouteResolution
+from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime, PendingInbound
 
 
 class FakeDispatcher:

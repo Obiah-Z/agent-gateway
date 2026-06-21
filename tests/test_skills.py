@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agent_gateway.intelligence.skills import SkillsManager
+from agent_gateway.ai.context.skills import SkillsManager
 
 
 def test_skills_manager_discovers_skill(tmp_path: Path) -> None:

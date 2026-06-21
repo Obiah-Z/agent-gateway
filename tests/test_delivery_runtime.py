@@ -1,12 +1,12 @@
 import asyncio
 from pathlib import Path
 
-from agent_gateway.channels.base import Channel, ChannelAccount
-from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.delivery.queue import DeliveryQueue, DeliveryRunner, PermanentDeliveryError
-from agent_gateway.core.models import InboundMessage, OutboundMessage
-from agent_gateway.application.delivery_runtime import DeliveryRuntime
-from agent_gateway.observability.events import RuntimeEventStore
+from agent_gateway.gateways.messaging.base import Channel, ChannelAccount
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.state.queue import DeliveryQueue, DeliveryRunner, PermanentDeliveryError
+from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
+from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
+from agent_gateway.runtime.observability.events import RuntimeEventStore
 
 
 class DummyChannel(Channel):

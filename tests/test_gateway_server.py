@@ -2,22 +2,22 @@ import asyncio
 
 from websockets.exceptions import ConnectionClosedError
 
-from agent_gateway.core.agents import AgentManager
-from agent_gateway.channels.base import ChannelAccount
-from agent_gateway.channels.manager import ChannelManager
+from agent_gateway.runtime.domain.agents import AgentManager
+from agent_gateway.gateways.messaging.base import ChannelAccount
+from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
-from agent_gateway.delivery.queue import DeliveryQueue
-from agent_gateway.core.models import AgentConfig, Binding
-from agent_gateway.core.router import BindingTable
-from agent_gateway.application.control_plane import GatewayControlPlane
-from agent_gateway.interfaces.websocket.server import GatewayServer
-from agent_gateway.application.alerts_runtime import AlertsRuntime
-from agent_gateway.observability.events import RuntimeEventStore
-from agent_gateway.observability.alerts import AlertStore
-from agent_gateway.observability.metrics import MetricsStore
-from agent_gateway.application.resilience import AuthProfile, ProfileManager
-from agent_gateway.sessions.store import SessionStore
-from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
+from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.runtime.domain.models import AgentConfig, Binding
+from agent_gateway.runtime.domain.router import BindingTable
+from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
+from agent_gateway.gateways.control.websocket_server import GatewayServer
+from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
+from agent_gateway.runtime.observability.events import RuntimeEventStore
+from agent_gateway.runtime.observability.alerts import AlertStore
+from agent_gateway.runtime.observability.metrics import MetricsStore
+from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
+from agent_gateway.runtime.state.store import SessionStore
+from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
 class FakeHeartbeat:

@@ -1,6 +1,6 @@
-from agent_gateway.channels.base import Channel, ChannelAccount
-from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.core.models import InboundMessage, OutboundMessage
+from agent_gateway.gateways.messaging.base import Channel, ChannelAccount
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
 
 
 class DummyChannel(Channel):

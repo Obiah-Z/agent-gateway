@@ -1,9 +1,9 @@
 """Agent Gateway package."""
 
 __all__ = [
-    "core",
-    "agents",
+    "ai",
     "config",
-    "models",
-    "router",
+    "gateways",
+    "monitoring",
+    "runtime",
 ]

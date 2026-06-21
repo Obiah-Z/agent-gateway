@@ -2,10 +2,10 @@ import json
 import subprocess
 from pathlib import Path
 
-from agent_gateway.channels.base import ChannelAccount
-from agent_gateway.channels.feishu import FeishuChannel
-from agent_gateway.delivery.queue import PermanentDeliveryError
-from agent_gateway.core.models import OutboundMessage
+from agent_gateway.gateways.messaging.base import ChannelAccount
+from agent_gateway.gateways.feishu.channel import FeishuChannel
+from agent_gateway.runtime.state.queue import PermanentDeliveryError
+from agent_gateway.runtime.domain.models import OutboundMessage
 from Crypto.Cipher import AES
 
 import base64
@@ -189,13 +189,13 @@ def test_feishu_channel_send_can_use_lark_cli_for_group_message(monkeypatch) -> 
     channel = _build_channel(send_mode="lark_cli", render_mode="text")
     calls: list[list[str]] = []
 
-    monkeypatch.setattr("agent_gateway.channels.feishu.shutil.which", lambda command: command)
+    monkeypatch.setattr("agent_gateway.gateways.feishu.channel.shutil.which", lambda command: command)
 
     def fake_run(argv, **kwargs):
         calls.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    monkeypatch.setattr("agent_gateway.channels.feishu.subprocess.run", fake_run)
+    monkeypatch.setattr("agent_gateway.gateways.feishu.channel.subprocess.run", fake_run)
 
     ok = channel.send(
         OutboundMessage(
@@ -226,13 +226,13 @@ def test_feishu_channel_lark_cli_send_uses_user_id_for_open_id(monkeypatch) -> N
     channel = _build_channel(send_mode="lark_cli")
     calls: list[list[str]] = []
 
-    monkeypatch.setattr("agent_gateway.channels.feishu.shutil.which", lambda command: command)
+    monkeypatch.setattr("agent_gateway.gateways.feishu.channel.shutil.which", lambda command: command)
 
     def fake_run(argv, **kwargs):
         calls.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    monkeypatch.setattr("agent_gateway.channels.feishu.subprocess.run", fake_run)
+    monkeypatch.setattr("agent_gateway.gateways.feishu.channel.subprocess.run", fake_run)
 
     ok = channel.send(
         OutboundMessage(

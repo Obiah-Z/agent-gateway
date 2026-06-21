@@ -1,8 +1,8 @@
 import asyncio
 
-from agent_gateway.channels.base import ChannelAccount
-from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.interfaces.feishu.long_connection import FeishuLongConnectionRuntime
+from agent_gateway.gateways.messaging.base import ChannelAccount
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 
 
 class FakeChannelRuntime:

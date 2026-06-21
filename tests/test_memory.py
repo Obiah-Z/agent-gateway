@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agent_gateway.intelligence.memory import MemoryStore
+from agent_gateway.ai.context.memory import MemoryStore
 
 
 def test_memory_store_write_and_recall(tmp_path: Path) -> None:

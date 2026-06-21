@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agent_gateway.sessions.store import SessionStore
+from agent_gateway.runtime.state.store import SessionStore
 
 
 def test_session_store_round_trip(tmp_path: Path) -> None:

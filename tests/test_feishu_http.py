@@ -4,11 +4,11 @@ import json
 import time
 from pathlib import Path
 
-from agent_gateway.channels.base import ChannelAccount
-from agent_gateway.channels.feishu import FeishuChannel
-from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.core.models import OutboundMessage
-from agent_gateway.interfaces.feishu.http import FeishuWebhookServer
+from agent_gateway.gateways.messaging.base import ChannelAccount
+from agent_gateway.gateways.feishu.channel import FeishuChannel
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.domain.models import OutboundMessage
+from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 
 
 class FakeChannelRuntime:

@@ -1,7 +1,7 @@
 from datetime import date
 from pathlib import Path
 
-from agent_gateway.observability.events import RuntimeEventStore, ensure_correlation_id
+from agent_gateway.runtime.observability.events import RuntimeEventStore, ensure_correlation_id
 
 
 def test_runtime_event_store_tails_events_and_filters_errors(tmp_path: Path) -> None:

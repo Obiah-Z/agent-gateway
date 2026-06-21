@@ -1,7 +1,7 @@
 from datetime import date
 from pathlib import Path
 
-from agent_gateway.observability.alerts import AlertRule, AlertState, AlertStore
+from agent_gateway.runtime.observability.alerts import AlertRule, AlertState, AlertStore
 
 
 def test_alert_state_to_dict_exposes_human_times() -> None:

@@ -9,12 +9,11 @@
   },
   "bindings": [
     {
-      "_comment": "默认兜底路由：除非前面的更精确规则命中，否则所有消息都交给 main Agent。",
-      "agent_id": "main",
-      "tier": 5,
-      "match_key": "default",
-      "match_value": "*",
-      "priority": 0
+      "agent_id": "feishu-user-ou-7d7ecc3911714f2cf6905b0d7215ca5e",
+      "tier": 1,
+      "match_key": "peer_id",
+      "match_value": "ou_7d7ecc3911714f2cf6905b0d7215ca5e",
+      "priority": 120
     },
     {
       "_comment": "第二个飞书机器人账号专用路由：来自 account_id=feishu-secondary 的消息会交给 FeishuQABot 对应的 feishu-secondary Agent。",
@@ -31,6 +30,14 @@
       "match_key": "account_id",
       "match_value": "feishu-long-local",
       "priority": 40
+    },
+    {
+      "_comment": "默认兜底路由：除非前面的更精确规则命中，否则所有消息都交给 main Agent。",
+      "agent_id": "main",
+      "tier": 5,
+      "match_key": "default",
+      "match_value": "*",
+      "priority": 0
     }
   ]
 }

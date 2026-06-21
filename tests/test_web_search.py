@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 from agent_gateway.config import GatewaySettings
-from agent_gateway.tools.registry import ToolRegistry
-from agent_gateway.tools.web_search import register_web_search_tools
+from agent_gateway.ai.tools.registry import ToolRegistry
+from agent_gateway.ai.tools.web_search import register_web_search_tools
 
 
 class FakeTavilyClient:

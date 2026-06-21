@@ -2,17 +2,17 @@ import asyncio
 import json
 from pathlib import Path
 
-from agent_gateway.core.agents import AgentManager
-from agent_gateway.channels.manager import ChannelManager
+from agent_gateway.runtime.domain.agents import AgentManager
+from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
-from agent_gateway.core.models import AgentConfig, InboundMessage
-from agent_gateway.onboarding.feishu import (
+from agent_gateway.runtime.domain.models import AgentConfig, InboundMessage
+from agent_gateway.gateways.feishu.onboarding import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
 )
-from agent_gateway.core.router import BindingTable
-from agent_gateway.application.control_plane import GatewayControlPlane
-from agent_gateway.application.resilience import ProfileManager
+from agent_gateway.runtime.domain.router import BindingTable
+from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
+from agent_gateway.runtime.execution.resilience import ProfileManager
 
 
 class FakeDispatcher:

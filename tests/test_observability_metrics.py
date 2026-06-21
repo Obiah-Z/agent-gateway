@@ -1,7 +1,7 @@
 from datetime import date
 from pathlib import Path
 
-from agent_gateway.observability.metrics import MetricsStore
+from agent_gateway.runtime.observability.metrics import MetricsStore
 
 
 def test_metrics_store_records_and_reads_latest_snapshot(tmp_path: Path) -> None:

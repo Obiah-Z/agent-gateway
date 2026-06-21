@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_gateway.application.lanes import CommandQueue
-from agent_gateway.application.metrics_runtime import MetricsRuntime
-from agent_gateway.application.resilience import AuthProfile, ProfileManager
-from agent_gateway.delivery.queue import DeliveryQueue
-from agent_gateway.observability.events import RuntimeEventStore
-from agent_gateway.observability.metrics import MetricsStore
+from agent_gateway.runtime.execution.lanes import CommandQueue
+from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
+from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
+from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.runtime.observability.events import RuntimeEventStore
+from agent_gateway.runtime.observability.metrics import MetricsStore
 
 
 class FakeCron:

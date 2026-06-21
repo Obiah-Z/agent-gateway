@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from agent_gateway.application.alerts_runtime import AlertsRuntime
-from agent_gateway.channels.manager import ChannelManager
-from agent_gateway.core.models import ProactiveTarget
-from agent_gateway.delivery.queue import DeliveryQueue
-from agent_gateway.application.dispatcher import GatewayDispatcher
-from agent_gateway.observability.alerts import AlertStore
-from agent_gateway.observability.events import RuntimeEventStore
-from agent_gateway.observability.metrics import MetricsStore
+from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.domain.models import ProactiveTarget
+from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
+from agent_gateway.runtime.observability.alerts import AlertStore
+from agent_gateway.runtime.observability.events import RuntimeEventStore
+from agent_gateway.runtime.observability.metrics import MetricsStore
 
 
 def test_alerts_runtime_triggers_and_recovers_metric_rules(tmp_path: Path) -> None:

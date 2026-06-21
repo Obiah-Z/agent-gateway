@@ -2,18 +2,18 @@ import asyncio
 import json
 from pathlib import Path
 
-from agent_gateway.core.agents import AgentManager
+from agent_gateway.runtime.domain.agents import AgentManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.config_loader import load_agents, save_agents
-from agent_gateway.intelligence.bootstrap import PromptAssembler
-from agent_gateway.intelligence.memory import MemoryStore
-from agent_gateway.intelligence.skills import SkillsManager
-from agent_gateway.core.models import AgentConfig
-from agent_gateway.application.agent_manifest import build_agent_template, validate_agent_config
-from agent_gateway.application.loop import AgentLoopRunner
-from agent_gateway.application.resilience import ProfileManager
-from agent_gateway.sessions.store import SessionStore
-from agent_gateway.tools.registry import RegisteredTool, ToolRegistry
+from agent_gateway.ai.context.prompt import PromptAssembler
+from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.ai.context.skills import SkillsManager
+from agent_gateway.runtime.domain.models import AgentConfig
+from agent_gateway.runtime.execution.agent_manifest import build_agent_template, validate_agent_config
+from agent_gateway.runtime.execution.loop import AgentLoopRunner
+from agent_gateway.runtime.execution.resilience import ProfileManager
+from agent_gateway.runtime.state.store import SessionStore
+from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
 class FakeResilienceRunner:

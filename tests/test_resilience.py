@@ -2,10 +2,10 @@ import os
 
 import pytest
 
-from agent_gateway.application.resilience import AuthProfile, FailoverReason, ProfileManager, classify_failure
-from agent_gateway.application.resilience import ResilienceRunner
+from agent_gateway.runtime.execution.resilience import AuthProfile, FailoverReason, ProfileManager, classify_failure
+from agent_gateway.runtime.execution.resilience import ResilienceRunner
 from agent_gateway.config import GatewaySettings
-from agent_gateway.tools.registry import ToolRegistry
+from agent_gateway.ai.tools.registry import ToolRegistry
 
 
 def test_classify_failure_categories() -> None:

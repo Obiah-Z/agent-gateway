@@ -84,6 +84,33 @@
         "use_global_files": true,
         "skills_enabled": true
       }
+    },
+    {
+      "id": "feishu-user-ou-7d7ecc3911714f2cf6905b0d7215ca5e",
+      "name": "我的飞书助手",
+      "personality": "亲和、简洁、耐心，适合飞书日常对话",
+      "model": "",
+      "dm_scope": "per-account-channel-peer",
+      "extra_system": "你是通过飞书扫码接入 Gateway 的智能助手。优先用简洁中文回答，必要时再使用工具。",
+      "tool_policy": {
+        "mode": "allowlist",
+        "tool_names": [
+          "get_current_time",
+          "memory_search",
+          "web_search",
+          "fetch_url"
+        ]
+      },
+      "memory_policy": {
+        "enabled": true,
+        "auto_recall": false,
+        "top_k": 2
+      },
+      "prompt_policy": {
+        "prompt_dir": "agents/feishu-user-ou-7d7ecc3911714f2cf6905b0d7215ca5e",
+        "use_global_files": true,
+        "skills_enabled": true
+      }
     }
   ]
 }

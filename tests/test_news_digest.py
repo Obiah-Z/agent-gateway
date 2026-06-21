@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
 
-from agent_gateway.news.collector import NewsCollector
-from agent_gateway.news.digest import build_digest_prompt
-from agent_gateway.news.models import NewsItem, NewsSourceConfig
-from agent_gateway.news.sources import parse_html_news_page
-from agent_gateway.news.store import NewsDigestStore
+from agent_gateway.ai.news.collector import NewsCollector
+from agent_gateway.ai.news.digest import build_digest_prompt
+from agent_gateway.ai.news.models import NewsItem, NewsSourceConfig
+from agent_gateway.ai.news.sources import parse_html_news_page
+from agent_gateway.ai.news.store import NewsDigestStore
 
 
 class FakeNewsSourceClient:
