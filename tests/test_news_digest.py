@@ -65,6 +65,42 @@ def test_news_collector_loads_sources_filters_seen_and_records_items(tmp_path: P
     )
 
 
+def test_news_collector_dedupes_same_url_across_sources(tmp_path: Path) -> None:
+    sources_file = tmp_path / "sources.json"
+    sources_file.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {"id": "skills", "type": "github_search_repositories"},
+                    {"id": "plugins", "type": "github_search_repositories"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    duplicate_a = _item("skills", "Same repo from skills", "https://github.com/owner/repo")
+    duplicate_b = _item("plugins", "Same repo from plugins", "https://github.com/owner/repo")
+    unique = _item("plugins", "Different repo", "https://github.com/owner/other")
+    fake_client = FakeNewsSourceClient(
+        {
+            "skills": [duplicate_a],
+            "plugins": [duplicate_b, unique],
+        }
+    )
+
+    collector = NewsCollector(
+        sources_file,
+        NewsDigestStore(tmp_path / "news-store"),
+        client=fake_client,
+    )
+    result = collector.collect(lookback_hours=24, max_items=5, per_source_max_items=5)
+
+    assert [item.url for item in result.items] == [
+        "https://github.com/owner/repo",
+        "https://github.com/owner/other",
+    ]
+
+
 def test_build_digest_prompt_contains_candidate_sources() -> None:
     item = _item("openai-news", "OpenAI Agent Update", "https://openai.com/news/example")
 
@@ -150,6 +186,10 @@ def test_github_search_repositories_source_collects_ranked_repos(monkeypatch) ->
 
     assert [item.title for item in items] == ["owner/agent-skills"]
     assert items[0].metadata["stars"] == 1000
+    assert "仓库描述：Reusable skills for agents" in items[0].summary
+    assert "热度：1000 stars，70 forks" in items[0].summary
+    assert "主要语言：Python" in items[0].summary
+    assert "主题：agent, skills" in items[0].summary
     assert "stars:>=50" in client._http.calls[0]["params"]["q"]  # type: ignore[attr-defined]
     assert "pushed:>=" in client._http.calls[0]["params"]["q"]  # type: ignore[attr-defined]
 

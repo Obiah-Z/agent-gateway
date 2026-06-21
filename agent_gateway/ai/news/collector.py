@@ -64,6 +64,7 @@ class NewsCollector:
             collected.extend(items)
 
         collected = _sort_items(collected)
+        collected = _dedupe_by_url(collected)
         self.store.append_collected(collected)
         fresh = self.store.filter_new(collected)
         return NewsCollectionResult(items=fresh[: max(1, max_items)], errors=errors)
@@ -82,3 +83,15 @@ def _sort_items(items: list[NewsItem]) -> list[NewsItem]:
         return (source_rank, -timestamp)
 
     return sorted(items, key=key)
+
+
+def _dedupe_by_url(items: list[NewsItem]) -> list[NewsItem]:
+    result: list[NewsItem] = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.url.strip() or item.id
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result

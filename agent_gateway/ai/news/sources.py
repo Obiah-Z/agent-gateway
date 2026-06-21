@@ -264,10 +264,12 @@ class NewsSourceClient:
             if not isinstance(topics, list):
                 topics = []
             description = str(repo.get("description") or "").strip()
+            description_line = f"仓库描述：{description}" if description else "仓库描述：未提供"
             summary = (
-                f"{description}\n"
-                f"stars={stars}; forks={forks}; language={language or 'unknown'}; "
-                f"topics={', '.join(str(topic) for topic in topics[:8]) or '-'}"
+                f"{description_line}\n"
+                f"热度：{stars} stars，{forks} forks；"
+                f"主要语言：{language or '未知'}；"
+                f"主题：{', '.join(str(topic) for topic in topics[:8]) or '无'}"
             ).strip()
             rows.append(
                 NewsItem.build(

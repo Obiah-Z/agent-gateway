@@ -32,11 +32,11 @@
       "payload": {
         "kind": "github_skill_digest",
         "sources_file": "github-skill-sources.json",
-        "lookback_hours": 168,
-        "max_items": 6,
-        "per_source_max_items": 5,
+        "lookback_hours": 720,
+        "max_items": 3,
+        "per_source_max_items": 8,
         "skip_if_empty": true,
-        "timeout_seconds": 15
+        "timeout_seconds": 20
       },
       "delete_after_run": false
     }
