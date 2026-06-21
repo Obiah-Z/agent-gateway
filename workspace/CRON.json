@@ -29,6 +29,24 @@
         "message": "检查系统健康状态，包括内存占用、磁盘空间和运行中的服务。只有在确实需要处理时才输出报告。"
       },
       "delete_after_run": false
+    },
+    {
+      "id": "server-space-advisor",
+      "name": "服务器空间巡检",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 9 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "agent_id": "ops"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "执行 /space-advisor 服务器空间巡检。请通过 bash 工具运行：python3 skills/server-space-advisor/scripts/space_advisor.py --paths / /home /var /tmp --depth 2 --limit 20 --json，并把 bash 工具 timeout 参数设为 180。只允许分析和输出建议，禁止删除、移动、压缩、清空或修改任何文件。输出中文报告，分为：磁盘概览、可安全清理、需确认、不建议动、下一步。只有当磁盘使用率较高、发现明显可处理对象或扫描异常时才输出报告；如果一切正常，请简短说明正常。"
+      },
+      "delete_after_run": false
     }
   ]
 }

@@ -111,6 +111,33 @@
         "use_global_files": true,
         "skills_enabled": true
       }
+    },
+    {
+      "id": "ops",
+      "name": "GatewayOps",
+      "personality": "谨慎、只读、证据优先，适合本机运维巡检",
+      "model": "",
+      "dm_scope": "per-peer",
+      "extra_system": "你负责本机运维巡检和空间占用分析。你可以执行只读 shell 命令采集信息，但禁止删除、移动、压缩、清空、重启服务、修改权限、修改配置或执行任何会改变系统状态的动作。",
+      "tool_policy": {
+        "mode": "allowlist",
+        "tool_names": [
+          "read_file",
+          "list_directory",
+          "get_current_time",
+          "bash"
+        ]
+      },
+      "memory_policy": {
+        "enabled": false,
+        "auto_recall": false,
+        "top_k": 1
+      },
+      "prompt_policy": {
+        "prompt_dir": "agents/ops",
+        "use_global_files": true,
+        "skills_enabled": true
+      }
     }
   ]
 }
