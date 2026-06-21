@@ -37,3 +37,16 @@ def test_workspace_server_space_advisor_skill_is_discoverable() -> None:
     prompt = manager.format_prompt_block()
     assert "只读分析服务器磁盘占用" in prompt
     assert "禁止删除" in prompt
+
+
+def test_workspace_github_skill_finder_skill_is_discoverable() -> None:
+    workspace = Path(__file__).resolve().parents[1] / "workspace"
+
+    manager = SkillsManager(workspace)
+    manager.discover()
+
+    names = {skill.name for skill in manager.skills}
+    assert "github-skill-finder" in names
+    prompt = manager.format_prompt_block()
+    assert "GitHub 热门 Skill 发现" in prompt
+    assert "/github-skill-finder" in prompt

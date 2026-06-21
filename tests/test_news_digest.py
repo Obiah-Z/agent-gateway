@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 
 from agent_gateway.ai.news.collector import NewsCollector
-from agent_gateway.ai.news.digest import build_digest_prompt
+from agent_gateway.ai.news.digest import build_digest_prompt, build_github_skill_digest_prompt
 from agent_gateway.ai.news.models import NewsItem, NewsSourceConfig
-from agent_gateway.ai.news.sources import parse_html_news_page
+from agent_gateway.ai.news.sources import NewsSourceClient, parse_html_news_page
 from agent_gateway.ai.news.store import NewsDigestStore
 
 
@@ -73,6 +73,85 @@ def test_build_digest_prompt_contains_candidate_sources() -> None:
     assert "只能使用候选来源" in prompt
     assert "OpenAI Agent Update" in prompt
     assert "https://openai.com/news/example" in prompt
+
+
+def test_build_github_skill_digest_prompt_contains_repo_metrics() -> None:
+    source = NewsSourceConfig(
+        id="github-agent-skills",
+        type="github_search_repositories",
+        tags=("github", "skill"),
+    )
+    item = NewsItem.build(
+        source=source,
+        title="owner/useful-agent-skill",
+        url="https://github.com/owner/useful-agent-skill",
+        published_at="2026-06-20T00:00:00Z",
+        summary="Reusable skill for AI agents.",
+        metadata={
+            "stars": 1200,
+            "forks": 80,
+            "language": "Python",
+            "topics": ["agents", "skills"],
+        },
+    )
+
+    prompt = build_github_skill_digest_prompt([item], lookback_hours=168, max_output_items=6)
+
+    assert "热门 Skill 发现" in prompt
+    assert "owner/useful-agent-skill" in prompt
+    assert "stars: 1200" in prompt
+    assert "可用于我这个 Gateway" in prompt
+
+
+def test_github_search_repositories_source_collects_ranked_repos(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self):
+            return {
+                "items": [
+                    {
+                        "full_name": "owner/agent-skills",
+                        "html_url": "https://github.com/owner/agent-skills",
+                        "description": "Reusable skills for agents",
+                        "pushed_at": "2026-06-20T00:00:00Z",
+                        "stargazers_count": 1000,
+                        "forks_count": 70,
+                        "language": "Python",
+                        "topics": ["agent", "skills"],
+                    }
+                ]
+            }
+
+    class FakeHttp:
+        def __init__(self, *args, **kwargs) -> None:
+            self.calls = []
+
+        def get(self, url, params=None, headers=None):
+            self.calls.append({"url": url, "params": params, "headers": headers})
+            return FakeResponse()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("agent_gateway.ai.news.sources.httpx.Client", FakeHttp)
+    client = NewsSourceClient(timeout_seconds=1)
+    source = NewsSourceConfig(
+        id="github-agent-skills",
+        type="github_search_repositories",
+        query="skill agent in:name,description",
+        min_stars=50,
+        pushed_within_days=30,
+        max_results=5,
+    )
+
+    items = client.collect(source, lookback_hours=168, max_items=5)
+
+    assert [item.title for item in items] == ["owner/agent-skills"]
+    assert items[0].metadata["stars"] == 1000
+    assert "stars:>=50" in client._http.calls[0]["params"]["q"]  # type: ignore[attr-defined]
+    assert "pushed:>=" in client._http.calls[0]["params"]["q"]  # type: ignore[attr-defined]
 
 
 def test_parse_html_news_page_extracts_filtered_official_links() -> None:

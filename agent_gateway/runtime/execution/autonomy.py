@@ -25,7 +25,7 @@ from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.domain.ids import normalize_agent_id
 from agent_gateway.runtime.domain.models import ProactiveTarget, AgentReply
 from agent_gateway.ai.news.collector import NewsCollector
-from agent_gateway.ai.news.digest import build_digest_prompt
+from agent_gateway.ai.news.digest import build_digest_prompt, build_github_skill_digest_prompt
 from agent_gateway.ai.news.models import NewsItem
 from agent_gateway.ai.news.store import NewsDigestStore
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
@@ -288,8 +288,14 @@ class CronService:
         metadata = getattr(entry, "metadata", {})
         if not isinstance(metadata, dict):
             return
-        if metadata.get("kind") != "cron" or metadata.get("cron_payload_kind") != "agent_news_digest":
+        if metadata.get("kind") != "cron" or metadata.get("cron_payload_kind") not in {
+            "agent_news_digest",
+            "github_skill_digest",
+        }:
             return
+        store_name = str(metadata.get("news_digest_store") or "news-digest").strip()
+        if store_name not in {"news-digest", "github-skill-digest"}:
+            store_name = "news-digest"
         rows = metadata.get(NEWS_DIGEST_ACK_METADATA_KEY, [])
         if not isinstance(rows, list):
             return
@@ -301,7 +307,7 @@ class CronService:
             if item.id:
                 items.append(item)
         if items:
-            NewsDigestStore(self.settings.data_dir / "news-digest").mark_seen(items)
+            NewsDigestStore(self.settings.data_dir / store_name).mark_seen(items)
 
     async def start(self) -> None:
         """启动后台轮询任务。"""
@@ -515,6 +521,12 @@ class CronService:
                     payload,
                     correlation_id=correlation_id,
                 )
+            elif kind == "github_skill_digest":
+                output, status, delivered_news_items = await self._run_github_skill_digest(
+                    job,
+                    payload,
+                    correlation_id=correlation_id,
+                )
             else:
                 output = f"[unknown kind: {kind}]"
                 status = "error"
@@ -562,7 +574,8 @@ class CronService:
             if delivered_news_items:
                 metadata.update(
                     {
-                        "cron_payload_kind": "agent_news_digest",
+                        "cron_payload_kind": kind,
+                        "news_digest_store": self._news_digest_store_name(kind),
                         NEWS_DIGEST_ACK_METADATA_KEY: [
                             item.to_dict() for item in delivered_news_items
                         ],
@@ -624,6 +637,66 @@ class CronService:
             return "no fresh agent news items", "skipped", []
 
         prompt = build_digest_prompt(
+            result.items,
+            lookback_hours=lookback_hours,
+            max_output_items=max_items,
+            errors=result.errors,
+        )
+        reply = await _dispatch_background_with_correlation(
+            self.dispatcher,
+            agent_id=job.target.agent_id,
+            session_key=f"system:cron:{job.id}",
+            prompt=prompt,
+            channel="cron",
+            mode="minimal",
+            lane_name=f"cron:{job.target.agent_id}",
+            correlation_id=correlation_id,
+            disabled_tools=["memory_write"],
+        )
+        return reply.text, "ok", list(result.items)
+
+    @staticmethod
+    def _news_digest_store_name(payload_kind: str) -> str:
+        if payload_kind == "github_skill_digest":
+            return "github-skill-digest"
+        return "news-digest"
+
+    async def _run_github_skill_digest(
+        self,
+        job: CronJob,
+        payload: dict[str, Any],
+        *,
+        correlation_id: str,
+    ) -> tuple[str, str, list[NewsItem]]:
+        """搜索 GitHub 热门 Skill 仓库，并交给目标 Agent 生成飞书摘要。"""
+
+        lookback_hours = int(payload.get("lookback_hours", 24 * 7))
+        max_items = int(payload.get("max_items", 8))
+        per_source_max_items = int(payload.get("per_source_max_items", 8))
+        skip_if_empty = bool(payload.get("skip_if_empty", True))
+        sources_file = self.settings.workspace_root / str(
+            payload.get("sources_file", "github-skill-sources.json")
+        )
+        store = NewsDigestStore(self.settings.data_dir / "github-skill-digest")
+        collector = NewsCollector(
+            sources_file,
+            store,
+            timeout_seconds=float(payload.get("timeout_seconds", 15.0)),
+        )
+        try:
+            result = await asyncio.to_thread(
+                collector.collect,
+                lookback_hours=lookback_hours,
+                max_items=max_items,
+                per_source_max_items=per_source_max_items,
+            )
+        finally:
+            collector.close()
+
+        if not result.items and skip_if_empty:
+            return "no fresh github skill items", "skipped", []
+
+        prompt = build_github_skill_digest_prompt(
             result.items,
             lookback_hours=lookback_hours,
             max_output_items=max_items,

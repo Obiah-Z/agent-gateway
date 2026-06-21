@@ -57,6 +57,12 @@ class NewsSourceClient:
                 lookback_hours=lookback_hours,
                 max_items=max_items,
             )
+        if source.type == "github_search_repositories":
+            return self._collect_github_search_repositories(
+                source,
+                lookback_hours=lookback_hours,
+                max_items=max_items,
+            )
         raise RuntimeError(f"unsupported news source type: {source.type}")
 
     def _collect_rss(
@@ -199,6 +205,89 @@ class NewsSourceClient:
             lookback_hours=lookback_hours,
             max_items=max_items,
         )
+
+    def _collect_github_search_repositories(
+        self,
+        source: NewsSourceConfig,
+        *,
+        lookback_hours: int,
+        max_items: int,
+    ) -> list[NewsItem]:
+        query = source.query.strip()
+        if not query:
+            query = "skill OR skills topic:agent stars:>50"
+        if source.min_stars and "stars:" not in query:
+            query = f"{query} stars:>={source.min_stars}"
+        pushed_within_days = source.pushed_within_days or max(1, int(lookback_hours / 24))
+        if pushed_within_days and "pushed:" not in query:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=pushed_within_days)).date().isoformat()
+            query = f"{query} pushed:>={cutoff}"
+
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        token = os.getenv("GITHUB_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        response = self._http.get(
+            "https://api.github.com/search/repositories",
+            params={
+                "q": query,
+                "sort": "stars",
+                "order": "desc",
+                "per_page": max(1, min(max_items, 30)),
+            },
+            headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+        items = data.get("items", []) if isinstance(data, dict) else []
+        if not isinstance(items, list):
+            return []
+
+        rows: list[NewsItem] = []
+        for repo in items:
+            if not isinstance(repo, dict):
+                continue
+            name = str(repo.get("full_name") or "").strip()
+            url = str(repo.get("html_url") or "").strip()
+            if not name or not url:
+                continue
+            pushed_at = str(repo.get("pushed_at") or repo.get("updated_at") or "")
+            if pushed_at and not _within_lookback(pushed_at, max(24, pushed_within_days * 24)):
+                continue
+            stars = int(repo.get("stargazers_count") or 0)
+            forks = int(repo.get("forks_count") or 0)
+            language = str(repo.get("language") or "").strip()
+            topics = repo.get("topics", [])
+            if not isinstance(topics, list):
+                topics = []
+            description = str(repo.get("description") or "").strip()
+            summary = (
+                f"{description}\n"
+                f"stars={stars}; forks={forks}; language={language or 'unknown'}; "
+                f"topics={', '.join(str(topic) for topic in topics[:8]) or '-'}"
+            ).strip()
+            rows.append(
+                NewsItem.build(
+                    source=source,
+                    title=name,
+                    url=url,
+                    published_at=pushed_at,
+                    summary=summary,
+                    metadata={
+                        "stars": stars,
+                        "forks": forks,
+                        "language": language,
+                        "topics": [str(topic) for topic in topics],
+                        "pushed_at": pushed_at,
+                    },
+                )
+            )
+            if len(rows) >= max_items:
+                break
+        return rows
 
 
 def _node_text(node: ElementTree.Element, tag: str) -> str:

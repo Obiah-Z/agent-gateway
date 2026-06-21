@@ -250,6 +250,103 @@ def test_cron_service_runs_agent_news_digest(
     assert marked == [item]
 
 
+def test_cron_service_runs_github_skill_digest(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "github-skill-sources.json").write_text(
+        json.dumps({"sources": [{"id": "fake", "type": "github_search_repositories"}]}),
+        encoding="utf-8",
+    )
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "github-skill-digest",
+                "name": "GitHub 热门 Skill 发现",
+                "enabled": True,
+                "schedule": {
+                    "kind": "every",
+                    "every_seconds": 1,
+                    "anchor": "2026-01-01T00:00:00+00:00",
+                },
+                "payload": {
+                    "kind": "github_skill_digest",
+                    "sources_file": "github-skill-sources.json",
+                    "lookback_hours": 168,
+                    "max_items": 6,
+                },
+                "delete_after_run": False,
+            }
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    source = NewsSourceConfig(id="fake", type="github_search_repositories")
+    item = NewsItem.build(
+        source=source,
+        title="owner/agent-skills",
+        url="https://github.com/owner/agent-skills",
+        published_at="2026-06-20T00:00:00Z",
+        summary="Reusable skills",
+        metadata={"stars": 1000, "forks": 70, "language": "Python", "topics": ["agent"]},
+    )
+    marked: list[NewsItem] = []
+
+    class FakeCollector:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def collect(self, **kwargs):
+            return type("Result", (), {"items": [item], "errors": []})()
+
+        def close(self) -> None:
+            pass
+
+    class FakeStore:
+        def __init__(self, root: Path) -> None:
+            self.root = root
+
+        def mark_seen(self, items: list[NewsItem]) -> None:
+            marked.extend(items)
+
+    monkeypatch.setattr("agent_gateway.runtime.execution.autonomy.NewsCollector", FakeCollector)
+    monkeypatch.setattr("agent_gateway.runtime.execution.autonomy.NewsDigestStore", FakeStore)
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="research",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    dispatcher = FakeDispatcher("整理后的 GitHub Skill 简报")
+    cron = CronService(
+        settings,
+        dispatcher,
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "research"),
+    )
+
+    asyncio.run(cron._run_job(cron.jobs[0], time.time()))
+
+    assert "热门 Skill 发现" in dispatcher.background_prompts[0]
+    assert "owner/agent-skills" in dispatcher.background_prompts[0]
+    assert channel.sent == ["[GitHub 热门 Skill 发现] 整理后的 GitHub Skill 简报"]
+    delivery = dispatcher.deliveries[0]
+    metadata = delivery["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["cron_payload_kind"] == "github_skill_digest"
+    assert metadata["news_digest_items"] == [item.to_dict()]
+
+    cron.on_delivery_success(type("Entry", (), {"metadata": metadata})())
+
+    assert marked == [item]
+
+
 def test_cron_service_loads_agent_scoped_jobs(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     agent_dir = workspace / "agents" / "research"

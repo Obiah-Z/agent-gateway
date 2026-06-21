@@ -1,0 +1,34 @@
+{
+  "sources": [
+    {
+      "id": "github-agent-skills",
+      "type": "github_search_repositories",
+      "enabled": true,
+      "query": "(skill OR skills OR plugin OR plugins) (agent OR codex OR \"AI agent\" OR automation) in:name,description,readme",
+      "min_stars": 50,
+      "pushed_within_days": 30,
+      "max_results": 10,
+      "tags": ["github", "skill", "agent", "automation"]
+    },
+    {
+      "id": "github-mcp-tools",
+      "type": "github_search_repositories",
+      "enabled": true,
+      "query": "(mcp OR \"model context protocol\") (server OR tool OR agent) in:name,description,readme",
+      "min_stars": 50,
+      "pushed_within_days": 45,
+      "max_results": 10,
+      "tags": ["github", "mcp", "tool-protocol", "agent-runtime"]
+    },
+    {
+      "id": "github-agent-workflows",
+      "type": "github_search_repositories",
+      "enabled": true,
+      "query": "(workflow OR automation OR toolkit OR template) (agent OR llm OR codex) in:name,description,readme",
+      "min_stars": 100,
+      "pushed_within_days": 45,
+      "max_results": 10,
+      "tags": ["github", "workflow", "automation", "template"]
+    }
+  ]
+}

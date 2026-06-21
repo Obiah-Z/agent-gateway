@@ -19,6 +19,26 @@
         "timeout_seconds": 12
       },
       "delete_after_run": false
+    },
+    {
+      "id": "github-skill-digest",
+      "name": "GitHub 热门 Skill 发现",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 10 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "payload": {
+        "kind": "github_skill_digest",
+        "sources_file": "github-skill-sources.json",
+        "lookback_hours": 168,
+        "max_items": 6,
+        "per_source_max_items": 5,
+        "skip_if_empty": true,
+        "timeout_seconds": 15
+      },
+      "delete_after_run": false
     }
   ]
 }

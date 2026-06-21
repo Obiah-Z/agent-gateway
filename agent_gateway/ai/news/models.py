@@ -18,6 +18,8 @@ class NewsSourceConfig:
     max_results: int = 5
     url_patterns: tuple[str, ...] = ()
     exclude_url_patterns: tuple[str, ...] = ()
+    min_stars: int = 0
+    pushed_within_days: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NewsSourceConfig":
@@ -36,6 +38,8 @@ class NewsSourceConfig:
             exclude_url_patterns=tuple(
                 str(item) for item in data.get("exclude_url_patterns", []) if str(item).strip()
             ),
+            min_stars=max(0, int(data.get("min_stars", 0) or 0)),
+            pushed_within_days=max(0, int(data.get("pushed_within_days", 0) or 0)),
         )
 
 
