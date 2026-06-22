@@ -52,6 +52,20 @@ def test_workspace_github_skill_finder_skill_is_discoverable() -> None:
     assert "/github-skill-finder" in prompt
 
 
+def test_workspace_github_repo_analyzer_skill_is_discoverable() -> None:
+    workspace = Path(__file__).resolve().parents[1] / "workspace"
+
+    manager = SkillsManager(workspace)
+    manager.discover()
+
+    names = {skill.name for skill in manager.skills}
+    assert "github-repo-analyzer" in names
+    prompt = manager.format_prompt_block()
+    assert "GitHub 仓库分析" in prompt
+    assert "workspace/reports/github-repos/仓库分析-{owner}-{repo}.md" in prompt
+    assert "/github-repo-analyzer" in prompt
+
+
 def test_workspace_content_creation_skills_are_discoverable() -> None:
     workspace = Path(__file__).resolve().parents[1] / "workspace"
 
