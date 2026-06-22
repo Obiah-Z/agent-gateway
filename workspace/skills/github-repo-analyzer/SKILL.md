@@ -34,6 +34,13 @@ workspace/reports/github-repos/仓库分析-{owner}-{repo}.md
 
 对话回复只给简短摘要和文档路径，不要把完整报告刷屏。
 
+写文件时使用 Gateway 文件工具：
+
+- 工具：`write_file`
+- 参数：`file_path` 和 `content`
+- `file_path` 必须是相对 workspace 的路径，例如 `reports/github-repos/仓库分析-owner-repo.md`
+- 不要使用绝对路径，不要使用 `path` 作为主参数名。
+
 ## 标准版分析流程
 
 1. 解析仓库链接，确认 `owner/repo`。

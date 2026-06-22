@@ -33,7 +33,11 @@ def register_builtin_tools(
             return f"Error: file not found: {file_path}"
         return _truncate(path.read_text(encoding="utf-8"), max_output_chars)
 
-    def write_file(file_path: str, content: str) -> str:
+    def write_file(file_path: str = "", content: str = "", path: str = "") -> str:
+        # Some models use the common `path` argument name even when the schema says `file_path`.
+        file_path = file_path or path
+        if not file_path:
+            return "Error: write_file requires file_path"
         path = _resolve_workspace_path(workspace_root, file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -93,6 +97,10 @@ def register_builtin_tools(
                 "required": ["file_path", "content"],
                 "properties": {
                     "file_path": {"type": "string"},
+                    "path": {
+                        "type": "string",
+                        "description": "Compatibility alias for file_path. Prefer file_path.",
+                    },
                     "content": {"type": "string"},
                 },
             },
