@@ -50,3 +50,24 @@ def test_workspace_github_skill_finder_skill_is_discoverable() -> None:
     prompt = manager.format_prompt_block()
     assert "GitHub 热门 Skill 发现" in prompt
     assert "/github-skill-finder" in prompt
+
+
+def test_workspace_content_creation_skills_are_discoverable() -> None:
+    workspace = Path(__file__).resolve().parents[1] / "workspace"
+
+    manager = SkillsManager(workspace)
+    manager.discover()
+
+    names = {skill.name for skill in manager.skills}
+    assert {
+        "article-writing",
+        "content-distribution",
+        "frontend-slides",
+        "video-editing",
+        "audio-media",
+    }.issubset(names)
+    prompt = manager.format_prompt_block()
+    assert "/article" in prompt
+    assert "/slides" in prompt
+    assert "/video-edit" in prompt
+    assert "/audio-media" in prompt
