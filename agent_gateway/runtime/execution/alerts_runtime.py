@@ -16,6 +16,11 @@ RuleEvaluator = Callable[[dict[str, Any] | None, RuntimeEventStore | None], tupl
 
 
 class AlertsRuntime:
+    """告警评估与通知后台运行时。
+
+    读取最新指标和近期事件，根据规则维护告警状态，并在触发或恢复时发送通知。
+    """
+
     def __init__(
         self,
         *,
@@ -41,12 +46,16 @@ class AlertsRuntime:
         self._stopped = False
 
     async def start(self) -> None:
+        """启动后台告警评估循环。"""
+
         if self._task is not None:
             return
         self._stopped = False
         self._task = asyncio.create_task(self._loop(), name="alerts-runtime")
 
     async def stop(self) -> None:
+        """停止后台告警评估循环。"""
+
         self._stopped = True
         if self._task is not None:
             self._task.cancel()
@@ -57,6 +66,8 @@ class AlertsRuntime:
             self._task = None
 
     def evaluate_once(self) -> list[dict[str, Any]]:
+        """执行一轮告警评估，并返回本轮新产生的告警事件。"""
+
         latest = self.metrics_store.latest()
         now = time.time()
         emitted: list[dict[str, Any]] = []
@@ -124,6 +135,8 @@ class AlertsRuntime:
         return emitted
 
     def active_alerts(self) -> list[dict[str, Any]]:
+        """返回当前仍处于 active 状态的告警。"""
+
         rows = []
         for rule, _ in self.rules:
             state = self.states[rule.id]
@@ -141,9 +154,13 @@ class AlertsRuntime:
         return rows
 
     def recent_history(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """返回最近告警历史。"""
+
         return self.alert_store.tail(limit=limit)
 
     async def _loop(self) -> None:
+        """后台循环，定期评估规则并发送通知。"""
+
         while not self._stopped:
             try:
                 emitted = await asyncio.to_thread(self.evaluate_once)
@@ -154,6 +171,8 @@ class AlertsRuntime:
             await asyncio.sleep(self.interval_seconds)
 
     async def _deliver_notifications(self, rows: list[dict[str, Any]]) -> None:
+        """把新触发或恢复的告警推送到配置的主动目标。"""
+
         if self.dispatcher is None or self.channels is None or self.target is None or not self.target.peer_id:
             return
         for row in rows:
@@ -180,6 +199,8 @@ class AlertsRuntime:
                     state.last_notification_error = str(exc)
 
     def _render_alert_message(self, row: dict[str, Any]) -> str:
+        """把告警历史记录渲染成用户可读通知文本。"""
+
         rule = row.get("rule", {})
         state = row.get("state", {})
         event = str(row.get("event", "") or "")
@@ -228,6 +249,8 @@ class AlertsRuntime:
 
     @staticmethod
     def _duration_label(active_since: Any) -> str:
+        """把持续时长格式化成简短中文描述。"""
+
         if not active_since:
             return "--"
         seconds = max(0, int(time.time() - float(active_since)))
@@ -241,6 +264,8 @@ class AlertsRuntime:
 
     @staticmethod
     def _suggestion_for_rule(rule_id: str) -> str:
+        """按规则 ID 提供默认排障建议。"""
+
         suggestions = {
             "delivery_pending_backlog": "检查投递队列、目标通道和下游可达性，必要时手动 flush。",
             "delivery_failed_persisting": "检查失败消息的错误详情，确认目标 ID、凭证或权限是否失效。",
@@ -253,6 +278,8 @@ class AlertsRuntime:
 
     @staticmethod
     def _default_rules() -> list[tuple[AlertRule, RuleEvaluator]]:
+        """构造系统默认告警规则集。"""
+
         return [
             (
                 AlertRule(

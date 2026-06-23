@@ -12,6 +12,8 @@ from agent_gateway.runtime.execution.resilience import AuthProfile
 
 
 def ensure_default_project_files(settings: GatewaySettings) -> None:
+    """在项目首次启动时补齐默认配置文件。"""
+
     settings.config_dir.mkdir(parents=True, exist_ok=True)
     _write_json_if_missing(
         settings.agents_config_file,
@@ -137,6 +139,8 @@ def ensure_default_project_files(settings: GatewaySettings) -> None:
 
 
 def load_agents(settings: GatewaySettings) -> list[AgentConfig]:
+    """从 `config/agents.json` 读取 Agent 列表。"""
+
     payload = _read_json(settings.agents_config_file, {"agents": []})
     agents = []
     for item in payload.get("agents", []):
@@ -169,6 +173,8 @@ def load_agents(settings: GatewaySettings) -> list[AgentConfig]:
 
 
 def save_agents(settings: GatewaySettings, agents: list[AgentConfig]) -> None:
+    """把 Agent 配置写回 `config/agents.json`。"""
+
     write_json_atomic(
         settings.agents_config_file,
         {
@@ -178,6 +184,8 @@ def save_agents(settings: GatewaySettings, agents: list[AgentConfig]) -> None:
 
 
 def load_bindings(settings: GatewaySettings) -> list[Binding]:
+    """从 `config/bindings.json` 读取路由绑定。"""
+
     payload = _read_json(settings.bindings_config_file, {"bindings": []})
     bindings = []
     for item in payload.get("bindings", []):
@@ -194,6 +202,8 @@ def load_bindings(settings: GatewaySettings) -> list[Binding]:
 
 
 def save_bindings(settings: GatewaySettings, bindings: list[Binding]) -> None:
+    """把路由绑定写回 `config/bindings.json`。"""
+
     write_json_atomic(
         settings.bindings_config_file,
         {
@@ -212,6 +222,8 @@ def save_bindings(settings: GatewaySettings, bindings: list[Binding]) -> None:
 
 
 def load_auth_profiles(settings: GatewaySettings) -> list[AuthProfile]:
+    """读取模型调用 profile 配置，并解析环境变量密钥。"""
+
     payload = _read_json(settings.profiles_config_file, {"profiles": []})
     profiles: list[AuthProfile] = []
     for item in payload.get("profiles", []):
@@ -245,6 +257,8 @@ def load_auth_profiles(settings: GatewaySettings) -> list[AuthProfile]:
 
 
 def save_auth_profiles(settings: GatewaySettings, profiles: list[AuthProfile]) -> None:
+    """保存模型 profile 配置，同时尽量保留原始 JSON 中的扩展字段。"""
+
     existing = read_profiles_source(settings).get("profiles", [])
     existing_by_name = {
         str(item.get("name", "")): item
@@ -271,6 +285,8 @@ def save_auth_profiles(settings: GatewaySettings, profiles: list[AuthProfile]) -
 
 
 def load_channel_accounts(settings: GatewaySettings) -> list[ChannelAccount]:
+    """从 `config/channels.json` 加载通道账号配置。"""
+
     payload = _read_json(settings.channels_config_file, {"channels": []})
     accounts: list[ChannelAccount] = []
     for item in payload.get("channels", []):
@@ -298,6 +314,8 @@ def load_channel_accounts(settings: GatewaySettings) -> list[ChannelAccount]:
 
 
 def save_channel_accounts(settings: GatewaySettings, accounts: list[ChannelAccount]) -> None:
+    """把通道账号配置写回 `config/channels.json`。"""
+
     existing = read_channels_source(settings).get("channels", [])
     existing_by_key = {
         (str(item.get("channel", "")), str(item.get("account_id", ""))): item
@@ -332,22 +350,32 @@ def save_channel_accounts(settings: GatewaySettings, accounts: list[ChannelAccou
 
 
 def read_agents_source(settings: GatewaySettings) -> dict[str, Any]:
+    """读取原始 Agent 配置 JSON。"""
+
     return _read_json(settings.agents_config_file, {"agents": []})
 
 
 def read_bindings_source(settings: GatewaySettings) -> dict[str, Any]:
+    """读取原始 binding 配置 JSON。"""
+
     return _read_json(settings.bindings_config_file, {"bindings": []})
 
 
 def read_profiles_source(settings: GatewaySettings) -> dict[str, Any]:
+    """读取原始 profile 配置 JSON。"""
+
     return _read_json(settings.profiles_config_file, {"profiles": []})
 
 
 def read_channels_source(settings: GatewaySettings) -> dict[str, Any]:
+    """读取原始 channel 配置 JSON。"""
+
     return _read_json(settings.channels_config_file, {"channels": []})
 
 
 def _read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    """安全读取 JSON 文件，不存在或损坏时返回默认值。"""
+
     if not path.exists():
         return default
     try:
@@ -357,12 +385,16 @@ def _read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
 
 
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
+    """仅在目标文件不存在时写入默认 JSON。"""
+
     if path.exists():
         return
     write_json_atomic(path, payload)
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    """原子写入 JSON 文件，避免半写入状态。"""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".tmp.{path.name}")
     tmp_path.write_text(
@@ -376,6 +408,8 @@ def _serialize_channel_config(
     current: dict[str, Any],
     raw: dict[str, Any] | object,
 ) -> dict[str, Any]:
+    """保留 `_env` 键并合并当前配置，生成可落盘的通道配置。"""
+
     raw_config = raw if isinstance(raw, dict) else {}
     env_keys = {
         key[:-4]

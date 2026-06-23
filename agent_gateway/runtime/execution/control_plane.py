@@ -50,6 +50,11 @@ SUPPORTED_CHANNELS = {"cli", "telegram", "feishu"}
 
 @dataclass(slots=True)
 class GatewayControlPlane:
+    """控制面聚合器。
+
+    统一封装配置读写、运行时状态查询和控制操作，供 Dashboard、控制 API 和运维命令使用。
+    """
+
     settings: GatewaySettings
     agents: AgentManager
     bindings: BindingTable
@@ -69,12 +74,18 @@ class GatewayControlPlane:
     alerts_runtime: Any = None
 
     def list_bindings(self) -> list[Binding]:
+        """返回当前生效的路由绑定列表。"""
+
         return self.bindings.list_all()
 
     def list_agents(self) -> list[AgentConfig]:
+        """返回当前已加载的 Agent 配置。"""
+
         return self.agents.list()
 
     def list_tool_capabilities(self) -> list[dict[str, Any]]:
+        """按 capability tag 汇总工具暴露情况。"""
+
         if self.tools is None:
             return []
         return [
@@ -86,14 +97,20 @@ class GatewayControlPlane:
         ]
 
     def validate_agent(self, agent: AgentConfig) -> list[str]:
+        """校验 Agent 配置，主要检查工具能力声明是否合法。"""
+
         if self.tools is None:
             return []
         return validate_agent_config(agent, self.tools)
 
     def list_profiles(self) -> list[dict[str, Any]]:
+        """返回模型 profile 的运行态快照。"""
+
         return self.profiles.snapshot()
 
     def list_channels(self) -> list[dict[str, Any]]:
+        """汇总已配置通道和当前激活实例的状态。"""
+
         active_accounts = {
             (account.channel, account.account_id): account
             for account in self.channels.accounts
@@ -135,6 +152,8 @@ class GatewayControlPlane:
         return rows
 
     def delivery_stats(self) -> dict[str, Any]:
+        """返回投递队列的摘要统计。"""
+
         queue = self._require_delivery_queue()
         pending = queue.pending_entries()
         failed = queue.failed_entries()
@@ -159,6 +178,8 @@ class GatewayControlPlane:
         job_id: str = "",
         delivery_id: str = "",
     ) -> dict[str, Any]:
+        """按条件回看最近运行事件。"""
+
         if self.event_store is None:
             return {"items": [], "count": 0, "configured": False}
         items = self.event_store.tail(
@@ -186,6 +207,8 @@ class GatewayControlPlane:
         component: str = "",
         correlation_id: str = "",
     ) -> dict[str, Any]:
+        """筛出最近错误事件。"""
+
         if self.event_store is None:
             return {"items": [], "count": 0, "configured": False}
         items = self.event_store.recent_errors(
@@ -201,6 +224,8 @@ class GatewayControlPlane:
         }
 
     def recent_memories(self, *, limit: int = 20) -> dict[str, Any]:
+        """查看最近写入的记忆条目。"""
+
         store = MemoryStore(self.settings.workspace_root)
         items = store.recent_entries(limit=limit)
         return {
@@ -211,6 +236,8 @@ class GatewayControlPlane:
         }
 
     def metrics_snapshot(self) -> dict[str, Any]:
+        """返回最近一条指标快照。"""
+
         if self.metrics_store is None:
             return {"configured": False}
         latest = self.metrics_store.latest()
@@ -223,6 +250,8 @@ class GatewayControlPlane:
         }
 
     def metrics_tail(self, *, limit: int = 60) -> dict[str, Any]:
+        """返回最近一段时间的原始指标序列。"""
+
         safe_limit = max(1, min(int(limit), 1000))
         if self.metrics_store is None:
             return {"items": [], "count": 0, "configured": False, "limit": safe_limit}
@@ -235,6 +264,8 @@ class GatewayControlPlane:
         }
 
     def metrics_summary(self, *, limit: int = 60) -> dict[str, Any]:
+        """把近期指标序列压缩成面板可直接展示的摘要。"""
+
         safe_limit = max(1, min(int(limit), 1000))
         if self.metrics_store is None:
             return {"configured": False, "count": 0, "limit": safe_limit}
@@ -315,6 +346,8 @@ class GatewayControlPlane:
         }
 
     def active_alerts(self) -> dict[str, Any]:
+        """返回当前激活中的告警。"""
+
         if self.alerts_runtime is None:
             return {"items": [], "count": 0, "configured": False}
         items = self.alerts_runtime.active_alerts()
@@ -331,6 +364,8 @@ class GatewayControlPlane:
         }
 
     def alert_history(self, *, limit: int = 50) -> dict[str, Any]:
+        """返回最近告警历史。"""
+
         safe_limit = max(1, min(int(limit), 200))
         if self.alert_store is None:
             return {"items": [], "count": 0, "configured": False, "limit": safe_limit}
@@ -349,6 +384,8 @@ class GatewayControlPlane:
         limit: int = 50,
         include_text: bool = False,
     ) -> dict[str, Any]:
+        """列出投递队列中的记录。"""
+
         queue = self._require_delivery_queue()
         normalized_state = self._normalize_delivery_state(state, allow_all=True)
         safe_limit = max(1, min(int(limit), 200))
@@ -372,17 +409,23 @@ class GatewayControlPlane:
         }
 
     def retry_delivery(self, delivery_id: str) -> bool:
+        """立即重试一条失败投递。"""
+
         if not delivery_id:
             raise ValueError("delivery_id is required")
         return self._require_delivery_queue().retry_now(delivery_id)
 
     def discard_delivery(self, delivery_id: str, *, state: str = "any") -> bool:
+        """人工丢弃一条投递记录。"""
+
         if not delivery_id:
             raise ValueError("delivery_id is required")
         normalized = self._normalize_delivery_state(state, allow_all=False, allow_any=True)
         return self._require_delivery_queue().discard(delivery_id, state=normalized)
 
     async def flush_delivery(self, *, rounds: int = 1) -> dict[str, Any]:
+        """手动推进投递运行时若干轮。"""
+
         if self.delivery_runtime is None:
             raise RuntimeError("delivery runtime not configured")
         before = self.delivery_stats()
@@ -395,6 +438,8 @@ class GatewayControlPlane:
         return {"ok": True, "before": before, "after": after}
 
     def runtime_status(self) -> dict[str, Any]:
+        """聚合各运行部件状态，供面板和健康检查复用。"""
+
         agents = self.list_agents()
         bindings = self.list_bindings()
         channels = self.list_channels()
@@ -464,6 +509,8 @@ class GatewayControlPlane:
         }
 
     def health_check(self) -> dict[str, Any]:
+        """执行一轮轻量健康检查。"""
+
         status = self.runtime_status()
         checks = [
             self._health_check(
@@ -604,6 +651,8 @@ class GatewayControlPlane:
         }
 
     def get_source(self, kind: str) -> dict[str, Any]:
+        """读取指定配置源文件的原始内容。"""
+
         readers = {
             "agents": read_agents_source,
             "bindings": read_bindings_source,
@@ -616,6 +665,8 @@ class GatewayControlPlane:
         return reader(self.settings)
 
     def _require_delivery_queue(self) -> DeliveryQueue:
+        """确保当前控制面已经接入投递队列。"""
+
         if self.delivery_queue is None:
             raise RuntimeError("delivery queue not configured")
         return self.delivery_queue
@@ -628,6 +679,8 @@ class GatewayControlPlane:
         ok_message: str,
         failure_message: str,
     ) -> dict[str, str]:
+        """构造单条健康检查结果。"""
+
         return {
             "name": name,
             "status": "ok" if passed else failure_status,
@@ -641,6 +694,8 @@ class GatewayControlPlane:
         allow_all: bool,
         allow_any: bool = False,
     ) -> str:
+        """规范化投递状态过滤条件。"""
+
         normalized = str(state or "").strip().lower() or "pending"
         allowed = {"pending", "failed"}
         if allow_all:
@@ -658,6 +713,8 @@ class GatewayControlPlane:
         *,
         include_text: bool,
     ) -> dict[str, Any]:
+        """把队列中的投递对象转换成控制面可消费结构。"""
+
         now = time.time()
         text = entry.text if include_text else ""
         return {
@@ -682,6 +739,8 @@ class GatewayControlPlane:
         }
 
     def add_binding(self, binding: Binding) -> Binding:
+        """新增一条 binding 到当前路由表。"""
+
         binding.agent_id = normalize_agent_id(binding.agent_id)
         self.bindings.add(binding)
         return binding
@@ -704,6 +763,8 @@ class GatewayControlPlane:
         use_global_prompt_files: bool | None = None,
         skills_enabled: bool | None = None,
     ) -> AgentConfig:
+        """创建或更新 Agent 配置，并立即重载到运行时。"""
+
         normalized = normalize_agent_id(agent_id)
         payload = self.get_source("agents")
         rows = [row for row in payload.get("agents", []) if isinstance(row, dict)]
@@ -793,6 +854,8 @@ class GatewayControlPlane:
         skills_enabled: bool = True,
         write_files: bool = True,
     ) -> dict[str, Any]:
+        """生成一个新的 Agent 模板，并按需落地提示词文件。"""
+
         template = build_agent_template(
             agent_id,
             name=name,
@@ -814,6 +877,8 @@ class GatewayControlPlane:
         }
 
     def remove_agent(self, agent_id: str) -> bool:
+        """删除一个 Agent，同时做必要的引用保护。"""
+
         normalized = normalize_agent_id(agent_id)
         rows = [row for row in self.get_source("agents").get("agents", []) if isinstance(row, dict)]
         existing_index, _existing = self._find_agent_row(rows, normalized)
@@ -831,24 +896,34 @@ class GatewayControlPlane:
         return True
 
     def remove_binding(self, agent_id: str, match_key: str, match_value: str) -> bool:
+        """删除一条路由绑定。"""
+
         return self.bindings.remove(normalize_agent_id(agent_id), match_key, match_value)
 
     def save_bindings(self) -> int:
+        """把当前 bindings 持久化到配置文件。"""
+
         bindings = self.bindings.list_all()
         save_bindings(self.settings, bindings)
         return len(bindings)
 
     def save_agents(self) -> int:
+        """把当前 agents 持久化到配置文件。"""
+
         agents = self.agents.list()
         save_agents(self.settings, agents)
         return len(agents)
 
     def save_profiles(self) -> int:
+        """把当前 profiles 持久化到配置文件。"""
+
         profiles = list(self.profiles.profiles)
         save_auth_profiles(self.settings, profiles)
         return len(profiles)
 
     def save_channels(self) -> int:
+        """把当前通道账号配置持久化到配置文件。"""
+
         accounts = list(self.channels.accounts)
         save_channel_accounts(self.settings, accounts)
         return len(accounts)
@@ -863,6 +938,8 @@ class GatewayControlPlane:
         base_url: str | None = None,
         base_url_env: str | None = None,
     ) -> dict[str, Any]:
+        """创建或更新一个模型认证 profile。"""
+
         if api_key and api_key_env:
             raise ValueError("api_key and api_key_env are mutually exclusive")
         if base_url and base_url_env:
@@ -881,6 +958,8 @@ class GatewayControlPlane:
         return self._find_profile_snapshot(snapshot, name)
 
     def remove_profile(self, name: str) -> bool:
+        """删除一个 profile，并刷新运行态。"""
+
         rows = [row for row in self.get_source("profiles").get("profiles", []) if isinstance(row, dict)]
         existing_index, _existing = self._find_profile_row(rows, name)
         if existing_index < 0:
@@ -893,6 +972,8 @@ class GatewayControlPlane:
         return True
 
     def reload_bindings(self) -> int:
+        """从磁盘重载全部 bindings。"""
+
         bindings = load_bindings(self.settings)
         for binding in bindings:
             binding.agent_id = normalize_agent_id(binding.agent_id)
@@ -900,6 +981,8 @@ class GatewayControlPlane:
         return len(bindings)
 
     def reload_agents(self) -> list[AgentConfig]:
+        """从磁盘重载全部 agents。"""
+
         agents = load_agents(self.settings)
         if not agents:
             raise RuntimeError("No agents loaded from config")
@@ -907,6 +990,8 @@ class GatewayControlPlane:
         return self.agents.list()
 
     def reload_profiles(self) -> list[dict[str, Any]]:
+        """从磁盘重载全部 profiles，并保留旧冷却状态。"""
+
         profiles = load_auth_profiles(self.settings)
         self.profiles.replace_profiles(profiles)
         return self.profiles.snapshot()
@@ -922,6 +1007,8 @@ class GatewayControlPlane:
         token_env: str | None = None,
         config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """创建或更新一个通道账号，并重建通道实例。"""
+
         if token and token_env:
             raise ValueError("token and token_env are mutually exclusive")
         normalized_channel = channel.strip().lower()
@@ -951,6 +1038,8 @@ class GatewayControlPlane:
         return self._find_channel_descriptor(normalized_channel, account_id)
 
     async def remove_channel(self, channel: str, account_id: str) -> bool:
+        """删除一个通道账号，并刷新通道管理器。"""
+
         normalized_channel = channel.strip().lower()
         rows = [row for row in self.get_source("channels").get("channels", []) if isinstance(row, dict)]
         existing_index, _existing = self._find_channel_row(rows, normalized_channel, account_id)
@@ -967,6 +1056,8 @@ class GatewayControlPlane:
         return True
 
     async def reload_channels(self) -> list[str]:
+        """从磁盘重载全部通道，并同步替换依赖它们的运行时。"""
+
         next_manager = build_channel_manager(self.settings, load_channel_accounts(self.settings))
         if self.channel_runtime is not None:
             await self.channel_runtime.restart(next_manager)

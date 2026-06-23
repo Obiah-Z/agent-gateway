@@ -13,6 +13,8 @@ from typing import Any
 
 @dataclass(slots=True)
 class AlertRule:
+    """单条告警规则定义。"""
+
     id: str
     title: str
     severity: str
@@ -24,6 +26,8 @@ class AlertRule:
 
 @dataclass(slots=True)
 class AlertState:
+    """单条告警规则的运行时状态。"""
+
     rule_id: str
     status: str = "inactive"
     active_since: float = 0.0
@@ -40,6 +44,8 @@ class AlertState:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """转成控制面和历史存储可直接使用的结构。"""
+
         return {
             "rule_id": self.rule_id,
             "status": self.status,
@@ -64,6 +70,8 @@ class AlertState:
 
 
 class AlertStore:
+    """本地 JSONL 告警历史存储。"""
+
     def __init__(self, path: Path, *, retention_days: int = 14) -> None:
         self.root_dir = path if path.suffix == "" else path.parent
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -81,6 +89,8 @@ class AlertStore:
         metadata: dict[str, Any] | None = None,
         timestamp: float | None = None,
     ) -> dict[str, Any]:
+        """追加一条告警历史事件。"""
+
         ts = float(timestamp if timestamp is not None else time.time())
         row = {
             "timestamp": ts,
@@ -108,6 +118,8 @@ class AlertStore:
         return row
 
     def tail(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """读取最近若干条告警历史。"""
+
         safe_limit = max(1, min(int(limit), 1000))
         rows: list[dict[str, Any]] = []
         remaining = safe_limit
@@ -131,6 +143,8 @@ class AlertStore:
         return rows[-safe_limit:]
 
     def cleanup(self, *, now: date | None = None) -> None:
+        """删除超过保留期的告警文件。"""
+
         cutoff = (now or date.today()) - timedelta(days=self.retention_days - 1)
         for path in self._alert_files():
             suffix = path.stem.removeprefix("alerts-")
@@ -145,20 +159,28 @@ class AlertStore:
                     pass
 
     def _alert_files(self) -> list[Path]:
+        """列出全部告警分片文件。"""
+
         return sorted(self.root_dir.glob("alerts-*.jsonl"))
 
     def _path_for_timestamp(self, timestamp: float) -> Path:
+        """根据时间戳定位对应日期的告警文件。"""
+
         alert_date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
         return self.root_dir / f"alerts-{alert_date.isoformat()}.jsonl"
 
 
 def _isoformat(timestamp: float | None) -> str | None:
+    """把时间戳转换成 ISO 字符串。"""
+
     if not timestamp:
         return None
     return datetime.fromtimestamp(float(timestamp), tz=timezone.utc).isoformat()
 
 
 def _sanitize_value(value: Any) -> Any:
+    """把复杂值递归压平成 JSON 友好结构。"""
+
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, (list, tuple)):

@@ -9,6 +9,11 @@ from agent_gateway.ai.news.store import NewsDigestStore
 
 
 class NewsCollector:
+    """新闻采集编排器。
+
+    负责读取来源配置、调用具体 source client、去重排序，并结合 store 过滤已推送条目。
+    """
+
     def __init__(
         self,
         sources_file: Path,
@@ -23,10 +28,14 @@ class NewsCollector:
         self._owns_client = client is None
 
     def close(self) -> None:
+        """关闭内部 client；仅在 collector 自己创建 client 时生效。"""
+
         if self._owns_client:
             self.client.close()
 
     def load_sources(self) -> list[NewsSourceConfig]:
+        """从 sources 文件加载有效且启用的新闻源。"""
+
         if not self.sources_file.exists():
             return []
         try:
@@ -49,6 +58,8 @@ class NewsCollector:
         max_items: int,
         per_source_max_items: int = 5,
     ) -> NewsCollectionResult:
+        """执行一轮新闻采集，并返回去重后的新鲜条目。"""
+
         collected: list[NewsItem] = []
         errors: list[str] = []
         for source in self.load_sources():
@@ -71,6 +82,8 @@ class NewsCollector:
 
 
 def _sort_items(items: list[NewsItem]) -> list[NewsItem]:
+    """按来源优先级和发布时间排序。"""
+
     def key(item: NewsItem) -> tuple[int, float]:
         source_rank = {
             "rss": 0,
@@ -86,6 +99,8 @@ def _sort_items(items: list[NewsItem]) -> list[NewsItem]:
 
 
 def _dedupe_by_url(items: list[NewsItem]) -> list[NewsItem]:
+    """按 URL 去重，避免同一条内容被多个来源重复保留。"""
+
     result: list[NewsItem] = []
     seen: set[str] = set()
     for item in items:

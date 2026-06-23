@@ -26,11 +26,18 @@ ALLOWED_TOOL_CAPABILITIES = {
 
 @dataclass(slots=True)
 class AgentManifestTemplate:
+    """新建 Agent 时使用的模板结果。
+
+    包含一条可写入 `agents.json` 的 manifest 行，以及需要落到 workspace 的提示词文件。
+    """
+
     agent: dict[str, object]
     prompt_files: dict[str, str]
 
 
 def validate_agent_config(agent: AgentConfig, tools: ToolRegistry) -> list[str]:
+    """校验 Agent 配置是否合法。"""
+
     issues: list[str] = []
     if not agent.id.strip():
         issues.append("agent id is required")
@@ -64,6 +71,8 @@ def build_agent_template(
     skills_enabled: bool = True,
     tools: ToolRegistry | None = None,
 ) -> AgentManifestTemplate:
+    """根据输入参数生成一个新的 Agent 配置模板。"""
+
     normalized_id = agent_id.strip().lower().replace(" ", "-")
     capability_tags = capability_tags or []
     selected_tags = [tag for tag in capability_tags if tag in ALLOWED_TOOL_CAPABILITIES]
@@ -106,6 +115,8 @@ def build_agent_template(
 
 
 def materialize_agent_template(workspace_root: Path, template: AgentManifestTemplate) -> list[str]:
+    """把模板中的 prompt 文件真正写入 workspace。"""
+
     prompt_dir = template.agent.get("prompt_policy", {}).get("prompt_dir", "")
     if not isinstance(prompt_dir, str) or not prompt_dir.strip():
         raise ValueError("template prompt_dir is required")

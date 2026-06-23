@@ -8,6 +8,11 @@ from agent_gateway.ai.news.models import NewsItem
 
 
 class NewsDigestStore:
+    """新闻简报状态存储。
+
+    同时保存“采集过的候选条目”和“已经成功推送过的条目”，避免定时简报重复发送。
+    """
+
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
@@ -15,6 +20,8 @@ class NewsDigestStore:
         self.items_file = self.root / "collected-items.jsonl"
 
     def seen_ids(self) -> set[str]:
+        """读取已经确认推送过的新闻 ID 集合。"""
+
         ids: set[str] = set()
         if not self.seen_file.exists():
             return ids
@@ -31,6 +38,8 @@ class NewsDigestStore:
         return ids
 
     def filter_new(self, items: list[NewsItem]) -> list[NewsItem]:
+        """过滤已推送或本轮重复的条目。"""
+
         seen = self.seen_ids()
         result = []
         emitted: set[str] = set()
@@ -42,6 +51,8 @@ class NewsDigestStore:
         return result
 
     def mark_seen(self, items: list[NewsItem]) -> None:
+        """把成功推送的条目标记为已读。"""
+
         if not items:
             return
         now = time.time()
@@ -61,6 +72,8 @@ class NewsDigestStore:
                 )
 
     def append_collected(self, items: list[NewsItem]) -> None:
+        """把本轮采集到的原始候选条目追加落盘。"""
+
         if not items:
             return
         now = time.time()

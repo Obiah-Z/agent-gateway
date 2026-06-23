@@ -17,6 +17,8 @@ from typing import Any
 
 @dataclass(slots=True)
 class MetricSnapshot:
+    """单条系统指标快照。"""
+
     timestamp: float = field(default_factory=time.time)
     runtime: dict[str, Any] = field(default_factory=dict)
     delivery: dict[str, Any] = field(default_factory=dict)
@@ -27,6 +29,8 @@ class MetricSnapshot:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """转成 JSONL 可落盘结构。"""
+
         return {
             "timestamp": self.timestamp,
             "time": datetime.fromtimestamp(self.timestamp, tz=timezone.utc).isoformat(),
@@ -41,6 +45,11 @@ class MetricSnapshot:
 
 
 class MetricsStore:
+    """本地 JSONL 指标存储。
+
+    事件说明“发生了什么”，指标说明“系统当前长什么样”，两者配合做运维观测。
+    """
+
     def __init__(
         self,
         path: Path,
@@ -67,6 +76,8 @@ class MetricsStore:
         metadata: dict[str, Any] | None = None,
         timestamp: float | None = None,
     ) -> dict[str, Any]:
+        """记录一条指标快照。"""
+
         snapshot = MetricSnapshot(
             timestamp=float(timestamp if timestamp is not None else time.time()),
             runtime=self._sanitize_mapping(runtime or {}),
@@ -82,14 +93,20 @@ class MetricsStore:
         return row
 
     def latest(self) -> dict[str, Any] | None:
+        """返回最近一条指标。"""
+
         rows = self.tail(limit=1)
         return rows[-1] if rows else None
 
     def tail(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """读取最近若干条指标快照。"""
+
         safe_limit = max(1, min(int(limit), 1000))
         return self._read_tail(safe_limit)
 
     def cleanup(self, *, now: date | None = None) -> None:
+        """删除超过保留期的历史指标文件。"""
+
         cutoff = (now or date.today()) - timedelta(days=self.retention_days - 1)
         for path in self._metric_files():
             suffix = path.stem.removeprefix("metrics-")
@@ -104,6 +121,8 @@ class MetricsStore:
                     pass
 
     def _append(self, row: dict[str, Any]) -> None:
+        """把指标追加写入按日分片文件。"""
+
         payload = json.dumps(row, ensure_ascii=False, sort_keys=True)
         encoded = payload.encode("utf-8")
         if len(encoded) > self.max_line_bytes:
@@ -116,6 +135,8 @@ class MetricsStore:
         self.cleanup()
 
     def _read_tail(self, limit: int) -> list[dict[str, Any]]:
+        """从最近文件中读取尾部指标。"""
+
         rows: list[dict[str, Any]] = []
         remaining = max(1, int(limit))
         for path in reversed(self._metric_files()):
@@ -137,17 +158,25 @@ class MetricsStore:
         return rows[-limit:]
 
     def _metric_files(self) -> list[Path]:
+        """列出全部指标分片文件。"""
+
         return sorted(self.root_dir.glob("metrics-*.jsonl"))
 
     def _path_for_timestamp(self, timestamp: float) -> Path:
+        """根据时间戳定位对应日期分片文件。"""
+
         metric_date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
         return self._path_for_date(metric_date)
 
     def _path_for_date(self, metric_date: date) -> Path:
+        """构造指定日期的指标文件路径。"""
+
         return self.root_dir / f"metrics-{metric_date.isoformat()}.jsonl"
 
     @staticmethod
     def _sanitize_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+        """递归清洗映射结构，保证可安全落盘。"""
+
         safe: dict[str, Any] = {}
         for key, value in payload.items():
             safe[str(key)] = MetricsStore._sanitize_value(value)
@@ -155,6 +184,8 @@ class MetricsStore:
 
     @staticmethod
     def _sanitize_value(value: Any) -> Any:
+        """把复杂对象压平成 JSON 友好值。"""
+
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
         if isinstance(value, (list, tuple)):

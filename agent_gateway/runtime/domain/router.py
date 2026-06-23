@@ -28,6 +28,8 @@ class BindingTable:
         self._bindings.sort(key=lambda item: (item.tier, -item.priority))
 
     def remove(self, agent_id: str, match_key: str, match_value: str) -> bool:
+        """删除一条精确匹配的绑定规则。"""
+
         before = len(self._bindings)
         self._bindings = [
             binding
@@ -41,9 +43,13 @@ class BindingTable:
         return len(self._bindings) < before
 
     def list_all(self) -> list[Binding]:
+        """返回当前绑定表快照。"""
+
         return list(self._bindings)
 
     def replace_all(self, bindings: list[Binding]) -> None:
+        """整体替换绑定表，常用于控制面 reload。"""
+
         self._bindings.clear()
         for binding in bindings:
             self.add(binding)

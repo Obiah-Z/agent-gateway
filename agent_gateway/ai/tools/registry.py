@@ -9,6 +9,8 @@ ToolHandler = Callable[..., str]
 
 @dataclass(slots=True)
 class RegisteredTool:
+    """单个工具的注册描述。"""
+
     name: str
     description: str
     input_schema: dict[str, Any]
@@ -16,6 +18,8 @@ class RegisteredTool:
     tags: tuple[str, ...] = ()
 
     def schema(self) -> dict[str, Any]:
+        """导出为模型 tool calling 所需的 schema。"""
+
         return {
             "name": self.name,
             "description": self.description,
@@ -24,22 +28,37 @@ class RegisteredTool:
 
 
 class ToolRegistry:
+    """工具注册表。
+
+    负责统一维护工具元数据、按名称/标签筛选，以及执行真实 handler。
+    """
+
     def __init__(self) -> None:
         self._tools: dict[str, RegisteredTool] = {}
 
     def register(self, tool: RegisteredTool) -> None:
+        """注册或覆盖一个工具。"""
+
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> RegisteredTool | None:
+        """按名称获取工具定义。"""
+
         return self._tools.get(name)
 
     def names(self) -> list[str]:
+        """返回当前所有工具名。"""
+
         return list(self._tools.keys())
 
     def schemas(self) -> list[dict[str, Any]]:
+        """导出全部工具 schema。"""
+
         return [tool.schema() for tool in self._tools.values()]
 
     def schemas_for(self, allowed_names: list[str]) -> list[dict[str, Any]]:
+        """只导出允许名单中的工具 schema。"""
+
         return [
             tool.schema()
             for name, tool in self._tools.items()
@@ -47,6 +66,8 @@ class ToolRegistry:
         ]
 
     def describe_tools(self) -> list[dict[str, Any]]:
+        """返回适合控制面展示的工具描述。"""
+
         return [
             {
                 "name": tool.name,
@@ -57,6 +78,8 @@ class ToolRegistry:
         ]
 
     def names_for_tags(self, tags: list[str]) -> list[str]:
+        """按 capability tag 反查对应工具名。"""
+
         wanted = {tag.strip().lower() for tag in tags if tag.strip()}
         names: list[str] = []
         for tool in self._tools.values():
@@ -66,6 +89,8 @@ class ToolRegistry:
         return names
 
     def dispatch(self, name: str, tool_input: dict[str, Any]) -> str:
+        """执行指定工具，并把异常转成模型可读错误文本。"""
+
         tool = self.get(name)
         if tool is None:
             return f"Error: unknown tool '{name}'"

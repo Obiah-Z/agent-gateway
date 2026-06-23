@@ -9,12 +9,16 @@ from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
 def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
+    """把工具传入路径解析到 workspace 内，并阻止越界访问。"""
+
     candidate = (workspace_root / raw_path).resolve()
     candidate.relative_to(workspace_root.resolve())
     return candidate
 
 
 def _truncate(text: str, limit: int) -> str:
+    """截断过长工具输出，避免撑爆上下文。"""
+
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n... [truncated, {len(text)} total chars]"
@@ -27,13 +31,19 @@ def register_builtin_tools(
     max_output_chars: int = 50_000,
     default_timeout: int = 30,
 ) -> None:
+    """注册网关内置工具集。"""
+
     def read_file(file_path: str) -> str:
+        """读取 workspace 内单个文件。"""
+
         path = _resolve_workspace_path(workspace_root, file_path)
         if not path.exists():
             return f"Error: file not found: {file_path}"
         return _truncate(path.read_text(encoding="utf-8"), max_output_chars)
 
     def write_file(file_path: str = "", content: str = "", path: str = "") -> str:
+        """写入 workspace 内文件。"""
+
         # Some models use the common `path` argument name even when the schema says `file_path`.
         file_path = file_path or path
         if not file_path:
@@ -44,6 +54,8 @@ def register_builtin_tools(
         return f"Wrote {len(content)} chars to {path.relative_to(workspace_root)}"
 
     def list_directory(directory: str = ".") -> str:
+        """列出 workspace 子目录内容。"""
+
         path = _resolve_workspace_path(workspace_root, directory)
         if not path.exists():
             return f"Error: directory not found: {directory}"
@@ -56,6 +68,8 @@ def register_builtin_tools(
         return "\n".join(entries[:1000])
 
     def bash(command: str, timeout: int = default_timeout) -> str:
+        """在 workspace 内执行一条 shell 命令。"""
+
         completed = subprocess.run(
             command,
             cwd=workspace_root,
@@ -73,6 +87,8 @@ def register_builtin_tools(
         return _truncate(output, max_output_chars)
 
     def get_current_time() -> str:
+        """返回当前 UTC 时间。"""
+
         return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     registry.register(

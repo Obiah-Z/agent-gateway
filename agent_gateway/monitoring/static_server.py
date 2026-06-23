@@ -15,11 +15,15 @@ from agent_gateway.monitoring import STATIC_DIR
 
 @dataclass(frozen=True, slots=True)
 class DashboardConfig:
+    """Dashboard 前端需要的最小运行配置。"""
+
     websocket_url: str
     refresh_interval_seconds: int = 15
 
 
 class DashboardStaticServer:
+    """极简静态 HTTP 服务。"""
+
     def __init__(
         self,
         *,
@@ -37,11 +41,15 @@ class DashboardStaticServer:
         self._server: asyncio.base_events.Server | None = None
 
     async def start(self) -> None:
+        """启动本地静态 HTTP 服务。"""
+
         if self._server is not None:
             return
         self._server = await asyncio.start_server(self._handle_client, self.host, self.port)
 
     async def stop(self) -> None:
+        """停止静态 HTTP 服务。"""
+
         if self._server is None:
             return
         self._server.close()
@@ -98,6 +106,8 @@ class DashboardStaticServer:
         self,
         reader: asyncio.StreamReader,
     ) -> tuple[str, str, str] | None:
+        """读取并解析一条最小 HTTP 请求头。"""
+
         request_line = await reader.readline()
         if not request_line:
             return None
@@ -112,6 +122,8 @@ class DashboardStaticServer:
         return method.upper(), self._normalize_path(raw_path), raw_path
 
     async def _route_get(self, writer: asyncio.StreamWriter, path: str, raw_path: str) -> None:
+        """处理 GET 请求路由。"""
+
         if path in {"", "/"}:
             await self._serve_file(writer, self.static_dir / "index.html")
             return
@@ -154,6 +166,8 @@ class DashboardStaticServer:
         writer: asyncio.StreamWriter,
         path: str,
     ) -> None:
+        """处理 POST 请求路由。"""
+
         if path != "/onboarding/feishu/start":
             await self._write_bytes(
                 writer,
@@ -169,6 +183,8 @@ class DashboardStaticServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
+        """创建一条新的飞书 onboarding 会话。"""
+
         if self.onboarding is None:
             await self._write_json(writer, HTTPStatus.NOT_FOUND, {"error": "onboarding disabled"})
             return
@@ -182,6 +198,8 @@ class DashboardStaticServer:
         writer: asyncio.StreamWriter,
         path: str,
     ) -> None:
+        """返回指定 onboarding 会话的状态。"""
+
         if self.onboarding is None:
             await self._write_json(writer, HTTPStatus.NOT_FOUND, {"error": "onboarding disabled"})
             return
@@ -198,6 +216,8 @@ class DashboardStaticServer:
         writer: asyncio.StreamWriter,
         path: str,
     ) -> None:
+        """渲染 onboarding 页面。"""
+
         if self.onboarding is None:
             await self._write_bytes(
                 writer,
@@ -225,6 +245,8 @@ class DashboardStaticServer:
         writer: asyncio.StreamWriter,
         path: str,
     ) -> None:
+        """返回二维码图片或占位 SVG。"""
+
         query = self._query_params(path)
         text = query.get("text", [""])[0]
         png = self._render_qr_png(text)

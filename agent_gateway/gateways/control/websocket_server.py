@@ -14,6 +14,8 @@ from agent_gateway.runtime.state.store import SessionStore
 
 
 class GatewayServer:
+    """WebSocket JSON-RPC 控制面服务端。"""
+
     def __init__(
         self,
         host: str,
@@ -34,6 +36,8 @@ class GatewayServer:
         self._start_time = time.monotonic()
 
     async def start(self) -> None:
+        """启动 WebSocket 服务。"""
+
         try:
             import websockets
         except ImportError as exc:  # pragma: no cover - dependency check
@@ -43,16 +47,22 @@ class GatewayServer:
         self._running = True
 
     async def wait_closed(self) -> None:
+        """等待底层 server 关闭。"""
+
         if self._server is not None:
             await self._server.wait_closed()
 
     async def stop(self) -> None:
+        """关闭 WebSocket 服务。"""
+
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
         self._running = False
 
     async def _handle(self, websocket: Any) -> None:
+        """处理单个 WebSocket 连接上的连续请求。"""
+
         try:
             async for raw in websocket:
                 response = await self._dispatch(raw)
@@ -64,6 +74,8 @@ class GatewayServer:
             return
 
     async def _dispatch(self, raw: str) -> dict[str, Any]:
+        """把原始 JSON-RPC 请求分发到具体方法处理器。"""
+
         try:
             request = json.loads(raw)
         except json.JSONDecodeError:
@@ -147,6 +159,8 @@ class GatewayServer:
             }
 
     async def _m_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        """构造一条控制面入站消息并执行一次 Agent 轮次。"""
+
         text = params.get("text", "")
         if not text:
             raise ValueError("text is required")

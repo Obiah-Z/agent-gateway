@@ -28,11 +28,18 @@ from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
 
 
 class FeishuChannel(Channel):
+    """飞书通道实现。
+
+    负责飞书事件解析、消息发送，以及可交互卡片状态的本地维护。
+    """
+
     name = "feishu"
     _CARD_FALLBACK_ERROR_CODES = {230025, 230054, 230099}
     _PERMANENT_SEND_ERROR_CODES = {99992351}
 
     def __init__(self, account: ChannelAccount, state_dir: Path | None = None) -> None:
+        """根据账号配置初始化 API 客户端、渲染器和状态存储。"""
+
         if httpx is None:
             raise RuntimeError("FeishuChannel requires httpx")
         self.account = account
@@ -83,9 +90,13 @@ class FeishuChannel(Channel):
         )
 
     def receive(self) -> InboundMessage | None:
+        """飞书通过 webhook/长连接推送入站事件，这里不做主动拉取。"""
+
         return None
 
     def send(self, outbound: OutboundMessage) -> bool:
+        """发送一条出站消息，必要时拆分成多页卡片或多段文本。"""
+
         if self.send_mode == "lark_cli":
             return self._send_via_lark_cli(outbound)
         token = self._refresh_token()
@@ -100,6 +111,8 @@ class FeishuChannel(Channel):
         return True
 
     def parse_event(self, payload: dict[str, Any], token: str = "") -> InboundMessage | None:
+        """把飞书 webhook 事件转换成统一入站消息。"""
+
         if self.verification_token and token and token != self.verification_token:
             print(f"[feishu] ignore event: verification token mismatch account={self.account_id}")
             return None
@@ -148,6 +161,8 @@ class FeishuChannel(Channel):
         )
 
     def parse_card_action(self, payload: dict[str, Any], token: str = "") -> InboundMessage | None:
+        """把卡片交互动作转换成可继续进入 Agent 的入站消息。"""
+
         if self.verification_token and token and token != self.verification_token:
             print(
                 f"[feishu] ignore card action: verification token mismatch account={self.account_id}"
@@ -207,22 +222,32 @@ class FeishuChannel(Channel):
         )
 
     def close(self) -> None:
+        """关闭底层 HTTP 客户端。"""
+
         self._http.close()
 
     def render_card_state(self, state: FeishuCardState) -> tuple[dict[str, Any], str]:
+        """按当前分页/折叠状态重新渲染卡片。"""
+
         return self._renderer.render_stateful_card(state)
 
     def load_card_state(self, card_id: str) -> FeishuCardState | None:
+        """读取本地缓存的卡片状态。"""
+
         if self._card_state_store is None:
             return None
         return self._card_state_store.load(card_id)
 
     def save_card_state(self, state: FeishuCardState) -> None:
+        """持久化卡片状态，供后续交互继续使用。"""
+
         if self._card_state_store is None:
             return
         self._card_state_store.save(state)
 
     def is_control_card_action(self, payload: dict[str, Any]) -> bool:
+        """判断该卡片动作是否属于网关自己的分页/折叠控制。"""
+
         action_value = self._extract_card_action_value(payload)
         return (
             isinstance(action_value, dict)
@@ -231,6 +256,8 @@ class FeishuChannel(Channel):
         )
 
     def handle_control_card_action(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """处理本地卡片控制动作，并返回飞书要求的更新结构。"""
+
         action_value = self._extract_card_action_value(payload)
         if not isinstance(action_value, dict):
             return None
@@ -283,6 +310,8 @@ class FeishuChannel(Channel):
         }
 
     def _refresh_token(self) -> str:
+        """刷新并缓存 tenant access token。"""
+
         if self._tenant_token and time.time() < self._token_expires_at:
             return self._tenant_token
         response = self._http.post(
@@ -304,6 +333,8 @@ class FeishuChannel(Channel):
         return self._tenant_token
 
     def _build_send_payloads(self, outbound: OutboundMessage) -> list[FeishuSendPayload]:
+        """按当前渲染模式生成一个或多个飞书发送载荷。"""
+
         return self._renderer.render(outbound, mode=self._resolve_render_mode(outbound))
 
     def _send_payload(
@@ -312,6 +343,8 @@ class FeishuChannel(Channel):
         outbound: OutboundMessage,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        """调用飞书消息发送接口。"""
+
         receive_id_type = self._resolve_receive_id_type(outbound)
         response = self._http.post(
             f"{self.api_base}/im/v1/messages",
@@ -322,6 +355,8 @@ class FeishuChannel(Channel):
         return response.json()
 
     def _resolve_receive_id_type(self, outbound: OutboundMessage) -> str:
+        """推断当前消息应该按 open_id 还是 chat_id 发送。"""
+
         configured = str(outbound.metadata.get("receive_id_type", "")).strip()
         if configured:
             return configured
@@ -337,6 +372,8 @@ class FeishuChannel(Channel):
         page_index: int,
         total_pages: int,
     ) -> bool:
+        """发送单页消息，并处理卡片降级和永久失败判断。"""
+
         payload = {
             "receive_id": outbound.to,
             **rendered.payload,
@@ -399,12 +436,16 @@ class FeishuChannel(Channel):
         return success
 
     def _resolve_render_mode(self, outbound: OutboundMessage) -> str:
+        """结合账号配置和消息元数据决定文本/卡片发送模式。"""
+
         override = outbound.metadata.get("feishu_render_mode", "")
         if override:
             return self._normalize_render_mode(override)
         return self.render_mode
 
     def _send_via_lark_cli(self, outbound: OutboundMessage) -> bool:
+        """通过 lark-cli 发送消息，作为 HTTP API 的替代实现。"""
+
         command = self.lark_cli_command
         if shutil.which(command) is None:
             print(f"[feishu] lark-cli send failed: command not found: {command}")
@@ -512,18 +553,24 @@ class FeishuChannel(Channel):
         return default
 
     def _extract_event_type(self, payload: dict[str, Any]) -> str:
+        """兼容不同飞书事件结构提取 event_type。"""
+
         header = payload.get("header", {})
         if isinstance(header, dict) and header.get("event_type"):
             return str(header.get("event_type", ""))
         return str(payload.get("event_type", ""))
 
     def _extract_sent_message_id(self, payload: dict[str, Any]) -> str:
+        """从发送结果中提取 message_id。"""
+
         data = payload.get("data", {})
         if isinstance(data, dict):
             return str(data.get("message_id", "") or data.get("message", {}).get("message_id", ""))
         return ""
 
     def _extract_card_action_value(self, payload: dict[str, Any]) -> Any:
+        """取出卡片事件中的 action.value。"""
+
         event = payload.get("event", {})
         if not isinstance(event, dict):
             return None
@@ -533,6 +580,8 @@ class FeishuChannel(Channel):
         return action.get("value")
 
     def _build_card_action_prompt(self, payload: dict[str, Any], action_value: Any) -> str:
+        """把卡片交互上下文拼成 Agent 可理解的文本提示。"""
+
         event = payload.get("event", {})
         header = payload.get("header", {})
         action = event.get("action", {}) if isinstance(event, dict) else {}
@@ -571,6 +620,8 @@ class FeishuChannel(Channel):
         )
 
     def _bot_mentioned(self, event: dict[str, Any]) -> bool:
+        """群聊场景下判断消息是否明确 @ 了机器人。"""
+
         for mention in event.get("message", {}).get("mentions", []):
             mention_id = mention.get("id", {})
             if isinstance(mention_id, dict) and mention_id.get("open_id") == self.bot_open_id:
@@ -582,6 +633,8 @@ class FeishuChannel(Channel):
         return False
 
     def _parse_content(self, message: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+        """解析文本、图片、文件等飞书消息内容。"""
+
         message_type = message.get("msg_type", "text")
         raw = message.get("content", "{}")
         try:
@@ -616,6 +669,8 @@ class FeishuChannel(Channel):
         return "", media
 
     def decode_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """解密飞书加密 webhook 载荷。"""
+
         if "encrypt" not in payload:
             return payload
         if not self.encrypt_key:
@@ -632,6 +687,8 @@ class FeishuChannel(Channel):
         return body
 
     def _decrypt_string(self, encrypted: str) -> str:
+        """按飞书加密协议解出原始 JSON 字符串。"""
+
         assert AES is not None
         raw = base64.b64decode(encrypted)
         iv = raw[: AES.block_size]

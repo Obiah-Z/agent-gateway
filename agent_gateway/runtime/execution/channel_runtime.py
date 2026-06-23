@@ -29,6 +29,11 @@ class PendingInbound:
 
 
 class InboundInterceptor(Protocol):
+    """入站拦截器协议。
+
+    例如飞书 onboarding 会在正式进入 Agent 执行前消费部分激活消息。
+    """
+
     async def try_consume_activation(self, inbound: InboundMessage) -> bool:
         ...
 

@@ -1,8 +1,7 @@
-"""Runtime event JSONL store.
+"""运行时事件JSONL存储。
 
-The event store is intentionally local and append-only. It gives the control
-plane and dashboard a compact way to inspect the latest runtime chain without
-introducing a database dependency.
+该事件存储特意设计为本地且仅追加的。它为控制平面和仪表盘提供了一种紧凑的方式来
+检查最新的运行时链，而无需引入数据库依赖。
 """
 
 from __future__ import annotations
@@ -28,11 +27,15 @@ CORRELATION_ID_KEY = "correlation_id"
 
 
 def new_correlation_id(prefix: str = "evt") -> str:
+    """生成带前缀的关联 ID，用于串起一次完整运行链路。"""
+
     normalized = "".join(ch for ch in prefix.lower() if ch.isalnum() or ch in {"-", "_"}) or "evt"
     return f"{normalized}_{uuid.uuid4().hex[:16]}"
 
 
 def ensure_correlation_id(metadata: dict[str, Any], *, prefix: str = "evt") -> str:
+    """确保 metadata 中存在 correlation_id，没有则原地补齐。"""
+
     current = str(metadata.get(CORRELATION_ID_KEY, "") or "").strip()
     if current:
         return current
@@ -43,6 +46,8 @@ def ensure_correlation_id(metadata: dict[str, Any], *, prefix: str = "evt") -> s
 
 @dataclass(slots=True)
 class RuntimeEvent:
+    """单条运行事件。"""
+
     type: str
     status: str
     component: str
@@ -61,6 +66,8 @@ class RuntimeEvent:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """转成 JSONL 可落盘结构。"""
+
         return {
             "event_id": self.event_id,
             "timestamp": self.timestamp,
@@ -83,6 +90,11 @@ class RuntimeEvent:
 
 
 class RuntimeEventStore:
+    """本地 JSONL 事件存储。
+
+    采用按天滚动、追加写入的方式保存运行事件，供 Dashboard、控制面和错误视图回看。
+    """
+
     def __init__(
         self,
         path: Path,
@@ -115,6 +127,8 @@ class RuntimeEventStore:
         error: str | Exception = "",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """记录一条运行事件并立即落盘。"""
+
         event = RuntimeEvent(
             type=str(event_type),
             status=str(status),
@@ -148,6 +162,8 @@ class RuntimeEventStore:
         job_id: str = "",
         delivery_id: str = "",
     ) -> list[dict[str, Any]]:
+        """按过滤条件回看最近事件。"""
+
         safe_limit = max(1, min(int(limit), 500))
         rows = self._read_tail(max(safe_limit, min(safe_limit * 5, 2000)))
         filtered = []
@@ -178,6 +194,8 @@ class RuntimeEventStore:
         component: str = "",
         correlation_id: str = "",
     ) -> list[dict[str, Any]]:
+        """返回最近错误事件，并排除约定的无害拒绝项。"""
+
         rows = self._read_tail(max(50, min(int(limit) * 5, 1000)))
         errors = [
             row
@@ -192,6 +210,8 @@ class RuntimeEventStore:
 
     @staticmethod
     def _is_error_event(row: dict[str, Any]) -> bool:
+        """判断一条事件是否应计入错误视图。"""
+
         status = str(row.get("status", "")).lower()
         if status == "rejected" and RuntimeEventStore._is_ignorable_rejection(row):
             return False
@@ -199,10 +219,14 @@ class RuntimeEventStore:
 
     @staticmethod
     def _is_ignorable_rejection(row: dict[str, Any]) -> bool:
+        """识别不应告警的拒绝类事件。"""
+
         reason = str(row.get("error") or row.get("metadata", {}).get("reason", "")).lower()
         return reason in IGNORED_REJECTION_REASONS
 
     def _append(self, row: dict[str, Any]) -> None:
+        """把事件追加写入按日分片的 JSONL 文件。"""
+
         payload = json.dumps(row, ensure_ascii=False, sort_keys=True)
         encoded = payload.encode("utf-8")
         if len(encoded) > self.max_line_bytes:
@@ -217,6 +241,8 @@ class RuntimeEventStore:
         self.cleanup()
 
     def _read_tail(self, limit: int) -> list[dict[str, Any]]:
+        """从最近文件中逆序读取尾部事件。"""
+
         rows: list[dict[str, Any]] = []
         remaining = max(1, int(limit))
         for path in reversed(self._event_files()):
@@ -238,6 +264,8 @@ class RuntimeEventStore:
         return rows[-limit:]
 
     def cleanup(self, *, now: date | None = None) -> None:
+        """删除超过保留期的历史事件文件。"""
+
         cutoff = (now or date.today()) - timedelta(days=self.retention_days - 1)
         for path in self._event_files():
             suffix = path.stem.removeprefix("runtime-events-")
@@ -252,17 +280,25 @@ class RuntimeEventStore:
                     pass
 
     def _event_files(self) -> list[Path]:
+        """列出全部事件分片文件。"""
+
         return sorted(self.root_dir.glob("runtime-events-*.jsonl"))
 
     def _path_for_timestamp(self, timestamp: float) -> Path:
+        """根据时间戳定位对应日期分片文件。"""
+
         event_date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
         return self._path_for_date(event_date)
 
     def _path_for_date(self, event_date: date) -> Path:
+        """构造指定日期的事件文件路径。"""
+
         return self.root_dir / f"runtime-events-{event_date.isoformat()}.jsonl"
 
     @staticmethod
     def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+        """清洗 metadata，确保可 JSON 序列化且体积受控。"""
+
         safe: dict[str, Any] = {}
         for key, value in metadata.items():
             if key.lower() in {"token", "secret", "app_secret", "authorization"}:

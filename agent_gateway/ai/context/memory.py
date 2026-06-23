@@ -13,12 +13,20 @@ from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 @dataclass(slots=True)
 class MemorySearchResult:
+    """单条记忆检索结果。"""
+
     path: str
     score: float
     snippet: str
 
 
 class MemoryStore:
+    """记忆存储与检索入口。
+
+    同时管理长期记忆 `MEMORY.md` 和按天滚动的 `memory/daily/*.jsonl`，并提供
+    写入、统计、召回和混合检索能力。
+    """
+
     def __init__(self, workspace_root: Path) -> None:
         self.workspace_root = workspace_root
         self.memory_file = workspace_root / "MEMORY.md"
@@ -26,6 +34,8 @@ class MemoryStore:
         self.daily_dir.mkdir(parents=True, exist_ok=True)
 
     def write_memory(self, content: str, category: str = "general") -> str:
+        """把一条新记忆追加到当天的 daily memory 文件。"""
+
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = self.daily_dir / f"{today}.jsonl"
         entry = {
@@ -38,11 +48,15 @@ class MemoryStore:
         return f"Memory saved to {today}.jsonl ({category})"
 
     def load_evergreen(self) -> str:
+        """读取长期记忆文件 `MEMORY.md`。"""
+
         if not self.memory_file.exists():
             return ""
         return self.memory_file.read_text(encoding="utf-8").strip()
 
     def get_stats(self) -> dict[str, int]:
+        """返回长期记忆和日记忆的体量统计。"""
+
         daily_files = list(self.daily_dir.glob("*.jsonl")) if self.daily_dir.is_dir() else []
         total_entries = 0
         for path in daily_files:
@@ -86,6 +100,11 @@ class MemoryStore:
         return rows[:safe_limit]
 
     def hybrid_search(self, query: str, top_k: int = 5) -> list[MemorySearchResult]:
+        """执行混合检索。
+
+        先做关键词检索和哈希向量检索，再合并分数、做时间衰减和去冗余重排。
+        """
+
         chunks = self._load_all_chunks()
         if not chunks:
             return []
@@ -109,6 +128,8 @@ class MemoryStore:
         return results
 
     def format_results(self, results: list[MemorySearchResult]) -> str:
+        """把检索结果格式化成适合直接注入 prompt 的文本。"""
+
         if not results:
             return "No relevant memories found."
         return "\n".join(
@@ -117,12 +138,16 @@ class MemoryStore:
         )
 
     def auto_recall(self, query: str, top_k: int = 3) -> str:
+        """为一次对话自动召回最相关的记忆片段。"""
+
         results = self.hybrid_search(query, top_k=top_k)
         if not results:
             return ""
         return "\n".join(f"- [{result.path}] {result.snippet}" for result in results)
 
     def _load_all_chunks(self) -> list[dict[str, str]]:
+        """把长期记忆和日记忆切成统一检索块。"""
+
         chunks: list[dict[str, str]] = []
         evergreen = self.load_evergreen()
         if evergreen:
@@ -151,11 +176,15 @@ class MemoryStore:
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
+        """把中英文文本切成轻量 token 序列。"""
+
         tokens = re.findall(r"[a-z0-9\u4e00-\u9fff]+", text.lower())
         return [token for token in tokens if len(token) > 1 or "\u4e00" <= token <= "\u9fff"]
 
     @staticmethod
     def _hash_vector(text: str, dim: int = 64) -> list[float]:
+        """生成无需外部模型的哈希向量表示。"""
+
         tokens = MemoryStore._tokenize(text)
         vector = [0.0] * dim
         for token in tokens:
@@ -168,6 +197,8 @@ class MemoryStore:
 
     @staticmethod
     def _vector_cosine(a: list[float], b: list[float]) -> float:
+        """计算两个哈希向量的余弦相似度。"""
+
         dot = sum(x * y for x, y in zip(a, b))
         na = math.sqrt(sum(x * x for x in a))
         nb = math.sqrt(sum(y * y for y in b))
@@ -175,6 +206,8 @@ class MemoryStore:
 
     @staticmethod
     def _jaccard_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
+        """用 token 集合重合度衡量两个记忆块是否过于相似。"""
+
         set_a, set_b = set(tokens_a), set(tokens_b)
         union = len(set_a | set_b)
         if union == 0:
@@ -187,6 +220,8 @@ class MemoryStore:
         chunks: list[dict[str, str]],
         top_k: int = 10,
     ) -> list[dict[str, Any]]:
+        """基于 TF-IDF 风格分数做关键词检索。"""
+
         query_tokens = self._tokenize(query)
         if not query_tokens:
             return []
@@ -232,6 +267,8 @@ class MemoryStore:
         chunks: list[dict[str, str]],
         top_k: int = 10,
     ) -> list[dict[str, Any]]:
+        """基于本地哈希向量做近似语义检索。"""
+
         query_vector = self._hash_vector(query)
         scored = []
         for chunk in chunks:
@@ -250,6 +287,8 @@ class MemoryStore:
         vector_weight: float = 0.7,
         text_weight: float = 0.3,
     ) -> list[dict[str, Any]]:
+        """合并关键词和向量检索结果。"""
+
         merged: dict[str, dict[str, Any]] = {}
         for row in vector_results:
             key = row["chunk"]["text"][:100]
@@ -269,6 +308,8 @@ class MemoryStore:
         results: list[dict[str, Any]],
         decay_rate: float = 0.01,
     ) -> list[dict[str, Any]]:
+        """对较旧的 daily memory 做轻度时间衰减。"""
+
         now = datetime.now(timezone.utc)
         for row in results:
             path = row["chunk"].get("path", "")
@@ -290,6 +331,8 @@ class MemoryStore:
         results: list[dict[str, Any]],
         lambda_param: float = 0.7,
     ) -> list[dict[str, Any]]:
+        """用 MMR 重排，减少返回结果之间的重复内容。"""
+
         if len(results) <= 1:
             return results
         tokenized = [MemoryStore._tokenize(row["chunk"]["text"]) for row in results]

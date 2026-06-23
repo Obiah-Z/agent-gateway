@@ -28,9 +28,13 @@ class AgentManager:
         return normalized
 
     def get(self, agent_id: str) -> AgentConfig | None:
+        """按 ID 获取一个 Agent 配置。"""
+
         return self._agents.get(normalize_agent_id(agent_id))
 
     def list(self) -> list[AgentConfig]:
+        """列出当前所有 Agent 配置。"""
+
         return list(self._agents.values())
 
     def replace_all(self, configs: list[AgentConfig]) -> list[AgentConfig]:

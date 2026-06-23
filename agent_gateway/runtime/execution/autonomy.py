@@ -118,6 +118,8 @@ class HeartbeatService:
         self._stopped = False
 
     def set_channels(self, channels: ChannelManager) -> None:
+        """在通道重载后替换发送出口。"""
+
         self.channels = channels
 
     async def start(self) -> None:
@@ -391,6 +393,8 @@ class CronService:
 
     @staticmethod
     def _build_job_id(config_id: str, owner_agent_id: str = "") -> str:
+        """为全局任务和 Agent 私有任务生成稳定 job_id。"""
+
         if not owner_agent_id:
             return config_id
         if config_id.startswith(f"{owner_agent_id}:"):
@@ -837,13 +841,19 @@ class AutonomyRuntime:
         )
 
     def set_channels(self, channels: ChannelManager) -> None:
+        """在通道重建后同步更新 heartbeat 和 cron 的发送出口。"""
+
         self.heartbeat.set_channels(channels)
         self.cron.set_channels(channels)
 
     async def start(self) -> None:
+        """启动主动任务子系统。"""
+
         await self.heartbeat.start()
         await self.cron.start()
 
     async def stop(self) -> None:
+        """停止主动任务子系统。"""
+
         await self.heartbeat.stop()
         await self.cron.stop()

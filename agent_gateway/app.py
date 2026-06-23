@@ -52,6 +52,11 @@ from agent_gateway.ai.tools.web_search import register_web_search_tools
 
 @dataclass(slots=True)
 class GatewayApplication:
+    """网关应用装配结果。
+
+    把启动阶段构造出的主要运行对象集中收口，便于 `serve()`、CLI 命令和测试复用。
+    """
+
     settings: GatewaySettings
     agents: AgentManager
     bindings: BindingTable
@@ -77,6 +82,8 @@ class GatewayApplication:
 
 
 def build_dashboard_websocket_url(settings: GatewaySettings) -> str:
+    """为本地 Dashboard 生成可连接的 WebSocket 地址。"""
+
     protocol = "ws"
     host = settings.host
     if host in {"0.0.0.0", "::"}:
@@ -87,6 +94,8 @@ def build_dashboard_websocket_url(settings: GatewaySettings) -> str:
 
 
 def build_application(settings: GatewaySettings | None = None) -> GatewayApplication:
+    """装配完整网关应用。"""
+
     settings = settings or GatewaySettings.from_env()
     settings.ensure_directories()
     ensure_default_project_files(settings)
@@ -230,6 +239,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
 
 
 async def serve(app: GatewayApplication) -> None:
+    """启动网关所有常驻服务，并在退出时统一回收。"""
+
     onboarding_store = FeishuOnboardingSessionStore(app.settings.data_dir / "onboarding" / "feishu")
     onboarding_service = FeishuOnboardingService(
         store=onboarding_store,
@@ -368,6 +379,8 @@ async def trigger_cron_once(
     flush_delivery: bool = True,
     flush_rounds: int = 3,
 ) -> dict[str, object]:
+    """手动触发一次 Cron 任务，并按需执行若干轮投递刷新。"""
+
     result = await app.autonomy_runtime.cron.trigger_job(job_id)
     pending_before_flush = app.delivery_runtime.pending_count()
     if flush_delivery:
@@ -400,6 +413,8 @@ async def trigger_cron_once_with_timeout(
     flush_rounds: int = 3,
     timeout_seconds: float = 180.0,
 ) -> dict[str, object]:
+    """在超时保护下触发一次 Cron 任务。"""
+
     try:
         return await asyncio.wait_for(
             trigger_cron_once(
@@ -420,6 +435,8 @@ async def trigger_cron_once_with_timeout(
 
 
 def main() -> None:
+    """CLI 入口。"""
+
     parser = argparse.ArgumentParser(description="Run the modular agent gateway.")
     subparsers = parser.add_subparsers(dest="command")
 

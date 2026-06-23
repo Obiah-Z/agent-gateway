@@ -84,6 +84,8 @@ class SessionStore:
         return self._rebuild_history(path)
 
     def list_sessions(self, agent_id: str = "") -> dict[str, int]:
+        """列出会话文件及其消息条数，用于控制面查看。"""
+
         agents_dir = self.base_dir / "agents"
         if not agents_dir.exists():
             return {}
@@ -101,6 +103,8 @@ class SessionStore:
 
     @staticmethod
     def _count_lines(path: Path) -> int:
+        """统计单个会话文件中的记录数。"""
+
         with path.open("r", encoding="utf-8") as handle:
             return sum(1 for _ in handle)
 

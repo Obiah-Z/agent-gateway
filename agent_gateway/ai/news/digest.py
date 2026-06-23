@@ -10,6 +10,8 @@ def build_digest_prompt(
     max_output_items: int,
     errors: list[str] | None = None,
 ) -> str:
+    """把普通新闻候选条目拼成给 Agent 的简报生成 prompt。"""
+
     lines = [
         "请基于下面由程序预先采集并去重的候选来源，生成一份适合飞书推送的中文 AI Agent 简报。",
         "",
@@ -53,6 +55,8 @@ def build_github_skill_digest_prompt(
     max_output_items: int,
     errors: list[str] | None = None,
 ) -> str:
+    """把 GitHub Skill 候选仓库拼成给 Agent 的简报生成 prompt。"""
+
     lines = [
         "请基于下面由程序从 GitHub 采集并去重的候选仓库，生成一份适合飞书推送的中文“热门 Skill 发现”简报。",
         "",
@@ -97,4 +101,6 @@ def build_github_skill_digest_prompt(
 
 
 def _single_line(value: str) -> str:
+    """压成单行摘要，避免来源内容把 prompt 撑得过长。"""
+
     return " ".join(value.split())[:800]

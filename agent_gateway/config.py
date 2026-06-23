@@ -18,6 +18,8 @@ DEFAULT_DATA_DIR = PACKAGE_ROOT / "data"
 
 
 def env_bool(name: str, default: bool = False) -> bool:
+    """把环境变量解析为布尔值。"""
+
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -25,12 +27,16 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 def load_env(env_file: Path | None = None) -> None:
+    """从 `.env` 文件加载环境变量。"""
+
     target = (env_file.expanduser().resolve() if env_file else PACKAGE_ROOT / ".env")
     if target.exists():
         load_dotenv(target, override=True)
 
 
 def resolve_env_path(raw_value: str, default: Path) -> Path:
+    """把环境变量中的路径解析为绝对路径。"""
+
     candidate = Path(raw_value).expanduser() if raw_value else default
     if candidate.is_absolute():
         return candidate.resolve()
@@ -39,6 +45,8 @@ def resolve_env_path(raw_value: str, default: Path) -> Path:
 
 @dataclass(slots=True)
 class GatewaySettings:
+    """网关运行时总配置。"""
+
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     model_id: str = "claude-opus-4-6"
@@ -134,6 +142,8 @@ class GatewaySettings:
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
+        """从当前环境变量构造配置对象。"""
+
         fallback_models = tuple(
             item.strip()
             for item in os.getenv("GATEWAY_FALLBACK_MODELS", "").split(",")
@@ -220,6 +230,8 @@ class GatewaySettings:
         )
 
     def ensure_directories(self) -> None:
+        """确保运行所需目录存在。"""
+
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)

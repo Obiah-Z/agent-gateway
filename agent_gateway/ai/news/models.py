@@ -8,6 +8,8 @@ from typing import Any
 
 @dataclass(slots=True)
 class NewsSourceConfig:
+    """单个新闻源配置。"""
+
     id: str
     type: str
     enabled: bool = True
@@ -23,6 +25,8 @@ class NewsSourceConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NewsSourceConfig":
+        """从 JSON 配置行恢复新闻源定义。"""
+
         return cls(
             id=str(data.get("id", "")).strip(),
             type=str(data.get("type", "")).strip(),
@@ -45,6 +49,8 @@ class NewsSourceConfig:
 
 @dataclass(slots=True)
 class NewsItem:
+    """一条标准化新闻条目。"""
+
     id: str
     source_id: str
     source_type: str
@@ -66,6 +72,8 @@ class NewsItem:
         summary: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> "NewsItem":
+        """基于采集结果构建一条标准化新闻对象。"""
+
         normalized_url = normalize_url(url)
         item_id = stable_item_id(source.id, normalized_url or title)
         return cls(
@@ -81,6 +89,8 @@ class NewsItem:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """转成可持久化结构。"""
+
         return {
             "id": self.id,
             "source_id": self.source_id,
@@ -95,6 +105,8 @@ class NewsItem:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NewsItem":
+        """从持久化结构恢复新闻对象。"""
+
         return cls(
             id=str(data.get("id", "")),
             source_id=str(data.get("source_id", "")),
@@ -110,20 +122,28 @@ class NewsItem:
 
 @dataclass(slots=True)
 class NewsCollectionResult:
+    """一次采集任务的结果集合。"""
+
     items: list[NewsItem]
     errors: list[str] = field(default_factory=list)
 
 
 def stable_item_id(source_id: str, value: str) -> str:
+    """为同一来源下的同一条目生成稳定 ID。"""
+
     digest = hashlib.sha256(f"{source_id}:{value}".encode("utf-8")).hexdigest()
     return digest[:16]
 
 
 def normalize_url(url: str) -> str:
+    """规范化 URL 字段。"""
+
     return url.strip()
 
 
 def parse_datetime(value: str) -> datetime | None:
+    """把来源返回的时间字符串解析成 UTC 时间。"""
+
     raw = value.strip()
     if not raw:
         return None

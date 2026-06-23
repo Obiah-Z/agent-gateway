@@ -13,7 +13,10 @@ from agent_gateway.runtime.observability.metrics import MetricsStore
 
 
 class MetricsRuntime:
-    """Periodically captures lightweight runtime counters into MetricsStore."""
+    """指标采集后台运行时。
+
+    定期抓取投递、并发车道、Cron、事件和模型 profile 的轻量指标，并写入 `MetricsStore`。
+    """
 
     def __init__(
         self,
@@ -39,12 +42,16 @@ class MetricsRuntime:
         self._stopped = False
 
     async def start(self) -> None:
+        """启动后台指标采集。"""
+
         if self._task is not None:
             return
         self._stopped = False
         self._task = asyncio.create_task(self._loop(), name="metrics-runtime")
 
     async def stop(self) -> None:
+        """停止后台指标采集。"""
+
         self._stopped = True
         if self._task is not None:
             self._task.cancel()
@@ -55,7 +62,7 @@ class MetricsRuntime:
             self._task = None
 
     def snapshot_once(self) -> dict[str, Any]:
-        """Collect and persist one snapshot. Exposed for tests and manual checks."""
+        """采集并持久化一条指标快照。"""
 
         try:
             row = self.metrics_store.record(
@@ -74,6 +81,8 @@ class MetricsRuntime:
             raise
 
     async def _loop(self) -> None:
+        """后台循环，按固定间隔采集指标。"""
+
         while not self._stopped:
             try:
                 await asyncio.to_thread(self.snapshot_once)
@@ -82,12 +91,16 @@ class MetricsRuntime:
             await asyncio.sleep(self.interval_seconds)
 
     def _collect_runtime_metrics(self) -> dict[str, Any]:
+        """采集运行时自身指标。"""
+
         return {
             "uptime_seconds": round(max(0.0, time.time() - self.started_at), 3),
             "collector_last_error": self.last_error,
         }
 
     def _collect_delivery_metrics(self) -> dict[str, Any]:
+        """采集投递队列相关指标。"""
+
         pending = self.delivery_queue.pending_entries()
         failed = self.delivery_queue.failed_entries()
         now = time.time()
@@ -106,6 +119,8 @@ class MetricsRuntime:
         }
 
     def _collect_lane_metrics(self) -> dict[str, Any]:
+        """采集命名并发车道的整体指标。"""
+
         lane_rows = self.command_queue.stats()
         active = 0
         queued = 0
@@ -123,6 +138,8 @@ class MetricsRuntime:
         }
 
     def _collect_cron_metrics(self) -> dict[str, Any]:
+        """采集 Cron 任务数量和错误态分布。"""
+
         if self.autonomy is None:
             return {"configured": False}
         jobs = self.autonomy.cron.list_jobs()
@@ -134,6 +151,8 @@ class MetricsRuntime:
         }
 
     def _collect_event_metrics(self) -> dict[str, Any]:
+        """从近期事件中提取错误、拒绝和失败计数。"""
+
         if self.event_store is None:
             return {"configured": False}
         rows = self.event_store.tail(limit=500)
@@ -150,6 +169,8 @@ class MetricsRuntime:
         }
 
     def _collect_profile_metrics(self) -> dict[str, Any]:
+        """采集模型 profile 可用性指标。"""
+
         rows = self.profiles.snapshot()
         return {
             "count": len(rows),
@@ -165,6 +186,8 @@ class MetricsRuntime:
 
     @staticmethod
     def _oldest_age_seconds(values: list[float], *, now: float) -> float | None:
+        """根据最早时间戳计算当前最长积压时长。"""
+
         if not values:
             return None
         return round(max(0.0, now - min(values)), 3)

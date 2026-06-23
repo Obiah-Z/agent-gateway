@@ -7,6 +7,8 @@ from agent_gateway.runtime.domain.models import ConversationMessage
 
 
 def serialize_messages_for_summary(messages: list[ConversationMessage]) -> str:
+    """把消息历史转成适合摘要模型消费的纯文本。"""
+
     parts: list[str] = []
     for message in messages:
         role = message.get("role", "unknown")
@@ -17,10 +19,17 @@ def serialize_messages_for_summary(messages: list[ConversationMessage]) -> str:
 
 @dataclass(slots=True)
 class ContextGuard:
+    """上下文保护器。
+
+    在模型上下文溢出时，优先截断超长 tool_result，再按需压缩旧历史，尽量保住最近对话。
+    """
+
     safe_limit: int = 180_000
     max_tool_chars: int = 20_000
 
     def estimate_tokens(self, messages: list[ConversationMessage]) -> int:
+        """用字符数做一个粗略 token 估算。"""
+
         total_chars = sum(len(str(message.get("content", ""))) for message in messages)
         return total_chars // 4
 
@@ -28,6 +37,8 @@ class ContextGuard:
         self,
         messages: list[ConversationMessage],
     ) -> list[ConversationMessage]:
+        """截断过长的 tool_result，避免单次工具输出占满上下文。"""
+
         truncated: list[ConversationMessage] = []
         for message in messages:
             content = message.get("content")
@@ -53,6 +64,8 @@ class ContextGuard:
         messages: list[ConversationMessage],
         summarizer: Callable[[str], str],
     ) -> list[ConversationMessage]:
+        """把较旧消息压缩成摘要，只保留最近一段原始上下文。"""
+
         if len(messages) < 8:
             return messages
 
@@ -83,6 +96,8 @@ class ContextGuard:
         summarizer: Callable[[str], str] | None = None,
         max_retries: int = 2,
     ) -> Any:
+        """带上下文保护地执行一次模型调用。"""
+
         current_messages = messages
         for attempt in range(max_retries + 1):
             try:

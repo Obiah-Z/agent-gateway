@@ -105,15 +105,23 @@ class DeliveryQueue:
         return delivery_id
 
     def pending_entries(self) -> list[QueuedDelivery]:
+        """列出当前 pending 队列中的全部消息。"""
+
         return self._entries_from_dir(self.queue_dir)
 
     def failed_entries(self) -> list[QueuedDelivery]:
+        """列出当前 failed 队列中的全部消息。"""
+
         return self._entries_from_dir(self.failed_dir)
 
     def get_pending(self, delivery_id: str) -> QueuedDelivery | None:
+        """按 ID 读取一条 pending 消息。"""
+
         return self._read_entry(self._entry_path(self.queue_dir, delivery_id))
 
     def get_failed(self, delivery_id: str) -> QueuedDelivery | None:
+        """按 ID 读取一条 failed 消息。"""
+
         return self._read_entry(self._entry_path(self.failed_dir, delivery_id))
 
     def ack(self, delivery_id: str) -> None:
@@ -170,6 +178,8 @@ class DeliveryQueue:
         return True
 
     def discard(self, delivery_id: str, *, state: str = "any") -> bool:
+        """删除一条 pending/failed 消息。"""
+
         if state not in {"any", "pending", "failed"}:
             raise ValueError("state must be one of: any, pending, failed")
         removed = False
@@ -200,6 +210,8 @@ class DeliveryQueue:
 
     @staticmethod
     def _read_entry(path: Path) -> QueuedDelivery | None:
+        """读取单个队列文件并恢复为消息对象。"""
+
         if not path.exists():
             return None
         try:
@@ -209,12 +221,16 @@ class DeliveryQueue:
 
     @staticmethod
     def _entry_path(root: Path, delivery_id: str) -> Path:
+        """构造单条消息对应的队列文件路径。"""
+
         if not DELIVERY_ID_PATTERN.fullmatch(delivery_id):
             raise ValueError("invalid delivery id")
         return root / f"{delivery_id}.json"
 
     @staticmethod
     def _entries_from_dir(root: Path) -> list[QueuedDelivery]:
+        """扫描目录并恢复其中的全部消息对象。"""
+
         entries: list[QueuedDelivery] = []
         for path in sorted(root.glob("*.json")):
             loaded = DeliveryQueue._read_entry(path)
@@ -237,6 +253,8 @@ class DeliveryRunner:
         max_retries: int = 5,
         on_success: Callable[[QueuedDelivery], None] | None = None,
     ) -> None:
+        """创建一个与具体通道无关的投递消费器。"""
+
         self.queue = queue
         self.deliver_fn = deliver_fn
         self.max_retries = max_retries

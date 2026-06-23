@@ -9,6 +9,11 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 
 
 class DeliveryRuntime:
+    """可靠投递后台运行时。
+
+    周期性扫描 `DeliveryQueue`，把可发送消息交给对应通道，并把结果写入事件流。
+    """
+
     def __init__(
         self,
         queue: DeliveryQueue,
@@ -34,12 +39,16 @@ class DeliveryRuntime:
         self._stopped = False
 
     async def start(self) -> None:
+        """启动后台投递轮询。"""
+
         if self._task is not None:
             return
         self._stopped = False
         self._task = asyncio.create_task(self._loop(), name="delivery-runtime")
 
     async def stop(self) -> None:
+        """停止后台投递轮询。"""
+
         self._stopped = True
         if self._task is not None:
             self._task.cancel()
@@ -50,12 +59,18 @@ class DeliveryRuntime:
             self._task = None
 
     async def flush_once(self) -> None:
+        """手动执行一轮投递扫描。"""
+
         await asyncio.to_thread(self.runner.run_once)
 
     def pending_count(self) -> int:
+        """返回当前 pending 消息数量。"""
+
         return len(self.queue.pending_entries())
 
     async def _loop(self) -> None:
+        """后台循环，按固定间隔推进投递。"""
+
         while not self._stopped:
             try:
                 await self.flush_once()
@@ -64,6 +79,8 @@ class DeliveryRuntime:
             await asyncio.sleep(self.poll_interval)
 
     def _deliver_entry(self, entry: QueuedDelivery) -> bool:
+        """把单条队列消息交给具体通道发送。"""
+
         channel = self.channels.get(entry.channel, str(entry.metadata.get("account_id", "")))
         if channel is None:
             error = f"channel unavailable: {entry.channel}/{entry.metadata.get('account_id', '')}"
@@ -103,6 +120,8 @@ class DeliveryRuntime:
         return success
 
     def _on_success(self, entry: QueuedDelivery) -> None:
+        """处理投递成功后的事件记录和回调。"""
+
         self._record_delivery_event(
             "delivery.sent",
             entry,
@@ -122,6 +141,8 @@ class DeliveryRuntime:
         message: str,
         error: str | Exception = "",
     ) -> None:
+        """把投递链路事件写入 runtime event store。"""
+
         if self.event_store is None:
             return
         metadata = dict(entry.metadata)
