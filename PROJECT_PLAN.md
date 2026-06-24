@@ -223,9 +223,78 @@ cd ~/Desktop/claw0/gateway
 
 ## 7. 后续路线图
 
+### Phase 15：ChannelRuntime Lane 化与入站背压
+
+状态：待实现，P0 优先级，建议优先于 Dashboard 鉴权推进。
+
+目标：
+
+- 将当前“所有通道入站消息进入单一消费者串行处理”的模型，升级为“统一入口、按会话/Agent 分 lane 并发执行”。
+- 避免飞书、CLI、Telegram、Webhook、长连接等通道互相阻塞。
+- 保持同一会话内顺序一致，同时允许不同会话、不同 Agent、不同通道并发处理。
+
+背景：
+
+- 当前 `ChannelRuntime` 使用一个全局 `asyncio.Queue` 和一个 `_consume()` 任务。
+- 这种设计简单可靠，但一条慢消息会阻塞后续所有消息。
+- 典型风险包括：飞书长任务拖慢 CLI、GitHub 仓库分析阻塞普通聊天、Telegram 批量消息影响飞书响应。
+- 当前 `restart()` 会先 `stop()` 再替换通道；`stop()` 直接向队列写入 `None` 退出哨兵，存在未消费消息被留在旧队列或旧通道线程继续投递后无人消费的风险。
+
+计划项：
+
+1. 先修复 `ChannelRuntime.restart()` 的 graceful drain 语义：
+   - 停止接收新消息。
+   - 通知旧通道线程退出。
+   - 等待旧通道线程结束或超时。
+   - 等待当前入站队列 drain 完成。
+   - drain 完成后再投递退出哨兵停止 consumer。
+   - 确保 CLI `completion_event` 在成功、失败和 shutdown 场景下都能释放。
+2. 定义入站 lane key 规则：
+   - 优先使用 `agent_id + session_key`。
+   - 路由前可临时使用 `channel + account_id + peer_id`。
+   - 后台任务、Cron、Heartbeat 与用户实时消息分开 lane。
+3. 将 `ChannelRuntime` 从单消费者改为 lane dispatcher：
+   - 全局入站队列只负责接收和粗分发。
+   - 每个 lane 内部保持顺序处理。
+   - 不同 lane 可以并发执行。
+4. 增加全局并发上限和 per-agent 并发上限：
+   - 例如 `main=2`、`research=1`、`ops=1`。
+   - 防止并发过高打爆模型 API 或工具执行资源。
+5. 增加入站背压策略：
+   - 配置最大队列长度。
+   - 超过阈值时对低优先级任务延迟或拒绝。
+   - 实时用户消息优先于 Cron/Heartbeat。
+6. 增加长任务降级策略：
+   - 超过阈值后先回复“已进入后台处理”。
+   - 后续结果通过可靠投递链路补发。
+7. 增加运行指标：
+   - 全局入站队列长度。
+   - 每个 lane 的队列长度。
+   - 最老消息等待时间。
+   - 当前运行 lane 数。
+   - 每个 Agent 的并发占用。
+8. Dashboard 增加入站队列和 lane 视图。
+9. 控制面增加 `runtime.lanes` 或扩展现有 runtime status，展示当前积压和并发状态。
+10. 补充测试：
+   - restart 时已入队消息不会丢失。
+   - restart 时旧通道线程不会继续向无人消费的旧队列投递消息。
+   - 同一 session 串行。
+   - 不同 session 并发。
+   - 慢任务不阻塞其他 lane。
+   - CLI completion_event 仍能正确释放。
+   - interceptor 消费消息后不进入 Agent lane。
+
+完成标准：
+
+- 一个长耗时飞书任务不会阻塞 CLI 或其他飞书会话。
+- 控制面 reload 通道配置时，已入队消息不会因为 restart 丢失。
+- 同一会话内消息顺序仍然稳定。
+- Dashboard 能看到入站积压和 lane 运行状态。
+- 并发上限可配置，默认保持保守，适合本地单机运行。
+
 ### Phase 12：Dashboard 鉴权与安全边界
 
-状态：待实现，建议优先。
+状态：待实现，高优先级，但排在 Phase 15 之后。
 
 目标：
 
@@ -279,7 +348,7 @@ cd ~/Desktop/claw0/gateway
 - 排查 API key、base_url、限流和上下文溢出时有明确事件依据。
 - 用户看到错误后能快速判断该检查模型、工具、通道、飞书还是配置。
 
-### Phase 15：Agent 权限预览与配置治理
+### Phase 16：Agent 权限预览与配置治理
 
 状态：待实现。
 
@@ -306,7 +375,7 @@ cd ~/Desktop/claw0/gateway
 - 修改 Agent 配置前后，可以清楚看到最终能力差异。
 - 配置误改后可以定位是谁改了什么，并恢复到旧版本。
 
-### Phase 16：会话与记忆治理
+### Phase 17：会话与记忆治理
 
 状态：待实现。
 
@@ -327,7 +396,7 @@ cd ~/Desktop/claw0/gateway
 - 可以管理长期会话数据，而不是只靠手动删除 JSONL。
 - 记忆可追溯、可清理，不会无限污染 prompt。
 
-### Phase 17：多 Agent 协作与任务实例状态机
+### Phase 18：多 Agent 协作与任务实例状态机
 
 状态：待实现。
 
@@ -355,7 +424,7 @@ cd ~/Desktop/claw0/gateway
 - 多 Agent 协作不再依赖纯 prompt 手工编排。
 - 任务失败后可以重试、取消或查看原因。
 
-### Phase 18：生产部署形态
+### Phase 19：生产部署形态
 
 状态：待实现。
 
@@ -381,30 +450,48 @@ cd ~/Desktop/claw0/gateway
 
 建议接下来按以下顺序推进：
 
-1. Phase 12：Dashboard 鉴权与安全边界。
-2. Phase 13 增强项：模型调用事件与错误分类。
-3. Phase 15：Agent 权限预览与配置治理。
-4. Phase 16：会话与记忆治理。
-5. Phase 17：多 Agent 协作与任务实例状态机。
-6. Phase 18：生产部署形态。
+1. Phase 15：ChannelRuntime Lane 化与入站背压。
+2. Phase 12：Dashboard 鉴权与安全边界。
+3. Phase 13 增强项：模型调用事件与错误分类。
+4. Phase 16：Agent 权限预览与配置治理。
+5. Phase 17：会话与记忆治理。
+6. Phase 18：多 Agent 协作与任务实例状态机。
+7. Phase 19：生产部署形态。
 
 排序依据：
 
-- 先补 Dashboard 和控制面鉴权，避免管理入口暴露风险。
-- 再补模型调用事件和错误分类，让后续排障更直接。
+- 先解决 ChannelRuntime 全局串行带来的入站拥堵风险，避免多通道互相阻塞。
+- 再补 Dashboard 和控制面鉴权，避免管理入口暴露风险。
+- 然后补模型调用事件和错误分类，让后续排障更直接。
 - 然后做配置、权限、会话和记忆治理，提升长期运行质量。
 - 最后推进多 Agent 协作和生产部署，避免在治理能力不足时扩大复杂度。
 
 ## 9. 最近一个可执行任务
 
-建议下一步实现 Phase 12 的最小闭环：
+建议下一步实现 Phase 15 的最小闭环：
 
-1. 在 `.env.example` 增加 `GATEWAY_DASHBOARD_AUTH_ENABLED` 和 `GATEWAY_DASHBOARD_TOKEN`。
-2. 在 `GatewaySettings` 中读取 Dashboard 鉴权配置。
-3. 在 Dashboard 静态服务和 WebSocket 控制面增加 token 校验。
-4. Dashboard 前端支持配置 token 并随请求发送。
-5. 对 delivery discard、config save、cron trigger 等高风险操作增加确认参数。
-6. README 补充本地访问和公网暴露说明。
-7. 增加测试覆盖未授权、授权成功和错误 token 三类路径。
+1. 先修复 `ChannelRuntime.restart()`：
+   - 停止旧通道采集。
+   - 等待旧线程退出。
+   - drain 已入队消息。
+   - drain 后再停止 consumer。
+2. 增加 restart 回归测试：
+   - 已入队消息在 restart 后仍会处理。
+   - CLI `completion_event` 不会卡住。
+   - 旧线程退出后不会继续投递到旧队列。
+3. 为 `ChannelRuntime` 增加 lane key 计算函数。
+4. 保留现有全局入站队列，但将消费阶段改为按 lane 投递到 lane worker。
+5. 每个 lane 内保持串行处理，不同 lane 使用 `asyncio.Semaphore` 控制并发。
+6. 增加默认全局并发上限，例如 4。
+7. CLI 消息继续等待 `completion_event`，确保终端交互节奏不回退。
+8. 增加 lane 化测试覆盖：
+   - 两个不同 `peer_id` 的消息可以并发。
+   - 同一个 `peer_id` 的消息保持顺序。
+   - 第一条慢消息不会阻塞另一个 lane。
+   - interceptor 消费消息后不进入 Agent 执行。
+9. 在 runtime status 中先暴露最小 lane 状态：
+   - active lane 数。
+   - queued message 数。
+   - running task 数。
 
-这一阶段改动范围明确，收益高，并且能为后续控制面能力扩展建立安全前提。
+这一阶段优先解决多通道共用单消费者导致的拥堵问题，收益直接，并且不需要先引入数据库或分布式组件。
