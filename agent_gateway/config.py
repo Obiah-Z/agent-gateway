@@ -49,7 +49,7 @@ class GatewaySettings:
 
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
-    model_id: str = "claude-opus-4-6"
+    model_id: str = "deepseek-v4-pro"
     host: str = "127.0.0.1"
     port: int = 8765
     workspace_root: Path = DEFAULT_WORKSPACE_ROOT

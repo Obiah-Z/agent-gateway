@@ -43,6 +43,7 @@ class FeishuOnboardingSession:
     last_error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """序列化为字典。"""
         return {
             "session_id": self.session_id,
             "binding_code": self.binding_code,
@@ -62,6 +63,7 @@ class FeishuOnboardingSession:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FeishuOnboardingSession":
+        """从字典恢复对象。"""
         return cls(
             session_id=str(data.get("session_id", "")),
             binding_code=str(data.get("binding_code", "")),
@@ -80,6 +82,7 @@ class FeishuOnboardingSession:
         )
 
     def is_expired(self, now: float | None = None) -> bool:
+        """判断当前记录是否已经过期。"""
         return self.expires_at > 0 and (now if now is not None else time.time()) >= self.expires_at
 
 
@@ -87,6 +90,7 @@ class FeishuOnboardingSessionStore:
     """接入会话的本地 JSON 持久化存储。"""
 
     def __init__(self, root: Path) -> None:
+        """初始化实例。"""
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.sessions_file = self.root / "sessions.json"
@@ -129,6 +133,7 @@ class FeishuOnboardingSessionStore:
         return sessions
 
     def get(self, session_id: str) -> FeishuOnboardingSession | None:
+        """获取指定对象。"""
         for session in self.list():
             if session.session_id == session_id:
                 return session
@@ -156,6 +161,7 @@ class FeishuOnboardingSessionStore:
         self._save_all(sessions)
 
     def _load_all(self) -> list[FeishuOnboardingSession]:
+        """加载运行状态。"""
         if not self.sessions_file.exists():
             return []
         try:
@@ -185,6 +191,7 @@ class FeishuOnboardingSessionStore:
 
     @staticmethod
     def _new_binding_code(existing: set[str]) -> str:
+        """生成新的运行值。"""
         for _ in range(100):
             code = f"GATEWAY-{secrets.token_hex(3).upper()}"
             if code not in existing:
@@ -193,6 +200,7 @@ class FeishuOnboardingSessionStore:
 
     @staticmethod
     def _normalize_mode(mode: str) -> str:
+        """规范化输入值。"""
         normalized = str(mode or "personal").strip().lower()
         if normalized in {"personal", "group"}:
             return normalized
@@ -200,6 +208,7 @@ class FeishuOnboardingSessionStore:
 
     @staticmethod
     def _normalize_code(code: str) -> str:
+        """规范化输入值。"""
         return str(code or "").strip().upper()
 
 
@@ -220,6 +229,7 @@ class FeishuOnboardingService:
         auto_bind_first_message: bool = True,
         auto_bind_bot_added: bool = False,
     ) -> None:
+        """初始化实例。"""
         self.store = store
         self.control_plane = control_plane
         self.dispatcher = dispatcher
@@ -247,12 +257,14 @@ class FeishuOnboardingService:
         return self._session_response(session)
 
     def status(self, session_id: str) -> dict[str, Any] | None:
+        """返回当前运行状态。"""
         session = self.store.get(session_id)
         if session is None:
             return None
         return self._session_response(session)
 
     def list_sessions(self) -> list[dict[str, Any]]:
+        """执行 list sessions 逻辑。"""
         return [self._session_response(session) for session in self.store.list()]
 
     async def try_consume_activation(self, inbound: InboundMessage) -> bool:

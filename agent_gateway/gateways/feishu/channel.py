@@ -513,27 +513,32 @@ class FeishuChannel(Channel):
         return False
 
     def _normalize_send_mode(self, value: object) -> str:
+        """规范化输入值。"""
         mode = str(value or "api").strip().lower().replace("-", "_")
         if mode in {"api", "lark_cli"}:
             return mode
         return "api"
 
     def _normalize_render_mode(self, value: object) -> str:
+        """规范化输入值。"""
         mode = str(value or "auto").strip().lower()
         if mode in {"auto", "text", "interactive"}:
             return mode
         return "auto"
 
     def _should_fallback_to_text(self, data: dict[str, Any]) -> bool:
+        """判断是否满足条件。"""
         return data.get("code") in self._CARD_FALLBACK_ERROR_CODES
 
     def _is_permanent_send_error(self, data: dict[str, Any]) -> bool:
+        """判断输入是否满足条件。"""
         if data.get("code") in self._PERMANENT_SEND_ERROR_CODES:
             return True
         msg = str(data.get("msg", "")).lower()
         return "not a valid" in msg and "invalid ids" in msg
 
     def _read_positive_int(self, value: object, *, default: int, minimum: int) -> int:
+        """读取并转换配置值。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -541,6 +546,7 @@ class FeishuChannel(Channel):
         return max(minimum, parsed)
 
     def _read_bool(self, value: object, *, default: bool) -> bool:
+        """读取并转换配置值。"""
         if isinstance(value, bool):
             return value
         if value is None:

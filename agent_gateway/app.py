@@ -57,28 +57,28 @@ class GatewayApplication:
     把启动阶段构造出的主要运行对象集中收口，便于 `serve()`、CLI 命令和测试复用。
     """
 
-    settings: GatewaySettings
-    agents: AgentManager
-    bindings: BindingTable
-    sessions: SessionStore
-    tools: ToolRegistry
-    memory_store: MemoryStore
-    skills_manager: SkillsManager
-    prompt_assembler: PromptAssembler
-    runner: AgentLoopRunner
-    profile_manager: ProfileManager
-    channel_manager: ChannelManager
-    dispatcher: GatewayDispatcher
-    autonomy_runtime: AutonomyRuntime
-    delivery_queue: DeliveryQueue
-    delivery_runtime: DeliveryRuntime
-    command_queue: CommandQueue
-    control_plane: GatewayControlPlane
-    event_store: RuntimeEventStore
-    metrics_store: MetricsStore
-    metrics_runtime: MetricsRuntime
-    alert_store: AlertStore
-    alerts_runtime: AlertsRuntime
+    settings: GatewaySettings  # 全局运行配置，来自环境变量和默认配置。
+    agents: AgentManager  # Agent 配置注册表，负责保存可用智能体。
+    bindings: BindingTable  # 消息路由绑定表，决定入站消息分配给哪个 Agent。
+    sessions: SessionStore  # 会话持久化存储，负责读写多轮对话历史。
+    tools: ToolRegistry  # 工具注册表，向模型暴露可调用工具及 schema。
+    memory_store: MemoryStore  # 长期记忆存储，负责记忆写入、检索和召回。
+    skills_manager: SkillsManager  # Skill 发现与注入管理器。
+    prompt_assembler: PromptAssembler  # System prompt 组装器。
+    runner: AgentLoopRunner  # Agent Loop 执行器，负责模型调用和工具闭环。
+    profile_manager: ProfileManager  # 模型 Profile 管理器，负责主备模型和冷却状态。
+    channel_manager: ChannelManager  # 多通道管理器，保存 CLI、飞书、Telegram 等通道实例。
+    dispatcher: GatewayDispatcher  # 入站/后台任务调度器，连接路由、Agent Loop 和投递队列。
+    autonomy_runtime: AutonomyRuntime  # 主动任务运行时，包含 Heartbeat 和 Cron。
+    delivery_queue: DeliveryQueue  # 可靠投递磁盘队列。
+    delivery_runtime: DeliveryRuntime  # 出站投递运行时，负责重试、失败归档和成功回调。
+    command_queue: CommandQueue  # 命名并发车道队列，控制同类任务串行执行。
+    control_plane: GatewayControlPlane  # 控制面服务，提供配置、状态和运维操作。
+    event_store: RuntimeEventStore  # 运行事件 JSONL 存储。
+    metrics_store: MetricsStore  # 指标快照存储。
+    metrics_runtime: MetricsRuntime  # 指标采集运行时。
+    alert_store: AlertStore  # 告警事件存储。
+    alerts_runtime: AlertsRuntime  # 告警规则运行时，负责检测和通知。
 
 
 def build_dashboard_websocket_url(settings: GatewaySettings) -> str:

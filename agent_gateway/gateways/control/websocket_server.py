@@ -25,6 +25,7 @@ class GatewayServer:
         autonomy: AutonomyRuntime | None = None,
         control_plane: GatewayControlPlane | None = None,
     ) -> None:
+        """初始化实例。"""
         self.host = host
         self.port = port
         self.dispatcher = dispatcher
@@ -187,6 +188,7 @@ class GatewayServer:
         }
 
     async def _m_bind_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 路由绑定 RPC 请求。"""
         binding = Binding(
             agent_id=params.get("agent_id", "main"),
             tier=int(params.get("tier", 5)),
@@ -201,6 +203,7 @@ class GatewayServer:
         return {"ok": True, "binding": binding.display()}
 
     async def _m_bind_remove(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 路由绑定 RPC 请求。"""
         agent_id = params.get("agent_id", "main")
         match_key = params.get("match_key", "")
         match_value = params.get("match_value", "")
@@ -213,18 +216,21 @@ class GatewayServer:
         return {"ok": removed}
 
     async def _m_bind_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 路由绑定 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         count = self.control_plane.save_bindings()
         return {"ok": True, "count": count}
 
     async def _m_bind_reload(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 路由绑定 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         count = self.control_plane.reload_bindings()
         return {"ok": True, "count": count}
 
     async def _m_bind_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 路由绑定 RPC 请求。"""
         return [
             {
                 "agent_id": binding.agent_id,
@@ -237,6 +243,7 @@ class GatewayServer:
         ]
 
     async def _m_agents(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is not None:
             agents = self.control_plane.list_agents()
         else:
@@ -261,12 +268,14 @@ class GatewayServer:
         ]
 
     async def _m_agents_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         count = self.control_plane.save_agents()
         return {"ok": True, "count": count}
 
     async def _m_agents_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         agent_id = params.get("id", "")
@@ -310,6 +319,7 @@ class GatewayServer:
         }
 
     async def _m_agents_remove(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         agent_id = params.get("id", "")
@@ -318,6 +328,7 @@ class GatewayServer:
         return {"ok": self.control_plane.remove_agent(agent_id)}
 
     async def _m_agents_template(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         agent_id = params.get("id", "")
@@ -337,28 +348,33 @@ class GatewayServer:
         return {"ok": True, **result}
 
     async def _m_agents_capabilities(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is None:
             return []
         return self.control_plane.list_tool_capabilities()
 
     async def _m_agents_reload(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 智能体配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         agents = self.control_plane.reload_agents()
         return {"ok": True, "count": len(agents)}
 
     async def _m_profiles_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 模型 Profile 配置 RPC 请求。"""
         if self.control_plane is None:
             return []
         return self.control_plane.list_profiles()
 
     async def _m_profiles_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 模型 Profile 配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         count = self.control_plane.save_profiles()
         return {"ok": True, "count": count}
 
     async def _m_profiles_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 模型 Profile 配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         name = params.get("name", "")
@@ -375,6 +391,7 @@ class GatewayServer:
         return {"ok": True, "profile": profile}
 
     async def _m_profiles_remove(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 模型 Profile 配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         name = params.get("name", "")
@@ -383,23 +400,27 @@ class GatewayServer:
         return {"ok": self.control_plane.remove_profile(name)}
 
     async def _m_profiles_reload(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 模型 Profile 配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         profiles = self.control_plane.reload_profiles()
         return {"ok": True, "count": len(profiles)}
 
     async def _m_channels_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 通道配置 RPC 请求。"""
         if self.control_plane is None:
             return []
         return self.control_plane.list_channels()
 
     async def _m_channels_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 通道配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         count = self.control_plane.save_channels()
         return {"ok": True, "count": count}
 
     async def _m_channels_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 通道配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         channel = params.get("channel", "")
@@ -418,6 +439,7 @@ class GatewayServer:
         return {"ok": True, "channel_account": descriptor}
 
     async def _m_channels_remove(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 通道配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         channel = params.get("channel", "")
@@ -427,12 +449,14 @@ class GatewayServer:
         return {"ok": await self.control_plane.remove_channel(channel, account_id)}
 
     async def _m_channels_reload(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 通道配置 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         channels = await self.control_plane.reload_channels()
         return {"ok": True, "channels": channels}
 
     async def _m_feishu_long_connection_status(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 飞书长连接 RPC 请求。"""
         if self.control_plane is None:
             return []
         runtime = getattr(self.control_plane, "feishu_long_connection_runtime", None)
@@ -441,6 +465,7 @@ class GatewayServer:
         return runtime.status()
 
     async def _m_feishu_onboarding_start(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 飞书绑定引导 RPC 请求。"""
         onboarding = self._require_feishu_onboarding()
         return onboarding.create_session(
             mode=params.get("mode", "personal"),
@@ -450,6 +475,7 @@ class GatewayServer:
         )
 
     async def _m_feishu_onboarding_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 飞书绑定引导 RPC 请求。"""
         onboarding = self._require_feishu_onboarding()
         session_id = params.get("session_id", "")
         if not session_id:
@@ -460,9 +486,11 @@ class GatewayServer:
         return status
 
     async def _m_feishu_onboarding_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 飞书绑定引导 RPC 请求。"""
         return self._require_feishu_onboarding().list_sessions()
 
     def _require_feishu_onboarding(self):
+        """获取必需的运行依赖。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         onboarding = getattr(self.control_plane, "feishu_onboarding", None)
@@ -471,6 +499,7 @@ class GatewayServer:
         return onboarding
 
     async def _m_config_source(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 配置来源 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         kind = params.get("kind", "")
@@ -479,9 +508,11 @@ class GatewayServer:
         return self.control_plane.get_source(kind)
 
     async def _m_sessions(self, params: dict[str, Any]) -> dict[str, int]:
+        """处理控制面 会话列表 RPC 请求。"""
         return self.sessions.list_sessions(params.get("agent_id", ""))
 
     async def _m_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 基础状态 RPC 请求。"""
         return {
             "running": self._running,
             "uptime_seconds": round(time.monotonic() - self._start_time, 1),
@@ -494,6 +525,7 @@ class GatewayServer:
         }
 
     async def _m_runtime_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 运行时状态 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return {
@@ -505,6 +537,7 @@ class GatewayServer:
         }
 
     async def _m_health_check(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 健康检查 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         result = self.control_plane.health_check()
@@ -527,6 +560,7 @@ class GatewayServer:
         return result
 
     async def _m_events_tail(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 运行事件 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.tail_events(
@@ -542,6 +576,7 @@ class GatewayServer:
         )
 
     async def _m_errors_recent(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 最近错误 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.recent_errors(
@@ -551,36 +586,43 @@ class GatewayServer:
         )
 
     async def _m_memory_recent(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 最近记忆 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.recent_memories(limit=int(params.get("limit", 20)))
 
     async def _m_metrics_snapshot(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 运行指标 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.metrics_snapshot()
 
     async def _m_metrics_tail(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 运行指标 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.metrics_tail(limit=int(params.get("limit", 60)))
 
     async def _m_metrics_summary(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 运行指标 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.metrics_summary(limit=int(params.get("limit", 60)))
 
     async def _m_alerts_active(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 告警 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.active_alerts()
 
     async def _m_alerts_history(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 告警 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.alert_history(limit=int(params.get("limit", 50)))
 
     async def _m_ingest(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 入站注入 RPC 请求。"""
         inbound = InboundMessage(
             text=params.get("text", ""),
             sender_id=params.get("sender_id", ""),
@@ -604,21 +646,25 @@ class GatewayServer:
         }
 
     async def _m_heartbeat_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 心跳任务 RPC 请求。"""
         if self.autonomy is None:
             return {"enabled": False, "reason": "autonomy runtime not configured"}
         return self.autonomy.heartbeat.status()
 
     async def _m_heartbeat_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 心跳任务 RPC 请求。"""
         if self.autonomy is None:
             raise RuntimeError("autonomy runtime not configured")
         return {"result": await self.autonomy.heartbeat.trigger()}
 
     async def _m_cron_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理控制面 定时任务 RPC 请求。"""
         if self.autonomy is None:
             return []
         return self.autonomy.cron.list_jobs()
 
     async def _m_cron_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 定时任务 RPC 请求。"""
         if self.autonomy is None:
             raise RuntimeError("autonomy runtime not configured")
         job_id = params.get("job_id", "")
@@ -627,11 +673,13 @@ class GatewayServer:
         return {"result": await self.autonomy.cron.trigger_job(job_id)}
 
     async def _m_delivery_stats(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 投递队列 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.delivery_stats()
 
     async def _m_delivery_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 投递队列 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return self.control_plane.list_deliveries(
@@ -641,6 +689,7 @@ class GatewayServer:
         )
 
     async def _m_delivery_retry(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 投递队列 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         delivery_id = params.get("delivery_id", params.get("id", ""))
@@ -649,6 +698,7 @@ class GatewayServer:
         return {"ok": self.control_plane.retry_delivery(str(delivery_id))}
 
     async def _m_delivery_discard(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 投递队列 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         delivery_id = params.get("delivery_id", params.get("id", ""))
@@ -662,6 +712,7 @@ class GatewayServer:
         }
 
     async def _m_delivery_flush(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 投递队列 RPC 请求。"""
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return await self.control_plane.flush_delivery(rounds=int(params.get("rounds", 1)))

@@ -31,6 +31,7 @@ class FeishuEventInterceptor(Protocol):
     """允许在长连接事件进入主链路前拦截并消费。"""
 
     async def try_consume_event(self, event: dict[str, Any], account_id: str) -> bool:
+        """尝试消费长连接事件并转为入站消息。"""
         ...
 
 
@@ -55,9 +56,11 @@ class FeishuLongConnectionConsumer:
 
     @property
     def account_id(self) -> str:
+        """返回通道账号标识。"""
         return self.account.account_id
 
     def status(self) -> dict[str, Any]:
+        """返回当前运行状态。"""
         running = self.process is not None and self.process.poll() is None
         return {
             "account_id": self.account_id,
@@ -82,6 +85,7 @@ class FeishuLongConnectionRuntime:
         channel_runtime: ChannelRuntime,
         event_interceptors: list[FeishuEventInterceptor] | None = None,
     ) -> None:
+        """初始化实例。"""
         self.channels = channels
         self.channel_runtime = channel_runtime
         self.event_interceptors = list(event_interceptors or [])
@@ -126,6 +130,7 @@ class FeishuLongConnectionRuntime:
             await self.start()
 
     def status(self) -> list[dict[str, Any]]:
+        """返回当前运行状态。"""
         return [consumer.status() for consumer in self._consumers]
 
     def _build_consumers(self) -> list[FeishuLongConnectionConsumer]:
@@ -326,6 +331,7 @@ class FeishuLongConnectionRuntime:
             return
 
         async def _run() -> None:
+            """执行 run 辅助逻辑。"""
             for interceptor in self.event_interceptors:
                 if await interceptor.try_consume_event(event, account_id):
                     return

@@ -60,12 +60,14 @@ _ALLOWED_BUTTON_TYPES = {
 
 @dataclass(slots=True)
 class FeishuSendPayload:
+    """飞书发送载荷，包含消息类型、内容和可选回退文本。"""
     payload: dict[str, Any]
     fallback_text: str
     card_state: FeishuCardState | None = None
 
 
 class FeishuCardRenderer:
+    """将 Markdown、结构化块和长文本渲染为飞书卡片或文本消息。"""
     def __init__(
         self,
         *,
@@ -74,12 +76,14 @@ class FeishuCardRenderer:
         interactive_page_size: int = 4,
         enable_stateful_cards: bool = False,
     ) -> None:
+        """初始化实例。"""
         self.card_page_max_bytes = max(128, int(card_page_max_bytes))
         self.text_page_max_bytes = max(256, int(text_page_max_bytes))
         self.interactive_page_size = max(1, int(interactive_page_size))
         self.enable_stateful_cards = bool(enable_stateful_cards)
 
     def render(self, outbound: OutboundMessage, *, mode: str) -> list[FeishuSendPayload]:
+        """渲染飞书发送载荷。"""
         if mode == "text":
             return self._build_text_pages(outbound.text)
         if mode == "interactive":
@@ -89,16 +93,19 @@ class FeishuCardRenderer:
         return self._build_text_pages(outbound.text)
 
     def should_use_card(self, outbound: OutboundMessage) -> bool:
+        """判断文本是否应使用飞书卡片发送。"""
         if any(key in outbound.metadata for key in _CARD_METADATA_KEYS):
             return True
         return self.looks_like_markdown(outbound.text)
 
     def looks_like_markdown(self, text: str) -> bool:
+        """判断文本是否具有 Markdown 结构。"""
         if not text or ("\n" not in text and len(text) < 12):
             return False
         return any(pattern.search(text) for pattern in _MARKDOWN_PATTERNS)
 
     def _build_text_pages(self, text: str) -> list[FeishuSendPayload]:
+        """构建输出结构。"""
         chunks = self._split_text_chunks(text.strip() or "-", self.text_page_max_bytes)
         return [
             FeishuSendPayload(
@@ -112,6 +119,7 @@ class FeishuCardRenderer:
         ]
 
     def _build_card_pages(self, outbound: OutboundMessage) -> list[FeishuSendPayload]:
+        """构建输出结构。"""
         metadata = outbound.metadata
         blocks = self._split_markdown_blocks(outbound.text.strip())
         title = self._normalize_text(metadata.get("feishu_card_title", ""))
@@ -233,6 +241,7 @@ class FeishuCardRenderer:
         return results
 
     def render_stateful_card(self, state: FeishuCardState) -> tuple[dict[str, Any], str]:
+        """渲染可翻页的有状态飞书卡片。"""
         visible_blocks = self._select_visible_blocks(state)
         total_pages = self._state_total_pages(state)
         header_title = state.title or "Reply"
@@ -287,26 +296,31 @@ class FeishuCardRenderer:
         return card, fallback
 
     def _page_title(self, title: str, index: int, total_pages: int) -> str:
+        """执行 page title 辅助逻辑。"""
         if total_pages <= 1:
             return title
         base = title or "Reply"
         return f"{base} ({index + 1}/{total_pages})"
 
     def _extract_heading_title(self, block: str) -> str:
+        """提取目标内容。"""
         match = _HEADING_RE.match(block.strip())
         if not match:
             return ""
         return self._strip_inline_markdown(match.group(1))
 
     def _strip_inline_markdown(self, text: str) -> str:
+        """执行 strip inline markdown 辅助逻辑。"""
         cleaned = re.sub(r"[`*_~]+", "", text)
         cleaned = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", cleaned)
         return cleaned.strip()
 
     def _normalize_text(self, value: object) -> str:
+        """规范化输入值。"""
         return str(value or "").strip()
 
     def _normalize_template(self, value: object) -> str:
+        """规范化输入值。"""
         template = str(value or "blue").strip().lower()
         if template in _ALLOWED_CARD_TEMPLATES:
             return template
@@ -317,11 +331,13 @@ class FeishuCardRenderer:
         blocks: list[str],
         structured_blocks: list[dict[str, Any]],
     ) -> bool:
+        """判断是否满足条件。"""
         if not self.enable_stateful_cards:
             return False
         return len(blocks) > self.interactive_page_size or bool(structured_blocks)
 
     def _normalize_render_blocks(self, blocks: list[str]) -> list[str]:
+        """规范化输入值。"""
         normalized: list[str] = []
         for block in blocks:
             if self._parse_structured_placeholder(block) is not None:
@@ -331,6 +347,7 @@ class FeishuCardRenderer:
         return normalized
 
     def _parse_actions(self, value: object) -> list[dict[str, Any]]:
+        """解析输入内容。"""
         if not isinstance(value, list):
             return []
         actions: list[dict[str, Any]] = []
@@ -402,6 +419,7 @@ class FeishuCardRenderer:
         raw: dict[str, Any],
         label: str,
     ) -> dict[str, Any]:
+        """规范化输入值。"""
         if isinstance(callback_value, dict):
             payload = dict(callback_value)
         elif callback_value is None:
@@ -416,6 +434,7 @@ class FeishuCardRenderer:
         return payload
 
     def _split_markdown_blocks(self, text: str) -> list[str]:
+        """拆分内容片段。"""
         if not text:
             return []
         blocks: list[str] = []
@@ -430,6 +449,7 @@ class FeishuCardRenderer:
         return [block for block in blocks if block.strip()]
 
     def _split_non_code_segment(self, text: str) -> list[str]:
+        """拆分内容片段。"""
         segment = text.strip()
         if not segment:
             return []
@@ -444,6 +464,7 @@ class FeishuCardRenderer:
         template: str,
         card_link: str,
     ) -> list[list[str]]:
+        """将内容分页。"""
         pages: list[list[str]] = []
         current: list[str] = []
         for block in blocks:
@@ -475,6 +496,7 @@ class FeishuCardRenderer:
         card_link: str,
         actions: list[dict[str, Any]],
     ) -> list[list[str]]:
+        """重新平衡分页内容。"""
         if not pages:
             return [["-"]]
         while len(pages[-1]) > 1 and self._estimate_card_payload_bytes(
@@ -493,6 +515,7 @@ class FeishuCardRenderer:
         return pages
 
     def _split_block_if_needed(self, block: str) -> list[str]:
+        """拆分内容片段。"""
         if self._parse_structured_placeholder(block) is not None:
             return [block]
         block_size = len(block.encode("utf-8"))
@@ -507,6 +530,7 @@ class FeishuCardRenderer:
         self,
         blocks: list[str],
     ) -> tuple[list[str], list[dict[str, Any]]]:
+        """提取目标内容。"""
         render_blocks: list[str] = []
         structured_blocks: list[dict[str, Any]] = []
         for block in blocks:
@@ -520,6 +544,7 @@ class FeishuCardRenderer:
         return render_blocks, structured_blocks
 
     def _parse_structured_block(self, block: str) -> list[dict[str, Any]]:
+        """解析输入内容。"""
         match = _CODE_FENCE_RE.match(block.strip())
         if match is None:
             return []
@@ -537,6 +562,7 @@ class FeishuCardRenderer:
         return normalized
 
     def _normalize_structured_payload(self, payload: object) -> list[dict[str, Any]]:
+        """规范化输入值。"""
         if isinstance(payload, list):
             result: list[dict[str, Any]] = []
             for item in payload:
@@ -564,6 +590,7 @@ class FeishuCardRenderer:
         *,
         default_type: str = "",
     ) -> dict[str, Any] | None:
+        """规范化输入值。"""
         if not isinstance(payload, dict):
             return None
         block_type = str(payload.get("type") or default_type).strip().lower()
@@ -576,6 +603,7 @@ class FeishuCardRenderer:
         return None
 
     def _normalize_status_block(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """规范化输入值。"""
         status = str(payload.get("status") or payload.get("level") or "info").strip().lower()
         if status not in {"success", "info", "warning", "error"}:
             status = "info"
@@ -591,6 +619,7 @@ class FeishuCardRenderer:
         }
 
     def _normalize_kv_block(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """规范化输入值。"""
         title = self._normalize_text(payload.get("title"))
         raw_items = payload.get("items", payload.get("metrics", payload.get("fields", [])))
         items: list[dict[str, str]] = []
@@ -619,6 +648,7 @@ class FeishuCardRenderer:
         }
 
     def _normalize_table_block(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """规范化输入值。"""
         raw_columns = payload.get("columns", payload.get("headers", payload.get("fields", [])))
         raw_rows = payload.get("rows", [])
         if not isinstance(raw_columns, list) or not isinstance(raw_rows, list):
@@ -743,6 +773,7 @@ class FeishuCardRenderer:
         }
 
     def _split_fenced_code_block(self, block: str) -> list[str]:
+        """拆分内容片段。"""
         match = _CODE_FENCE_RE.match(block.strip())
         if match is None:
             return []
@@ -753,6 +784,7 @@ class FeishuCardRenderer:
         return [f"{prefix}{chunk}\n```" for chunk in chunks]
 
     def _split_text_chunks(self, text: str, max_bytes: int) -> list[str]:
+        """拆分内容片段。"""
         lines = text.splitlines()
         if not lines:
             return [text[:max_bytes]]
@@ -773,6 +805,7 @@ class FeishuCardRenderer:
         return [chunk for chunk in chunks if chunk]
 
     def _split_oversized_line(self, line: str, max_bytes: int) -> list[str]:
+        """拆分内容片段。"""
         pieces: list[str] = []
         current = ""
         for char in line:
@@ -791,6 +824,7 @@ class FeishuCardRenderer:
         blocks: list[str],
         structured_blocks: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """渲染输出结构。"""
         elements: list[dict[str, Any]] = []
         for block in blocks:
             structured_index = self._parse_structured_placeholder(block)
@@ -803,6 +837,7 @@ class FeishuCardRenderer:
         return elements
 
     def _render_structured_block(self, block: dict[str, Any]) -> list[dict[str, Any]]:
+        """渲染输出结构。"""
         block_type = str(block.get("type", "")).strip().lower()
         if block_type == "status":
             return self._render_status_block(block)
@@ -813,6 +848,7 @@ class FeishuCardRenderer:
         return []
 
     def _render_status_block(self, block: dict[str, Any]) -> list[dict[str, Any]]:
+        """渲染输出结构。"""
         status = str(block.get("status", "info")).strip().lower()
         title = self._normalize_text(block.get("title")) or {
             "success": "Success",
@@ -859,6 +895,7 @@ class FeishuCardRenderer:
         ]
 
     def _render_kv_block(self, block: dict[str, Any]) -> list[dict[str, Any]]:
+        """渲染输出结构。"""
         items = block.get("items", [])
         if not isinstance(items, list) or not items:
             return []
@@ -900,6 +937,7 @@ class FeishuCardRenderer:
         return elements
 
     def _render_table_block(self, block: dict[str, Any]) -> list[dict[str, Any]]:
+        """渲染输出结构。"""
         columns = block.get("columns", [])
         rows = block.get("rows", [])
         if not isinstance(columns, list) or not isinstance(rows, list) or not columns or not rows:
@@ -937,6 +975,7 @@ class FeishuCardRenderer:
         blocks: list[str],
         structured_blocks: list[dict[str, Any]],
     ) -> list[str]:
+        """展开回退内容。"""
         expanded: list[str] = []
         for block in blocks:
             structured_index = self._parse_structured_placeholder(block)
@@ -951,6 +990,7 @@ class FeishuCardRenderer:
         return expanded
 
     def _structured_block_fallback(self, block: dict[str, Any]) -> str:
+        """执行 structured block fallback 辅助逻辑。"""
         block_type = str(block.get("type", "")).strip().lower()
         if block_type == "status":
             title = self._normalize_text(block.get("title"))
@@ -993,9 +1033,11 @@ class FeishuCardRenderer:
         return ""
 
     def _structured_placeholder(self, index: int) -> str:
+        """执行 structured placeholder 辅助逻辑。"""
         return f"[[STRUCTURED:{index}]]"
 
     def _parse_structured_placeholder(self, value: str) -> int | None:
+        """解析输入内容。"""
         match = _STRUCTURED_PLACEHOLDER_RE.match(value.strip())
         if match is None:
             return None
@@ -1005,6 +1047,7 @@ class FeishuCardRenderer:
             return None
 
     def _stringify_structured_value(self, value: object) -> str:
+        """将值转换为展示文本。"""
         if isinstance(value, str):
             return value.strip()
         if value is None:
@@ -1020,6 +1063,7 @@ class FeishuCardRenderer:
         return str(value).strip()
 
     def _table_cell_value(self, value: object, *, data_type: str = "text") -> Any:
+        """处理表格相关值。"""
         normalized_type = self._normalize_table_data_type(data_type)
         if normalized_type == "number":
             return self._normalize_table_number_value(value)
@@ -1034,6 +1078,7 @@ class FeishuCardRenderer:
         return self._stringify_structured_value(value)
 
     def _table_value_preview(self, value: object) -> str:
+        """处理表格相关值。"""
         if isinstance(value, list):
             return "\n".join(self._table_value_preview(item) for item in value)
         if isinstance(value, dict):
@@ -1043,6 +1088,7 @@ class FeishuCardRenderer:
         return self._stringify_structured_value(value)
 
     def _normalize_table_data_type(self, value: object) -> str:
+        """规范化输入值。"""
         data_type = self._normalize_text(value).lower() or "text"
         aliases = {
             "md": "lark_md",
@@ -1055,6 +1101,7 @@ class FeishuCardRenderer:
         return data_type
 
     def _normalize_table_width(self, value: object) -> str:
+        """规范化输入值。"""
         width = self._normalize_text(value)
         if not width:
             return "auto"
@@ -1073,6 +1120,7 @@ class FeishuCardRenderer:
         stats: list[dict[str, Any]] | None = None,
         locked: bool = False,
     ) -> str:
+        """规范化输入值。"""
         height = self._normalize_text(value)
         if height in {"low", "middle", "high", "auto"}:
             return height
@@ -1089,6 +1137,7 @@ class FeishuCardRenderer:
         stats: list[dict[str, Any]] | None = None,
         locked: bool = False,
     ) -> str:
+        """规范化输入值。"""
         max_height = self._normalize_text(value)
         if re.match(r"^\d+px$", max_height):
             return max_height
@@ -1102,6 +1151,7 @@ class FeishuCardRenderer:
         display_name: str,
         raw: dict[str, Any],
     ) -> list[str]:
+        """处理表格相关值。"""
         keys: list[str] = [name, display_name]
         for extra in (raw.get("key"), raw.get("field"), raw.get("title"), raw.get("label")):
             text = self._normalize_text(extra)
@@ -1121,6 +1171,7 @@ class FeishuCardRenderer:
         return result
 
     def _unwrap_table_row_source(self, row: dict[str, Any]) -> dict[str, Any]:
+        """执行 unwrap table row source 辅助逻辑。"""
         cells = row.get("cells")
         if isinstance(cells, dict):
             merged = dict(row)
@@ -1129,6 +1180,7 @@ class FeishuCardRenderer:
         return row
 
     def _find_table_row_value(self, row: dict[str, Any], keys: list[str]) -> object:
+        """执行 find table row value 辅助逻辑。"""
         for key in keys:
             if key in row:
                 return row[key]
@@ -1143,6 +1195,7 @@ class FeishuCardRenderer:
         column_specs: list[dict[str, Any]],
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """收集统计信息。"""
         stats: list[dict[str, Any]] = []
         for spec in column_specs:
             name = str(spec.get("name", ""))
@@ -1169,6 +1222,7 @@ class FeishuCardRenderer:
         column_specs: list[dict[str, Any]],
         column_stats: list[dict[str, Any]],
     ) -> None:
+        """应用计算结果。"""
         for index, column in enumerate(columns):
             if index >= len(column_specs) or index >= len(column_stats):
                 continue
@@ -1185,6 +1239,7 @@ class FeishuCardRenderer:
         *,
         total_columns: int,
     ) -> str:
+        """根据内容特征给出建议值。"""
         data_type = str(stat.get("data_type", "text"))
         max_chars = int(stat.get("max_chars", 0) or 0)
         has_multiline = bool(stat.get("has_multiline", False))
@@ -1207,6 +1262,7 @@ class FeishuCardRenderer:
         return "220px"
 
     def _table_has_long_cells(self, stats: list[dict[str, Any]]) -> bool:
+        """处理表格相关值。"""
         for stat in stats:
             if bool(stat.get("has_multiline", False)):
                 return True
@@ -1215,6 +1271,7 @@ class FeishuCardRenderer:
         return False
 
     def _normalize_table_number_value(self, value: object) -> Any:
+        """规范化输入值。"""
         if isinstance(value, bool):
             return int(value)
         if isinstance(value, (int, float)):
@@ -1235,6 +1292,7 @@ class FeishuCardRenderer:
         return text
 
     def _normalize_table_options_value(self, value: object) -> Any:
+        """规范化输入值。"""
         if isinstance(value, str):
             return value.strip()
         if isinstance(value, list):
@@ -1252,6 +1310,7 @@ class FeishuCardRenderer:
         return self._stringify_structured_value(value)
 
     def _normalize_table_persons_value(self, value: object) -> Any:
+        """规范化输入值。"""
         if isinstance(value, str):
             text = value.strip()
             return [text] if text else []
@@ -1260,6 +1319,7 @@ class FeishuCardRenderer:
         return self._stringify_structured_value(value)
 
     def _normalize_table_date_value(self, value: object) -> Any:
+        """规范化输入值。"""
         if isinstance(value, (int, float)):
             return int(value)
         text = self._normalize_text(value)
@@ -1278,6 +1338,7 @@ class FeishuCardRenderer:
         page_blocks: list[str],
         actions: list[dict[str, Any]],
     ) -> str:
+        """构建输出结构。"""
         parts: list[str] = []
         if page_title:
             parts.append(page_title)
@@ -1309,11 +1370,13 @@ class FeishuCardRenderer:
         return "\n\n".join(part for part in parts if part.strip())
 
     def _state_total_pages(self, state: FeishuCardState) -> int:
+        """读取状态字段。"""
         if state.expanded:
             return 1
         return max(1, (len(state.blocks) + state.page_size - 1) // state.page_size)
 
     def _select_visible_blocks(self, state: FeishuCardState) -> list[str]:
+        """选择当前可见内容。"""
         if state.expanded:
             return state.blocks
         start = state.page_index * state.page_size
@@ -1321,6 +1384,7 @@ class FeishuCardRenderer:
         return state.blocks[start:end]
 
     def _build_state_controls(self, state: FeishuCardState) -> list[dict[str, Any]]:
+        """构建输出结构。"""
         buttons: list[dict[str, Any]] = []
         total_pages = self._state_total_pages(state)
         if state.expanded:
@@ -1350,6 +1414,7 @@ class FeishuCardRenderer:
         *,
         button_type: str,
     ) -> dict[str, Any]:
+        """构建控制组件。"""
         return {
             "tag": "button",
             "text": {
@@ -1380,6 +1445,7 @@ class FeishuCardRenderer:
         card_link: str,
         actions: list[dict[str, Any]],
     ) -> int:
+        """估算输出大小。"""
         elements: list[dict[str, Any]] = []
         if summary:
             elements.append(self._markdown_element(summary))
@@ -1421,6 +1487,7 @@ class FeishuCardRenderer:
         return len(content.encode("utf-8"))
 
     def _markdown_element(self, content: str) -> dict[str, Any]:
+        """构建 Markdown 组件。"""
         return {
             "tag": "markdown",
             "content": content,

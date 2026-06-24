@@ -12,6 +12,7 @@ def build_channel_manager(
     settings: GatewaySettings,
     accounts: list[ChannelAccount],
 ) -> ChannelManager:
+    """根据配置构建通道管理器。"""
     manager = ChannelManager()
     state_dir = settings.data_dir / "channel-state"
     for account in accounts:
@@ -23,6 +24,7 @@ def build_channel_manager(
 
 
 def _build_channel(account: ChannelAccount, state_dir):
+    """构建输出结构。"""
     if account.channel == "cli":
         return CLIChannel(account_id=account.account_id)
     if account.channel == "telegram":

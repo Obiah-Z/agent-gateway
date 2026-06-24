@@ -14,10 +14,12 @@ from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
 
 
 class TelegramChannel(Channel):
+    """Telegram 消息通道实现。"""
     name = "telegram"
     max_message_length = 4096
 
     def __init__(self, account: ChannelAccount, state_dir: Path) -> None:
+        """初始化实例。"""
         if httpx is None:
             raise RuntimeError("TelegramChannel requires httpx")
         self.account = account
@@ -36,13 +38,16 @@ class TelegramChannel(Channel):
         self._text_buffer: dict[tuple[str, str], dict[str, Any]] = {}
 
     def receive(self) -> InboundMessage | None:
+        """接收一条入站消息。"""
         messages = self.poll()
         return messages[0] if messages else None
 
     def receive_batch(self) -> list[InboundMessage]:
+        """批量接收入站消息。"""
         return self.poll()
 
     def poll(self) -> list[InboundMessage]:
+        """轮询远端消息并转换为入站消息。"""
         result = self._api(
             "getUpdates",
             offset=self._offset,
@@ -79,6 +84,7 @@ class TelegramChannel(Channel):
         return self._flush_all()
 
     def send(self, outbound: OutboundMessage) -> bool:
+        """发送一条出站消息。"""
         chat_id, thread_id = outbound.to, None
         if ":topic:" in outbound.to:
             parts = outbound.to.split(":topic:")
@@ -96,12 +102,15 @@ class TelegramChannel(Channel):
         return ok
 
     def send_typing(self, chat_id: str) -> None:
+        """发送输入中状态提示。"""
         self._api("sendChatAction", chat_id=chat_id, action="typing")
 
     def close(self) -> None:
+        """关闭通道并释放资源。"""
         self._http.close()
 
     def _api(self, method: str, **params: Any) -> Any:
+        """调用远端 API。"""
         payload = {key: value for key, value in params.items() if value is not None}
         response = self._http.post(f"{self.base_url}/{method}", json=payload)
         data = response.json()
@@ -110,17 +119,20 @@ class TelegramChannel(Channel):
         return data.get("result", {})
 
     def _buffer_media(self, message: dict[str, Any], update: dict[str, Any]) -> None:
+        """缓存待发送内容。"""
         media_group_id = message["media_group_id"]
         if media_group_id not in self._media_groups:
             self._media_groups[media_group_id] = {"ts": time.monotonic(), "entries": []}
         self._media_groups[media_group_id]["entries"].append((message, update))
 
     def _flush_all(self) -> list[InboundMessage]:
+        """刷新缓存内容。"""
         ready = self._flush_media()
         ready.extend(self._flush_text())
         return ready
 
     def _flush_media(self) -> list[InboundMessage]:
+        """刷新缓存内容。"""
         now = time.monotonic()
         ready: list[InboundMessage] = []
         expired = [
@@ -154,6 +166,7 @@ class TelegramChannel(Channel):
         return ready
 
     def _buffer_text(self, inbound: InboundMessage) -> None:
+        """缓存待发送内容。"""
         key = (inbound.peer_id, inbound.sender_id)
         now = time.monotonic()
         if key in self._text_buffer:
@@ -163,6 +176,7 @@ class TelegramChannel(Channel):
             self._text_buffer[key] = {"text": inbound.text, "msg": inbound, "ts": now}
 
     def _flush_text(self) -> list[InboundMessage]:
+        """刷新缓存内容。"""
         now = time.monotonic()
         ready: list[InboundMessage] = []
         expired = [
@@ -179,6 +193,7 @@ class TelegramChannel(Channel):
         message: dict[str, Any],
         raw_update: dict[str, Any],
     ) -> InboundMessage | None:
+        """解析输入内容。"""
         chat = message.get("chat", {})
         chat_type = chat.get("type", "")
         chat_id = str(chat.get("id", ""))
@@ -209,6 +224,7 @@ class TelegramChannel(Channel):
         )
 
     def _chunk(self, text: str) -> list[str]:
+        """按长度切分文本。"""
         if len(text) <= self.max_message_length:
             return [text]
         chunks: list[str] = []
@@ -226,11 +242,13 @@ class TelegramChannel(Channel):
 
     @staticmethod
     def _save_offset(path: Path, offset: int) -> None:
+        """保存运行状态。"""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(str(offset), encoding="utf-8")
 
     @staticmethod
     def _load_offset(path: Path) -> int:
+        """加载运行状态。"""
         try:
             return int(path.read_text(encoding="utf-8").strip())
         except Exception:

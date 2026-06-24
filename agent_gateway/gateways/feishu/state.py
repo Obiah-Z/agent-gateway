@@ -10,6 +10,7 @@ from typing import Any
 
 @dataclass(slots=True)
 class FeishuCardState:
+    """记录飞书有状态卡片的分页和内容状态。"""
     card_id: str
     owner_channel: str
     owner_account_id: str
@@ -28,6 +29,7 @@ class FeishuCardState:
     updated_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        """序列化为字典。"""
         return {
             "card_id": self.card_id,
             "owner_channel": self.owner_channel,
@@ -49,6 +51,7 @@ class FeishuCardState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FeishuCardState":
+        """从字典恢复对象。"""
         return cls(
             card_id=str(data.get("card_id", "")),
             owner_channel=str(data.get("owner_channel", "feishu")),
@@ -70,7 +73,9 @@ class FeishuCardState:
 
 
 class FeishuCardStateStore:
+    """持久化飞书有状态卡片状态。"""
     def __init__(self, state_dir: Path) -> None:
+        """初始化实例。"""
         self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.cards_dir = self.state_dir / "cards"
@@ -78,6 +83,7 @@ class FeishuCardStateStore:
         self._lock = threading.Lock()
 
     def load(self, card_id: str) -> FeishuCardState | None:
+        """执行 load 逻辑。"""
         path = self.cards_dir / f"{card_id}.json"
         if not path.exists():
             return None
@@ -87,6 +93,7 @@ class FeishuCardStateStore:
             return None
 
     def save(self, state: FeishuCardState) -> None:
+        """执行 save 逻辑。"""
         state.updated_at = time.time()
         path = self.cards_dir / f"{state.card_id}.json"
         tmp = self.cards_dir / f".tmp.{state.card_id}.json"

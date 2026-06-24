@@ -420,6 +420,7 @@ class ResilienceRunner:
 
     @staticmethod
     def _clone_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """深度克隆消息列表，通过 JSON 序列化/反序列化实现，返回独立副本。"""
         return json.loads(json.dumps(messages, ensure_ascii=False))
 
     def _summarize(self, api_client: Any, model: str, text: str) -> str:

@@ -23,6 +23,7 @@ class FeishuEventDeduplicator:
     """基于本地状态文件的事件去重器。"""
 
     def __init__(self, state_dir: Path, *, ttl_seconds: int = 86400) -> None:
+        """初始化实例。"""
         self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.seen_file = self.state_dir / "seen-events.jsonl"
@@ -133,6 +134,7 @@ class FeishuWebhookAuditLog:
     """把飞书请求落盘成 JSONL 审计日志。"""
 
     def __init__(self, state_dir: Path) -> None:
+        """初始化实例。"""
         self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.events_file = self.state_dir / "events.jsonl"

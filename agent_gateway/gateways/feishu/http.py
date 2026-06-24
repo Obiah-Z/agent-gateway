@@ -41,6 +41,7 @@ class FeishuWebhookServer:
         dedup_ttl_seconds: int = 86400,
         event_store: RuntimeEventStore | None = None,
     ) -> None:
+        """初始化实例。"""
         self.host = host
         self.port = port
         self.path = path
@@ -56,11 +57,13 @@ class FeishuWebhookServer:
         self._server: asyncio.base_events.Server | None = None
 
     async def start(self) -> None:
+        """启动后台服务。"""
         if self._server is not None:
             return
         self._server = await asyncio.start_server(self._handle_client, self.host, self.port)
 
     async def stop(self) -> None:
+        """停止后台服务。"""
         if self._server is None:
             return
         self._server.close()
@@ -566,6 +569,7 @@ class FeishuWebhookServer:
         inbound: Any = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        """记录运行事件。"""
         if self.event_store is None:
             return
         payload = dict(metadata or {})
