@@ -2,6 +2,14 @@
 
 负责把 CLI / Telegram / Feishu 等通道采集到的入站消息统一放进异步队列，再交给
 dispatcher 顺序处理。CLI 的 completion_event 设计用于避免提示符抢跑。
+
+这个模块是“协议通道”和“Agent 执行链路”之间的缓冲层：
+
+1. 各通道可以用自己的阻塞式 receive/poll 逻辑采集消息。
+2. ChannelRuntime 把这些消息统一桥接到 asyncio 主循环。
+3. Dispatcher 再负责路由、Agent Loop 和出站投递。
+
+因此这里重点处理的是并发边界、生命周期和故障兜底，而不是具体业务语义。
 """
 
 from __future__ import annotations
@@ -22,10 +30,14 @@ from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 
 @dataclass(slots=True)
 class PendingInbound:
-    """从具体通道进入网关主队列的待处理消息。"""
+    """从具体通道进入网关主队列的待处理消息。
 
-    message: InboundMessage
-    completion_event: threading.Event | None = None
+    `completion_event` 只用于需要同步交互节奏的通道。目前主要是 CLI：终端输入线程
+    必须等本轮回复投递完成后再继续读取下一次输入，否则提示符会抢在回复前出现。
+    """
+
+    message: InboundMessage  # 标准化后的入站消息。
+    completion_event: threading.Event | None = None  # 通知采集线程“本条消息已处理完成”。
 
 
 class InboundInterceptor(Protocol):
@@ -35,11 +47,17 @@ class InboundInterceptor(Protocol):
     """
 
     async def try_consume_activation(self, inbound: InboundMessage) -> bool:
+        """尝试在进入普通 Agent 路由前消费入站消息。"""
         ...
 
 
 class ChannelRuntime:
-    """协调多通道采集、顺序消费和错误回退。"""
+    """协调多通道采集、顺序消费和错误回退。
+
+    设计上每个通道一个采集线程，所有线程把消息投递到同一个 asyncio 队列。
+    队列消费者只有一个，因此同一进程内的入站处理是顺序的，避免会话记录和投递队列
+    在多线程下被并发写入。
+    """
 
     def __init__(
         self,
@@ -48,19 +66,24 @@ class ChannelRuntime:
         delivery_runtime: DeliveryRuntime | None = None,
         inbound_interceptors: list[InboundInterceptor] | None = None,
     ) -> None:
-        self.dispatcher = dispatcher
-        self.channels = channels
-        self.delivery_runtime = delivery_runtime
-        self.inbound_interceptors = list(inbound_interceptors or [])
+        self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
+        self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
+        self.delivery_runtime = delivery_runtime  # 出站投递运行时，CLI 场景需要同步 flush。
+        self.inbound_interceptors = list(inbound_interceptors or [])  # 入站前置拦截链。
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._stop_event = threading.Event()
-        self._threads: list[threading.Thread] = []
-        self._consumer_task: asyncio.Task[None] | None = None
-        self._running = False
+        self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
+        self._stop_event = threading.Event()  # 跨线程停止信号。
+        self._threads: list[threading.Thread] = []  # 每个通道对应一个后台采集线程。
+        self._consumer_task: asyncio.Task[None] | None = None  # 统一入站队列消费者。
+        self._running = False  # 防止重复 start/stop。
 
     async def start(self) -> None:
-        """启动消费队列和每个已配置通道的采集线程。"""
+        """启动消费队列和每个已配置通道的采集线程。
+
+        通道 receive_batch 可能是阻塞/轮询式实现，因此不能直接跑在 asyncio 主循环中。
+        这里为每个通道开一个 daemon 线程，再用 `run_coroutine_threadsafe` 把消息投回
+        `_queue`。
+        """
 
         if self._running:
             return
@@ -69,6 +92,7 @@ class ChannelRuntime:
         self._loop = asyncio.get_running_loop()
         self._consumer_task = asyncio.create_task(self._consume())
         for account, channel in self.channels.iter_channels():
+            # 线程名包含通道和账号，便于排查多账号飞书/Telegram 运行问题。
             thread = threading.Thread(
                 target=self._worker_loop,
                 args=(account.channel, account.account_id, channel),
@@ -79,7 +103,11 @@ class ChannelRuntime:
             self._threads.append(thread)
 
     async def stop(self) -> None:
-        """停止所有通道线程并结束消费循环。"""
+        """停止所有通道线程并结束消费循环。
+
+        `_queue.put(None)` 是消费者退出哨兵。通道线程通过 `_stop_event` 感知退出，
+        `channels.close_all()` 用于唤醒或终止可能阻塞在远端轮询里的通道。
+        """
 
         if not self._running:
             return
@@ -91,14 +119,26 @@ class ChannelRuntime:
             await self._consumer_task
 
     async def wait_closed(self) -> None:
+        """等待消费任务结束。"""
+
         if self._consumer_task is not None:
             await self._consumer_task
 
     async def ingest_external(self, inbound: InboundMessage) -> None:
+        """接收外部已经解析好的入站消息。
+
+        飞书 HTTP Webhook 和长连接都已经在各自模块里完成协议解析，因此这里直接把
+        `InboundMessage` 放入统一队列，而不再经过通道线程。
+        """
+
         await self._queue.put(PendingInbound(message=inbound))
 
     async def restart(self, channels: ChannelManager) -> None:
-        """在控制面 reload 通道配置后热重启通道运行时。"""
+        """在控制面 reload 通道配置后热重启通道运行时。
+
+        控制面更新通道配置时不能只替换 `self.channels`，还要同步更新
+        `DeliveryRuntime.channels`，否则入站用新通道，出站仍可能投递到旧通道实例。
+        """
 
         was_running = self._running
         if was_running:
@@ -117,18 +157,22 @@ class ChannelRuntime:
             try:
                 batch = channel.receive_batch()
             except Exception:
+                # 通道采集失败不能杀死整个进程。这里做短退避，等待下一轮轮询自恢复。
                 time.sleep(1.0)
                 continue
 
             if not batch:
+                # 空轮询保持轻量退避，避免无消息时 CPU 空转。
                 time.sleep(0.1)
                 continue
 
             for inbound in batch:
                 if self._loop is None or self._stop_event.is_set():
                     return
+                # CLI 是同步终端体验：必须等回复真正刷出后再允许下一次 input()。
                 completion_event = threading.Event() if channel_name == "cli" else None
                 try:
+                    # 从普通线程安全地投递到 asyncio 队列；`.result()` 确保投递完成。
                     asyncio.run_coroutine_threadsafe(
                         self._queue.put(
                             PendingInbound(
@@ -139,18 +183,25 @@ class ChannelRuntime:
                         self._loop,
                     ).result()
                 except Exception:
+                    # 主循环已关闭或队列不可用时退出当前通道线程，避免后台异常刷屏。
                     return
                 if completion_event is not None:
+                    # CLI 输入线程在这里等待消费者 finally 中 set()，从而避免提示符抢跑。
                     while not self._stop_event.is_set():
                         if completion_event.wait(timeout=0.1):
                             break
 
     async def _consume(self) -> None:
-        """消费统一入站队列，并保证异常会转成用户可见的错误回复。"""
+        """消费统一入站队列，并保证异常会转成用户可见的错误回复。
+
+        这个消费者是单任务串行执行的，目的是让同一进程里的会话写入、路由决策和投递
+        入队保持确定顺序。异常会被吞掉并回送错误提示，避免一条坏消息终止整个消费者。
+        """
 
         while True:
             pending = await self._queue.get()
             if pending is None:
+                # None 是 stop() 放入的退出哨兵，不代表真实消息。
                 self._queue.task_done()
                 break
 
@@ -158,6 +209,7 @@ class ChannelRuntime:
             try:
                 await self._handle_inbound(inbound)
             except Exception as exc:
+                # print + traceback 是最低限度兜底；结构化事件由下游 dispatcher/runner 记录。
                 print(
                     "[channel_runtime] inbound processing failed:"
                     f" channel={inbound.channel}"
@@ -170,6 +222,7 @@ class ChannelRuntime:
                 await self._deliver_error_reply(inbound, exc)
             finally:
                 if pending.completion_event is not None:
+                    # 无论成功还是失败，都必须释放 CLI 输入线程。
                     pending.completion_event.set()
                 self._queue.task_done()
 
@@ -185,10 +238,13 @@ class ChannelRuntime:
         )
         await self._send_typing_if_supported(inbound)
         for interceptor in self.inbound_interceptors:
+            # onboarding 等激活消息如果被拦截器消费，就不应进入普通 Agent 会话。
             if await interceptor.try_consume_activation(inbound):
                 await self._flush_cli_delivery_if_needed(inbound)
                 return
+        # dispatcher 内部会完成路由解析、Agent Loop 执行和回复对象构造。
         result = await self.dispatcher.dispatch_inbound(inbound)
+        # 普通回复仍先入可靠投递队列，再由 DeliveryRuntime 发送。
         await self.dispatcher.deliver_reply(self.channels, result)
         await self._flush_cli_delivery_if_needed(inbound)
 
@@ -196,6 +252,7 @@ class ChannelRuntime:
         """把处理异常转换成一条出站错误提示，避免用户无反馈。"""
 
         try:
+            # 复用原入站 metadata，保留 receive_id_type 等通道投递需要的上下文。
             metadata = dict(inbound.metadata)
             metadata.update(
                 {
@@ -217,6 +274,7 @@ class ChannelRuntime:
             )
             await self._flush_cli_delivery_if_needed(inbound)
         except Exception as delivery_exc:
+            # 连错误提示都投递失败时只能记录日志，不能再次抛出，否则消费者会被终止。
             print(
                 "[channel_runtime] failed to enqueue error reply:"
                 f" channel={inbound.channel}"
@@ -227,18 +285,26 @@ class ChannelRuntime:
             traceback.print_exc()
 
     async def _flush_cli_delivery_if_needed(self, inbound: InboundMessage) -> None:
-        """CLI 通道需要在打印提示后立即刷新投递，避免交互体验错位。"""
+        """CLI 通道需要在打印提示后立即刷新投递，避免交互体验错位。
+
+        飞书/Telegram 可以让 DeliveryRuntime 后台慢慢发送；CLI 用户正在当前进程里等待
+        输出，所以这里主动 flush 一次。
+        """
 
         if inbound.channel == "cli" and self.delivery_runtime is not None:
             await self.delivery_runtime.flush_once()
 
     async def _send_typing_if_supported(self, inbound: InboundMessage) -> None:
-        """仅对支持 typing 的通道发送打字状态。"""
+        """仅对支持 typing 的通道发送打字状态。
+
+        目前只有 Telegram 通道在这里处理 typing。飞书卡片和消息回调不走这个提示机制。
+        """
 
         if inbound.channel != "telegram":
             return
         channel = self.channels.get("telegram", inbound.account_id)
         if not isinstance(channel, TelegramChannel):
             return
+        # 带 topic 的群消息 peer_id 形如 chat_id:topic:thread_id，typing 只需要 chat_id。
         chat_id = inbound.peer_id.split(":topic:")[0]
         await asyncio.to_thread(channel.send_typing, chat_id)
