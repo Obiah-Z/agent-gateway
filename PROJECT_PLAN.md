@@ -225,7 +225,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 15：ChannelRuntime Lane 化与入站背压
 
-状态：待实现，P0 优先级，建议优先于 Dashboard 鉴权推进。
+状态：进行中，P0 优先级，建议优先于 Dashboard 鉴权推进。
 
 目标：
 
@@ -240,42 +240,41 @@ cd ~/Desktop/claw0/gateway
 - 典型风险包括：飞书长任务拖慢 CLI、GitHub 仓库分析阻塞普通聊天、Telegram 批量消息影响飞书响应。
 - 当前 `restart()` 会先 `stop()` 再替换通道；`stop()` 直接向队列写入 `None` 退出哨兵，存在未消费消息被留在旧队列或旧通道线程继续投递后无人消费的风险。
 
-计划项：
+阶段进展：
 
-1. 先修复 `ChannelRuntime.restart()` 的 graceful drain 语义：
-   - 停止接收新消息。
-   - 通知旧通道线程退出。
-   - 等待旧通道线程结束或超时。
-   - 等待当前入站队列 drain 完成。
-   - drain 完成后再投递退出哨兵停止 consumer。
-   - 确保 CLI `completion_event` 在成功、失败和 shutdown 场景下都能释放。
-2. 定义入站 lane key 规则：
+1. Phase 15.1：`ChannelRuntime.restart()` graceful drain。已完成。
+   - `stop()` 改为先停止接收新消息，再关闭通道并等待旧通道线程退出。
+   - 旧线程退出后等待当前入站队列 drain 完成，再投递 consumer 退出哨兵。
+   - CLI `completion_event` 在正常处理、失败处理和 restart drain 场景下都会释放。
+   - `ingest_external()` 在 runtime 未运行时拒绝入队，避免消息进入无人消费的旧队列。
+   - 新增回归测试覆盖：restart 前已入队消息不丢、CLI completion_event 可释放、旧通道线程会被关闭并 join。
+2. Phase 15.2：定义入站 lane key 规则。待实现。
    - 优先使用 `agent_id + session_key`。
    - 路由前可临时使用 `channel + account_id + peer_id`。
    - 后台任务、Cron、Heartbeat 与用户实时消息分开 lane。
-3. 将 `ChannelRuntime` 从单消费者改为 lane dispatcher：
+3. Phase 15.3：将 `ChannelRuntime` 从单消费者改为 lane dispatcher。待实现。
    - 全局入站队列只负责接收和粗分发。
    - 每个 lane 内部保持顺序处理。
    - 不同 lane 可以并发执行。
-4. 增加全局并发上限和 per-agent 并发上限：
+4. Phase 15.4：增加全局并发上限和 per-agent 并发上限。待实现。
    - 例如 `main=2`、`research=1`、`ops=1`。
    - 防止并发过高打爆模型 API 或工具执行资源。
-5. 增加入站背压策略：
+5. Phase 15.5：增加入站背压策略。待实现。
    - 配置最大队列长度。
    - 超过阈值时对低优先级任务延迟或拒绝。
    - 实时用户消息优先于 Cron/Heartbeat。
-6. 增加长任务降级策略：
+6. Phase 15.6：增加长任务降级策略。待实现。
    - 超过阈值后先回复“已进入后台处理”。
    - 后续结果通过可靠投递链路补发。
-7. 增加运行指标：
+7. Phase 15.7：增加运行指标。待实现。
    - 全局入站队列长度。
    - 每个 lane 的队列长度。
    - 最老消息等待时间。
    - 当前运行 lane 数。
    - 每个 Agent 的并发占用。
-8. Dashboard 增加入站队列和 lane 视图。
-9. 控制面增加 `runtime.lanes` 或扩展现有 runtime status，展示当前积压和并发状态。
-10. 补充测试：
+8. Phase 15.8：Dashboard 增加入站队列和 lane 视图。待实现。
+9. Phase 15.9：控制面增加 `runtime.lanes` 或扩展现有 runtime status，展示当前积压和并发状态。待实现。
+10. Phase 15.10：补充测试。进行中。
    - restart 时已入队消息不会丢失。
    - restart 时旧通道线程不会继续向无人消费的旧队列投递消息。
    - 同一 session 串行。

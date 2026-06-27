@@ -1,8 +1,15 @@
 import asyncio
 from threading import Event
 
+from agent_gateway.gateways.messaging.base import ChannelAccount
 from agent_gateway.gateways.messaging.manager import ChannelManager
-from agent_gateway.runtime.domain.models import AgentReply, Binding, InboundMessage, RouteResolution
+from agent_gateway.runtime.domain.models import (
+    AgentReply,
+    Binding,
+    InboundMessage,
+    OutboundMessage,
+    RouteResolution,
+)
 from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime, PendingInbound
 
 
@@ -40,8 +47,44 @@ class FakeDeliveryRuntime:
 
 
 class FakeChannel:
+    name = "dummy"
+
+    def receive(self) -> InboundMessage | None:
+        return None
+
+    def send(self, outbound: OutboundMessage) -> bool:
+        del outbound
+        return True
+
     def close(self) -> None:
         pass
+
+
+class BlockingChannel(FakeChannel):
+    def __init__(self) -> None:
+        self.closed = Event()
+        self.receive_entered = Event()
+
+    def receive_batch(self) -> list[InboundMessage]:
+        self.receive_entered.set()
+        self.closed.wait(timeout=2.0)
+        return []
+
+    def close(self) -> None:
+        self.closed.set()
+
+
+class SlowDispatcher(FakeDispatcher):
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.dispatched: list[str] = []
+
+    async def dispatch_inbound(self, inbound: InboundMessage, *, forced_agent_id: str = ""):
+        self.started.set()
+        await self.release.wait()
+        self.dispatched.append(inbound.text)
+        return await super().dispatch_inbound(inbound, forced_agent_id=forced_agent_id)
 
 
 class ConsumingInterceptor:
@@ -93,6 +136,103 @@ def test_channel_runtime_restart_swaps_channels() -> None:
     assert runtime.channels is second
     assert runtime.delivery_runtime is not None
     assert runtime.delivery_runtime.channels is second
+
+
+def test_channel_runtime_restart_drains_queued_messages_before_swap() -> None:
+    first = ChannelManager()
+    second = ChannelManager()
+    dispatcher = SlowDispatcher()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=first,
+        delivery_runtime=FakeDeliveryRuntime(),
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="queued before restart",
+                sender_id="cli-user",
+                channel="cli",
+                account_id="cli-local",
+                peer_id="cli-user",
+            )
+        )
+        await dispatcher.started.wait()
+        restart_task = asyncio.create_task(runtime.restart(second))
+        await asyncio.sleep(0)
+        assert not restart_task.done()
+        dispatcher.release.set()
+        await restart_task
+
+    asyncio.run(_run())
+
+    assert dispatcher.dispatched == ["queued before restart"]
+    assert runtime.channels is second
+
+
+def test_channel_runtime_restart_releases_cli_completion_event() -> None:
+    dispatcher = SlowDispatcher()
+    first = ChannelManager()
+    second = ChannelManager()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=first,
+        delivery_runtime=FakeDeliveryRuntime(),
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        event = Event()
+        await runtime._queue.put(
+            PendingInbound(
+                message=InboundMessage(
+                    text="cli before restart",
+                    sender_id="cli-user",
+                    channel="cli",
+                    account_id="cli-local",
+                    peer_id="cli-user",
+                ),
+                completion_event=event,
+            )
+        )
+        await dispatcher.started.wait()
+        restart_task = asyncio.create_task(runtime.restart(second))
+        await asyncio.sleep(0)
+        assert not event.is_set()
+        dispatcher.release.set()
+        await restart_task
+        assert event.is_set()
+
+    asyncio.run(_run())
+
+    assert dispatcher.dispatched == ["cli before restart"]
+
+
+def test_channel_runtime_restart_closes_and_joins_old_channel_threads() -> None:
+    first = ChannelManager()
+    blocking_channel = BlockingChannel()
+    first.register(blocking_channel, ChannelAccount(channel="dummy", account_id="old"))
+    second = ChannelManager()
+    runtime = ChannelRuntime(
+        dispatcher=FakeDispatcher(),
+        channels=first,
+        delivery_runtime=FakeDeliveryRuntime(),
+        shutdown_timeout_seconds=1.0,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        assert blocking_channel.receive_entered.wait(timeout=1.0)
+        old_threads = list(runtime._threads)
+        await runtime.restart(second)
+        assert blocking_channel.closed.is_set()
+        assert all(not thread.is_alive() for thread in old_threads)
+
+    asyncio.run(_run())
+
+    assert runtime.channels is second
 
 
 def test_channel_runtime_flushes_cli_delivery_before_next_prompt() -> None:

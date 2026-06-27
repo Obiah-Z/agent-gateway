@@ -65,11 +65,13 @@ class ChannelRuntime:
         channels: ChannelManager,
         delivery_runtime: DeliveryRuntime | None = None,
         inbound_interceptors: list[InboundInterceptor] | None = None,
+        shutdown_timeout_seconds: float = 5.0,
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
         self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
         self.delivery_runtime = delivery_runtime  # 出站投递运行时，CLI 场景需要同步 flush。
         self.inbound_interceptors = list(inbound_interceptors or [])  # 入站前置拦截链。
+        self.shutdown_timeout_seconds = shutdown_timeout_seconds  # stop/restart 等待线程和队列 drain 的上限。
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
         self._stop_event = threading.Event()  # 跨线程停止信号。
@@ -103,10 +105,11 @@ class ChannelRuntime:
             self._threads.append(thread)
 
     async def stop(self) -> None:
-        """停止所有通道线程并结束消费循环。
+        """优雅停止所有通道线程并结束消费循环。
 
-        `_queue.put(None)` 是消费者退出哨兵。通道线程通过 `_stop_event` 感知退出，
-        `channels.close_all()` 用于唤醒或终止可能阻塞在远端轮询里的通道。
+        停止顺序很重要：先阻止新采集并关闭通道，再等待旧线程退出，然后 drain 已经
+        入队的消息，最后投递退出哨兵。这样控制面 reload 通道配置时，旧队列里的消息
+        不会因为 consumer 提前退出而丢失。
         """
 
         if not self._running:
@@ -114,9 +117,12 @@ class ChannelRuntime:
         self._running = False
         self._stop_event.set()
         self.channels.close_all()
+        await asyncio.to_thread(self._join_threads, self.shutdown_timeout_seconds)
+        await self._drain_queue(timeout=self.shutdown_timeout_seconds)
         await self._queue.put(None)
         if self._consumer_task is not None:
             await self._consumer_task
+        self._threads = []
 
     async def wait_closed(self) -> None:
         """等待消费任务结束。"""
@@ -131,6 +137,8 @@ class ChannelRuntime:
         `InboundMessage` 放入统一队列，而不再经过通道线程。
         """
 
+        if not self._running:
+            raise RuntimeError("channel runtime is not running")
         await self._queue.put(PendingInbound(message=inbound))
 
     async def restart(self, channels: ChannelManager) -> None:
@@ -149,6 +157,33 @@ class ChannelRuntime:
         self._threads = []
         if was_running:
             await self.start()
+
+    def _join_threads(self, timeout: float) -> None:
+        """等待旧通道采集线程退出，避免 reload 后仍向旧队列投递。"""
+
+        deadline = time.monotonic() + max(0.0, timeout)
+        for thread in list(self._threads):
+            if not thread.is_alive():
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
+
+    async def _drain_queue(self, timeout: float) -> None:
+        """等待入站队列清空，超时后释放 CLI 等待者并继续 shutdown。"""
+
+        try:
+            await asyncio.wait_for(self._queue.join(), timeout=max(0.0, timeout))
+        except asyncio.TimeoutError:
+            self._release_pending_completion_events()
+
+    def _release_pending_completion_events(self) -> None:
+        """兜底释放还停留在队列里的 CLI completion_event。"""
+
+        for item in list(self._queue._queue):  # noqa: SLF001 - shutdown 兜底只能检查底层 deque。
+            if isinstance(item, PendingInbound) and item.completion_event is not None:
+                item.completion_event.set()
 
     def _worker_loop(self, channel_name: str, account_id: str, channel: Any) -> None:
         """在独立线程里轮询具体通道，避免阻塞主事件循环。"""
