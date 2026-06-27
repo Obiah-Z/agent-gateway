@@ -119,6 +119,7 @@ def backfill_local_state_to_repository(
     _backfill_feishu_webhook(settings.feishu_webhook_dir, buffer)
     _backfill_feishu_onboarding(settings.data_dir / "onboarding" / "feishu", buffer)
     _backfill_channel_offsets(settings.data_dir / "channel-state", buffer)
+    _backfill_feishu_card_states(settings.data_dir / "channel-state" / "feishu", buffer)
     _backfill_cron_runs(settings.workspace_root / "cron", buffer)
     _backfill_news_items(settings.data_dir, buffer)
     _backfill_jsonl_dir(settings.events_dir, "runtime_events", buffer)
@@ -487,6 +488,50 @@ def _backfill_channel_offsets(
                 "metadata": {"source": "local-telegram-offset"},
             },
         )
+
+
+def _backfill_feishu_card_states(
+    feishu_state_dir: Path,
+    buffer: _BackfillBuffer,
+) -> None:
+    """把本地飞书有状态卡片 JSON 回填到 PostgreSQL。"""
+
+    if not feishu_state_dir.is_dir():
+        return
+    for account_dir in sorted(path for path in feishu_state_dir.iterdir() if path.is_dir()):
+        cards_dir = account_dir / "cards"
+        if not cards_dir.is_dir():
+            continue
+        for path in sorted(cards_dir.glob("*.json")):
+            row = _read_json_file(path, buffer.report, "feishu_card_states")
+            if row is None:
+                continue
+            card_id = str(row.get("card_id") or path.stem)
+            if not card_id:
+                buffer.report.skip("feishu_card_states")
+                continue
+            buffer.add(
+                "feishu_card_states",
+                {
+                    "card_id": card_id,
+                    "owner_channel": str(row.get("owner_channel", "feishu")),
+                    "owner_account_id": str(row.get("owner_account_id") or account_dir.name),
+                    "peer_id": str(row.get("peer_id", "")),
+                    "message_id": str(row.get("message_id", "")),
+                    "title": str(row.get("title", "")),
+                    "summary": str(row.get("summary", "")),
+                    "template": str(row.get("template", "blue")),
+                    "card_link": str(row.get("card_link", "")),
+                    "blocks": list(row.get("blocks", []) or []),
+                    "structured_blocks": list(row.get("structured_blocks", []) or []),
+                    "actions": list(row.get("actions", []) or []),
+                    "page_size": int(row.get("page_size", 4) or 4),
+                    "page_index": int(row.get("page_index", 0) or 0),
+                    "expanded": bool(row.get("expanded", False)),
+                    "updated_at": float(row.get("updated_at", path.stat().st_mtime) or path.stat().st_mtime),
+                    "metadata": row,
+                },
+            )
 
 
 def _backfill_cron_runs(

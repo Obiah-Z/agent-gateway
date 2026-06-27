@@ -129,6 +129,9 @@ def _column_type(table: str, column: str) -> str:
         "metadata",
         "payload",
         "prompt_policy",
+        "actions",
+        "blocks",
+        "structured_blocks",
         "tags",
         "tool_policy",
     }
@@ -153,11 +156,13 @@ def _column_type(table: str, column: str) -> str:
         "message_count",
         "offset_value",
         "priority",
+        "page_index",
+        "page_size",
         "retry_count",
         "tier",
         "window_seconds",
     }
-    bool_columns = {"bound_is_group", "enabled"}
+    bool_columns = {"bound_is_group", "enabled", "expanded"}
     if column in json_columns:
         return "JSONB NOT NULL DEFAULT '{}'::jsonb"
     if column in float_columns:
@@ -247,6 +252,8 @@ class PostgresReadRepository(StateReadRepository):
         if table == "cron_runs":
             return self._list_generic_rows(table, limit=limit, filters=filters)
         if table == "news_items":
+            return self._list_generic_rows(table, limit=limit, filters=filters)
+        if table == "feishu_card_states":
             return self._list_generic_rows(table, limit=limit, filters=filters)
         sql, params = self._build_list_query(table, limit=limit, filters=filters)
         return self.query(table, sql=sql, params=params)
@@ -386,6 +393,12 @@ class PostgresReadRepository(StateReadRepository):
                     params[key] = value
         if table == "news_items":
             for key in ("store_name", "state", "item_id", "source_id"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{key} = %({key})s")
+                    params[key] = value
+        if table == "feishu_card_states":
+            for key in ("card_id", "owner_account_id", "peer_id", "message_id"):
                 value = str(filters.get(key, ""))
                 if value:
                     clauses.append(f"{key} = %({key})s")
@@ -669,6 +682,7 @@ class PostgresReadRepository(StateReadRepository):
             "channel_offsets",
             "cron_runs",
             "news_items",
+            "feishu_card_states",
         }
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
@@ -695,6 +709,7 @@ class PostgresReadRepository(StateReadRepository):
             "channel_offsets": "key",
             "cron_runs": "id",
             "news_items": "key",
+            "feishu_card_states": "card_id",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -717,6 +732,7 @@ class PostgresReadRepository(StateReadRepository):
             "channel_offsets": "updated_at",
             "cron_runs": "run_at",
             "news_items": "updated_at",
+            "feishu_card_states": "updated_at",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -766,6 +782,8 @@ class PostgresWriteRepository:
             return self._append_cron_run(row)
         if table == "news_items":
             return self._append_news_item(row)
+        if table == "feishu_card_states":
+            return self._append_feishu_card_state(row)
         payload = dict(row)
         primary_key = self._primary_key(table)
         if primary_key not in payload:
@@ -831,6 +849,8 @@ class PostgresWriteRepository:
             return self._upsert_cron_run(row)
         if table == "news_items":
             return self._upsert_news_item(row)
+        if table == "feishu_card_states":
+            return self._upsert_feishu_card_state(row)
         payload = dict(row)
         primary_key = self._primary_key(table)
         if primary_key not in payload:
@@ -870,6 +890,8 @@ class PostgresWriteRepository:
             return self._delete_cron_run(key)
         if table == "news_items":
             return self._delete_news_item(key)
+        if table == "feishu_card_states":
+            return self._delete_feishu_card_state(key)
         sql = f"DELETE FROM {self._table_name(table)} WHERE {self._primary_key(table)} = %(id)s"
         self.query(table, sql=sql, params={"id": key})
         return True
@@ -1148,6 +1170,11 @@ class PostgresWriteRepository:
         """写入新闻简报状态。"""
 
         return self.upsert("news_items", row)
+
+    def write_feishu_card_state(self, row: dict[str, Any]) -> dict[str, Any]:
+        """写入或更新飞书有状态卡片状态。"""
+
+        return self.upsert("feishu_card_states", row)
 
     def write_agent(self, row: dict[str, Any]) -> dict[str, Any]:
         """兼容控制面 Agent 配置写入。"""
@@ -1525,6 +1552,26 @@ class PostgresWriteRepository:
         self.query("news_items", sql="DELETE FROM news_items WHERE key = %(id)s", params={"id": key})
         return True
 
+    def _append_feishu_card_state(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(row)
+        if not payload.get("card_id"):
+            raise ValueError("missing primary key for feishu_card_states: card_id")
+        payload.setdefault("updated_at", time.time())
+        sql = self._build_upsert_sql("feishu_card_states")
+        rows = self.query("feishu_card_states", sql=sql, params={"row": payload})
+        return rows[0] if rows else payload
+
+    def _upsert_feishu_card_state(self, row: dict[str, Any]) -> dict[str, Any]:
+        return self._append_feishu_card_state(row)
+
+    def _delete_feishu_card_state(self, key: str) -> bool:
+        self.query(
+            "feishu_card_states",
+            sql="DELETE FROM feishu_card_states WHERE card_id = %(id)s",
+            params={"id": key},
+        )
+        return True
+
     def _append_config_audit(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row)
         if not payload.get("id"):
@@ -1639,6 +1686,7 @@ class PostgresWriteRepository:
             "channel_offsets",
             "cron_runs",
             "news_items",
+            "feishu_card_states",
         }
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
@@ -1665,6 +1713,7 @@ class PostgresWriteRepository:
             "channel_offsets": "key",
             "cron_runs": "id",
             "news_items": "key",
+            "feishu_card_states": "card_id",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -1983,5 +2032,30 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
             "metadata",
         ),
         indexes=(("store_name", "state"), ("source_id", "updated_at"), ("updated_at",)),
+    ),
+    PostgresTableSpec(
+        name="feishu_card_states",
+        primary_key="card_id",
+        time_column="updated_at",
+        columns=(
+            "card_id",
+            "owner_channel",
+            "owner_account_id",
+            "peer_id",
+            "message_id",
+            "title",
+            "summary",
+            "template",
+            "card_link",
+            "blocks",
+            "structured_blocks",
+            "actions",
+            "page_size",
+            "page_index",
+            "expanded",
+            "updated_at",
+            "metadata",
+        ),
+        indexes=(("owner_account_id", "updated_at"), ("peer_id", "updated_at"), ("message_id",)),
     ),
 )

@@ -37,7 +37,14 @@ class FeishuChannel(Channel):
     _CARD_FALLBACK_ERROR_CODES = {230025, 230054, 230099}
     _PERMANENT_SEND_ERROR_CODES = {99992351}
 
-    def __init__(self, account: ChannelAccount, state_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        account: ChannelAccount,
+        state_dir: Path | None = None,
+        *,
+        state_read_repository: Any = None,
+        state_write_repository: Any = None,
+    ) -> None:
         """根据账号配置初始化 API 客户端、渲染器和状态存储。"""
 
         if httpx is None:
@@ -84,7 +91,11 @@ class FeishuChannel(Channel):
             enable_stateful_cards=self.enable_stateful_cards,
         )
         self._card_state_store = (
-            FeishuCardStateStore(state_dir / "feishu" / self.account_id)
+            FeishuCardStateStore(
+                state_dir / "feishu" / self.account_id,
+                read_backend=state_read_repository,
+                write_backend=state_write_repository,
+            )
             if state_dir is not None
             else None
         )

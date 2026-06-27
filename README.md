@@ -155,6 +155,7 @@ agent-gateway cron-trigger <job_id> --no-flush
 - `channel_offsets`
 - `cron_runs`
 - `news_items`
+- `feishu_card_states`
 
 ### 1. 配置连接
 
@@ -204,6 +205,7 @@ agent-gateway postgres-migrate-local
 - Telegram 轮询 offset 会回填到 PostgreSQL，运行时优先使用数据库 offset 并保留本地 offset 文件兜底。
 - Cron 运行记录会回填到 PostgreSQL，运行时优先写入数据库并保留本地 `cron-runs.jsonl` 兜底。
 - AI Agent 简报和 GitHub Skill 简报的已采集/已推送条目会回填到 PostgreSQL，运行时优先用 `news_items` 去重并继续保留本地 JSONL 兜底。
+- 飞书有状态卡片的分页、展开和收起状态会回填到 PostgreSQL，运行时优先读取数据库并继续保留本地卡片 JSON 兜底。
 - 大量 runtime events 和 metrics 使用批量 upsert，避免逐条启动 `psql`。
 - 本地文件继续作为保底路径，数据库不可用时读路径会回退到本地。
 
@@ -215,7 +217,7 @@ agent-gateway postgres-migrate-local
 GATEWAY_POSTGRES_ENABLED=true
 ```
 
-开启后，控制面和 Dashboard 的会话、任务、投递队列、事件、错误、指标、记忆以及配置读取会优先访问 PostgreSQL；控制面配置保存会先写 PostgreSQL，再写本地 JSON 作为 fallback/audit；记忆召回会优先使用 `memory_entries`，新闻简报去重会优先使用 `news_items`，当数据库无数据或读取失败时，仍回退到本地 JSON/JSONL。
+开启后，控制面和 Dashboard 的会话、任务、投递队列、事件、错误、指标、记忆以及配置读取会优先访问 PostgreSQL；控制面配置保存会先写 PostgreSQL，再写本地 JSON 作为 fallback/audit；记忆召回会优先使用 `memory_entries`，新闻简报去重会优先使用 `news_items`，飞书卡片交互状态会优先使用 `feishu_card_states`，当数据库无数据或读取失败时，仍回退到本地 JSON/JSONL。
 
 ### 5. 验证
 

@@ -157,6 +157,31 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
     telegram_offset_path = settings.data_dir / "channel-state" / "telegram" / "offset-telegram-main.txt"
     telegram_offset_path.parent.mkdir(parents=True, exist_ok=True)
     telegram_offset_path.write_text("12345", encoding="utf-8")
+    feishu_card_path = settings.data_dir / "channel-state" / "feishu" / "feishu-main" / "cards" / "card-1.json"
+    feishu_card_path.parent.mkdir(parents=True, exist_ok=True)
+    feishu_card_path.write_text(
+        json.dumps(
+            {
+                "card_id": "card-1",
+                "owner_channel": "feishu",
+                "owner_account_id": "feishu-main",
+                "peer_id": "oc_chat",
+                "message_id": "om_1",
+                "title": "卡片标题",
+                "summary": "摘要",
+                "template": "blue",
+                "card_link": "",
+                "blocks": ["第一页", "第二页"],
+                "structured_blocks": [],
+                "actions": [],
+                "page_size": 1,
+                "page_index": 1,
+                "expanded": True,
+                "updated_at": 8.0,
+            }
+        ),
+        encoding="utf-8",
+    )
     cron_run_path = settings.workspace_root / "cron" / "cron-runs.jsonl"
     cron_run_path.parent.mkdir(parents=True, exist_ok=True)
     cron_run_path.write_text(
@@ -243,6 +268,7 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
     assert "feishu_webhook_events" in tables
     assert "feishu_onboarding_sessions" in tables
     assert "channel_offsets" in tables
+    assert "feishu_card_states" in tables
     assert "cron_runs" in tables
     assert "news_items" in tables
     assert "runtime_events" in tables
@@ -253,6 +279,7 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
     assert report.written["feishu_webhook_events"] == 1
     assert report.written["feishu_onboarding_sessions"] == 1
     assert report.written["channel_offsets"] == 1
+    assert report.written["feishu_card_states"] == 1
     assert report.written["cron_runs"] == 1
     assert report.written["news_items"] == 2
     assert report.written["runtime_events"] == 1
@@ -296,6 +323,15 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
     ]
     assert offset_rows[0]["key"] == "telegram\x1ftelegram-main"
     assert offset_rows[0]["offset_value"] == 12345
+    card_rows = [
+        row
+        for table, rows, _ in writer.batches
+        if table == "feishu_card_states"
+        for row in rows
+    ]
+    assert card_rows[0]["card_id"] == "card-1"
+    assert card_rows[0]["page_index"] == 1
+    assert card_rows[0]["expanded"] is True
     cron_rows = [
         row
         for table, rows, _ in writer.batches

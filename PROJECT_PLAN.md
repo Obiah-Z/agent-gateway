@@ -452,9 +452,9 @@ delivery-worker
 
 | 子阶段 | 状态 | 主要内容 |
 | --- | --- | --- |
-| 20.5.1 schema 初始化 SQL | 已完成 | 新增 `build_postgres_schema_sql()`，可根据 `POSTGRES_STATE_TABLES` 生成 agents、bindings、profiles、channels、delivery_entries、sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits、feishu_dedup_entries、feishu_webhook_events、feishu_onboarding_sessions、channel_offsets、cron_runs、news_items 建表和索引 SQL。 |
+| 20.5.1 schema 初始化 SQL | 已完成 | 新增 `build_postgres_schema_sql()`，可根据 `POSTGRES_STATE_TABLES` 生成 agents、bindings、profiles、channels、delivery_entries、sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits、feishu_dedup_entries、feishu_webhook_events、feishu_onboarding_sessions、channel_offsets、cron_runs、news_items、feishu_card_states 建表和索引 SQL。 |
 | 20.5.2 schema 初始化命令 | 已完成 | 新增 `agent-gateway postgres-init`；`--print-sql` 只打印 SQL，不构建完整应用；默认通过本机 `psql` 执行初始化。 |
-| 20.5.3 本地回填 dry-run | 已完成 | 新增 `backfill_local_state_to_repository()` 和 `agent-gateway postgres-migrate-local --dry-run`，可扫描本地配置、会话、任务、投递、飞书 Webhook 去重/审计、飞书 onboarding 会话、Telegram offset、Cron 运行记录、新闻简报状态、事件、指标、告警和记忆并输出计数，不写数据库。 |
+| 20.5.3 本地回填 dry-run | 已完成 | 新增 `backfill_local_state_to_repository()` 和 `agent-gateway postgres-migrate-local --dry-run`，可扫描本地配置、会话、任务、投递、飞书 Webhook 去重/审计、飞书 onboarding 会话、飞书卡片状态、Telegram offset、Cron 运行记录、新闻简报状态、事件、指标、告警和记忆并输出计数，不写数据库。 |
 | 20.5.4 本地数据回填 | 已完成 | `postgres-migrate-local` 可把本地 JSON/JSONL 回填到 PostgreSQL 写仓储；配置表使用自然键，运行数据使用稳定主键，飞书审计使用内容 hash 生成稳定主键，便于重复执行。 |
 | 20.5.5 回填测试保护 | 已完成 | 增加 schema 初始化、CLI 入口、dry-run 和代表性运行数据回填测试，确保迁移命令不误启动完整网关。 |
 | 20.5.6 实库回放校验 | 已完成 | 已在本机 PostgreSQL 执行 `postgres-init`、`postgres-migrate-local --dry-run` 和实际回填；约 1.65 万条本地数据通过批量 upsert 在约 4.4 秒完成写入，抽样确认 agents、sessions、tasks、runtime_events、metrics、memory_entries 行数和读仓储查询正常。 |
@@ -466,6 +466,7 @@ delivery-worker
 | 20.5.12 Telegram offset PostgreSQL 化 | 已完成 | 新增 `channel_offsets`；Telegram 轮询 offset 读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 offset 文件作为兜底；迁移命令可回填旧 `channel-state/telegram/offset-*.txt`。 |
 | 20.5.13 Cron 运行记录 PostgreSQL 化 | 已完成 | 新增 `cron_runs`；CronService 运行记录优先写 PostgreSQL，并继续写本地 `workspace/cron/cron-runs.jsonl` 作为兜底；迁移命令可回填旧 Cron 运行日志。 |
 | 20.5.14 新闻简报状态 PostgreSQL 化 | 已完成 | 新增 `news_items`；AI Agent 简报和 GitHub Skill 简报的 collected/seen 状态读取优先 PostgreSQL、写入优先 PostgreSQL，并继续写本地 JSONL 作为兜底；迁移命令可回填旧 `data/news-digest` 和 `data/github-skill-digest`。 |
+| 20.5.15 飞书卡片状态 PostgreSQL 化 | 已完成 | 新增 `feishu_card_states`；飞书有状态卡片分页、展开和收起状态读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地卡片 JSON 作为兜底；迁移命令可回填旧 `data/channel-state/feishu/*/cards/*.json`。 |
 
 ## 9. 推荐执行顺序
 

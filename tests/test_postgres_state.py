@@ -28,6 +28,7 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
         "channel_offsets",
         "cron_runs",
         "news_items",
+        "feishu_card_states",
     ]
     assert POSTGRES_STATE_TABLES[0].primary_key == "id"
     assert "tool_policy" in POSTGRES_STATE_TABLES[0].columns
@@ -48,6 +49,7 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
     assert "offset_value" in POSTGRES_STATE_TABLES[15].columns
     assert "output_preview" in POSTGRES_STATE_TABLES[16].columns
     assert "item_id" in POSTGRES_STATE_TABLES[17].columns
+    assert "page_index" in POSTGRES_STATE_TABLES[18].columns
 
 
 def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
@@ -63,6 +65,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE TABLE IF NOT EXISTS "channel_offsets"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "cron_runs"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "news_items"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "feishu_card_states"' in sql
     assert '"metadata" JSONB NOT NULL DEFAULT' in sql
     assert 'PRIMARY KEY ("id")' in sql
     assert 'PRIMARY KEY ("key")' in sql
@@ -74,6 +77,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE INDEX IF NOT EXISTS "idx_channel_offsets_channel_account_id"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_cron_runs_job_id_run_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_news_items_store_name_state"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_card_states_owner_account_id_updated_at"' in sql
 
 
 def test_initialize_postgres_schema_runs_generated_sql(monkeypatch) -> None:
@@ -427,6 +431,42 @@ def test_postgres_write_news_item_upserts_row(monkeypatch) -> None:
 
     assert captured[0][0] == "news_items"
     assert row["item_id"] == "item-1"
+
+
+def test_postgres_write_feishu_card_state_upserts_row(monkeypatch) -> None:
+    captured = []
+
+    def fake_upsert(self, table, row):
+        captured.append((table, row))
+        return row
+
+    monkeypatch.setattr(PostgresWriteRepository, "upsert", fake_upsert)
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
+
+    row = repo.write_feishu_card_state(
+        {
+            "card_id": "card-1",
+            "owner_channel": "feishu",
+            "owner_account_id": "feishu-main",
+            "peer_id": "oc_chat",
+            "message_id": "om_1",
+            "title": "Card",
+            "summary": "Summary",
+            "template": "blue",
+            "card_link": "",
+            "blocks": ["block"],
+            "structured_blocks": [],
+            "actions": [],
+            "page_size": 4,
+            "page_index": 1,
+            "expanded": False,
+            "updated_at": 1.0,
+            "metadata": {},
+        }
+    )
+
+    assert captured[0][0] == "feishu_card_states"
+    assert row["card_id"] == "card-1"
 
 
 def test_postgres_write_reserve_task_uses_atomic_update(monkeypatch) -> None:

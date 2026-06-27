@@ -12,7 +12,38 @@ import base64
 import hashlib
 
 
-def _build_channel(*, state_dir: Path | None = None, **config_overrides):
+class FakeCardStateRepository:
+    enabled = True
+
+    def __init__(self, rows=None, *, fail: bool = False) -> None:
+        self.rows = list(rows or [])
+        self.fail = fail
+        self.written: list[dict[str, object]] = []
+
+    def get(self, table: str, key: str):
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        if table != "feishu_card_states":
+            return None
+        for row in self.rows:
+            if str(row.get("card_id", "")) == key:
+                return row
+        return None
+
+    def write_feishu_card_state(self, row: dict[str, object]):
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        self.written.append(dict(row))
+        return row
+
+
+def _build_channel(
+    *,
+    state_dir: Path | None = None,
+    state_read_repository=None,
+    state_write_repository=None,
+    **config_overrides,
+):
     account = ChannelAccount(
         channel="feishu",
         account_id="feishu-main",
@@ -25,7 +56,12 @@ def _build_channel(*, state_dir: Path | None = None, **config_overrides):
             **config_overrides,
         },
     )
-    return FeishuChannel(account, state_dir)
+    return FeishuChannel(
+        account,
+        state_dir,
+        state_read_repository=state_read_repository,
+        state_write_repository=state_write_repository,
+    )
 
 
 def test_feishu_channel_parse_event_rejects_wrong_verification_token() -> None:
@@ -806,6 +842,89 @@ def test_feishu_channel_handle_control_card_action_updates_stateful_card(tmp_pat
         for behavior in button.get("behaviors", [])
         if behavior.get("type") == "callback"
     )
+
+
+def test_feishu_channel_loads_card_state_from_postgres_first(tmp_path: Path) -> None:
+    repo = FakeCardStateRepository(
+        [
+            {
+                "card_id": "card-db",
+                "owner_channel": "feishu",
+                "owner_account_id": "feishu-main",
+                "peer_id": "oc_chat",
+                "message_id": "om_db",
+                "title": "数据库卡片",
+                "summary": "summary",
+                "template": "blue",
+                "card_link": "",
+                "blocks": ["第一页", "第二页"],
+                "structured_blocks": [],
+                "actions": [],
+                "page_size": 1,
+                "page_index": 1,
+                "expanded": True,
+                "updated_at": 1.0,
+                "metadata": {},
+            }
+        ]
+    )
+    channel = _build_channel(
+        state_dir=tmp_path,
+        enable_stateful_cards=True,
+        state_read_repository=repo,
+    )
+
+    state = channel.load_card_state("card-db")
+
+    assert state is not None
+    assert state.message_id == "om_db"
+    assert state.page_index == 1
+    assert state.expanded is True
+
+
+def test_feishu_channel_card_state_writes_postgres_and_keeps_local_fallback(tmp_path: Path) -> None:
+    repo = FakeCardStateRepository()
+    channel = _build_channel(
+        state_dir=tmp_path,
+        enable_stateful_cards=True,
+        state_write_repository=repo,
+    )
+    state = channel._build_send_payloads(  # type: ignore[attr-defined]
+        OutboundMessage(
+            channel="feishu",
+            to="oc_chat",
+            text="# 长回复\n\n" + "\n\n".join(f"段落 {index}" for index in range(1, 7)),
+            metadata={"receive_id_type": "chat_id"},
+        )
+    )[0].card_state
+    assert state is not None
+
+    channel.save_card_state(state)
+
+    assert repo.written[0]["card_id"] == state.card_id
+    local_path = tmp_path / "feishu" / "feishu-main" / "cards" / f"{state.card_id}.json"
+    assert local_path.exists()
+
+
+def test_feishu_channel_card_state_keeps_local_fallback_when_postgres_fails(tmp_path: Path) -> None:
+    channel = _build_channel(
+        state_dir=tmp_path,
+        enable_stateful_cards=True,
+        state_write_repository=FakeCardStateRepository(fail=True),
+    )
+    state = channel._build_send_payloads(  # type: ignore[attr-defined]
+        OutboundMessage(
+            channel="feishu",
+            to="oc_chat",
+            text="# 长回复\n\n" + "\n\n".join(f"段落 {index}" for index in range(1, 7)),
+            metadata={"receive_id_type": "chat_id"},
+        )
+    )[0].card_state
+    assert state is not None
+
+    channel.save_card_state(state)
+
+    assert channel.load_card_state(state.card_id) is not None
 
 
 def test_feishu_channel_renders_structured_json_blocks_as_components(

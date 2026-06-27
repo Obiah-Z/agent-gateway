@@ -50,5 +50,10 @@ def _build_channel(
             write_backend=state_write_repository,
         )
     if account.channel == "feishu":
-        return FeishuChannel(account, state_dir)
+        return FeishuChannel(
+            account,
+            state_dir,
+            state_read_repository=state_read_repository,
+            state_write_repository=state_write_repository,
+        )
     return None
