@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_gateway.runtime.execution.roles import parse_runtime_roles
+
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - optional during bootstrap
@@ -50,6 +52,7 @@ class GatewaySettings:
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     model_id: str = "deepseek-v4-pro"
+    runtime_roles: tuple[str, ...] = ("all",)
     host: str = "127.0.0.1"
     port: int = 8765
     workspace_root: Path = DEFAULT_WORKSPACE_ROOT
@@ -157,6 +160,7 @@ class GatewaySettings:
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", ""),
             model_id=os.getenv("MODEL_ID", "claude-opus-4-6"),
+            runtime_roles=parse_runtime_roles(os.getenv("GATEWAY_RUNTIME_ROLES", "all")),
             host=os.getenv("GATEWAY_HOST", "127.0.0.1"),
             port=int(os.getenv("GATEWAY_PORT", "8765")),
             workspace_root=resolve_env_path(

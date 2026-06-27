@@ -41,6 +41,7 @@ from agent_gateway.runtime.execution.loop import AgentLoopRunner
 from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import ProfileManager, ResilienceRunner
+from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 from agent_gateway.gateways.control.websocket_server import GatewayServer
@@ -241,6 +242,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
 async def serve(app: GatewayApplication) -> None:
     """启动网关所有常驻服务，并在退出时统一回收。"""
 
+    role_plan = build_runtime_role_plan(app.settings.runtime_roles)
     onboarding_store = FeishuOnboardingSessionStore(app.settings.data_dir / "onboarding" / "feishu")
     onboarding_service = FeishuOnboardingService(
         store=onboarding_store,
@@ -302,31 +304,41 @@ async def serve(app: GatewayApplication) -> None:
             ),
             onboarding=onboarding_service,
         )
-        if app.settings.dashboard_enabled
+        if app.settings.dashboard_enabled and role_plan.dashboard
         else None
     )
     started: list[object] = []
     try:
-        await server.start()
-        started.append(server)
-        await app.delivery_runtime.start()
-        started.append(app.delivery_runtime)
-        await channel_runtime.start()
-        started.append(channel_runtime)
-        await app.autonomy_runtime.start()
-        started.append(app.autonomy_runtime)
-        await app.metrics_runtime.start()
-        started.append(app.metrics_runtime)
-        await app.alerts_runtime.start()
-        started.append(app.alerts_runtime)
-        await feishu_webhook.start()
-        started.append(feishu_webhook)
-        await feishu_long_connection.start()
-        started.append(feishu_long_connection)
+        if role_plan.control:
+            await server.start()
+            started.append(server)
+        if role_plan.delivery:
+            await app.delivery_runtime.start()
+            started.append(app.delivery_runtime)
+        if role_plan.inbound:
+            await channel_runtime.start()
+            started.append(channel_runtime)
+        if role_plan.scheduler:
+            await app.autonomy_runtime.start()
+            started.append(app.autonomy_runtime)
+        if role_plan.observability:
+            await app.metrics_runtime.start()
+            started.append(app.metrics_runtime)
+            await app.alerts_runtime.start()
+            started.append(app.alerts_runtime)
+        if role_plan.inbound:
+            await feishu_webhook.start()
+            started.append(feishu_webhook)
+            await feishu_long_connection.start()
+            started.append(feishu_long_connection)
         if dashboard_server is not None:
             await dashboard_server.start()
             started.append(dashboard_server)
-        print(f"Gateway running on ws://{app.settings.host}:{app.settings.port}")
+        print(f"Gateway runtime roles: {role_plan.role_label}")
+        if role_plan.control:
+            print(f"Gateway control running on ws://{app.settings.host}:{app.settings.port}")
+        else:
+            print("Gateway control disabled for this runtime role")
         if dashboard_server is not None:
             print(
                 "Dashboard running on "
@@ -340,20 +352,23 @@ async def serve(app: GatewayApplication) -> None:
             if stop is not None:
                 await stop()
         raise
-    webhook_paths = feishu_webhook.list_webhook_paths()
-    if webhook_paths:
-        for account_id, path in webhook_paths:
+    if role_plan.inbound:
+        webhook_paths = feishu_webhook.list_webhook_paths()
+        if webhook_paths:
+            for account_id, path in webhook_paths:
+                print(
+                    "Feishu webhook on "
+                    f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
+                    f"{path} account={account_id}"
+                )
+        else:
             print(
                 "Feishu webhook on "
                 f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
-                f"{path} account={account_id}"
+                f"{app.settings.feishu_webhook_path}"
             )
     else:
-        print(
-            "Feishu webhook on "
-            f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
-            f"{app.settings.feishu_webhook_path}"
-        )
+        print("Inbound channels disabled for this runtime role")
     print(f"Loaded channels: {', '.join(app.channel_manager.list_channels()) or '(none)'}")
     print(
         "Loaded tools: "
@@ -364,16 +379,10 @@ async def serve(app: GatewayApplication) -> None:
     try:
         await asyncio.Event().wait()
     finally:
-        if dashboard_server is not None:
-            await dashboard_server.stop()
-        await feishu_long_connection.stop()
-        await app.metrics_runtime.stop()
-        await app.alerts_runtime.stop()
-        await app.autonomy_runtime.stop()
-        await channel_runtime.stop()
-        await app.delivery_runtime.stop()
-        await feishu_webhook.stop()
-        await server.stop()
+        for component in reversed(started):
+            stop = getattr(component, "stop", None)
+            if stop is not None:
+                await stop()
 
 
 async def trigger_cron_once(

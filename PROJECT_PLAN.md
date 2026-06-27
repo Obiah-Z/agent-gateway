@@ -1,46 +1,50 @@
 # AI Agent Gateway 项目计划
 
+更新时间：2026-06-27
+
 ## 1. 项目定位
 
-`gateway/` 是一个基于 Python 的 AI Agent Gateway 智能体网关系统，目标是把早期代码片段持续演进为可运行、可维护、可扩展的智能体运行框架。
+`gateway/` 是一个基于 Python 的 AI Agent Gateway 智能体网关系统，目标是把多轮对话、工具调用、多通道接入、主动任务、可靠投递和运行观测整合成一个可本地运行、可持续扩展的智能体运行框架。
 
-系统面向以下核心场景：
+当前路线坚持：
+
+- 本地优先：优先保证单机长期稳定运行。
+- 结构清晰：按通道、路由、执行、投递、状态、观测拆分边界。
+- 逐步生产化：先补齐可靠性、观测、安全和治理，再考虑数据库、分布式和复杂部署。
+
+核心场景：
 
 - 多轮对话与 Agent Loop。
 - Tool Calling 与外部执行能力。
-- 多通道接入与消息路由。
+- CLI、飞书、Telegram 等多通道接入。
 - 会话持久化、上下文管理与记忆注入。
 - Heartbeat、Cron、新闻简报等主动任务。
 - 可靠投递、失败重试、并发控制与弹性恢复。
-- 飞书接入、本地控制面、Dashboard 运维面板。
-- 运行事件流、指标快照、趋势与告警。
-
-当前项目应继续坚持“本地优先、结构清晰、可逐步生产化”的路线。短期内不急于引入数据库、分布式锁或复杂部署系统，优先补齐安全边界、配置治理、数据治理和任务状态管理。
+- Dashboard、WebSocket 控制面、运行事件流、指标和告警。
 
 ## 2. 当前架构
 
-核心目录职责如下：
-
 | 目录 | 职责 |
 | --- | --- |
-| `agent_gateway/core/` | 领域层，定义 Agent、消息模型、路由和 ID 规范。 |
-| `agent_gateway/application/` | 应用层，承载 Agent Loop、Dispatcher、主动任务、控制面、投递运行时、指标和告警运行时。 |
-| `agent_gateway/interfaces/` | 外部接口层，承载 WebSocket 控制面、飞书 Webhook 和飞书长连接。 |
-| `agent_gateway/channels/` | 通道适配层，封装 CLI、Telegram、Feishu 等消息通道。 |
-| `agent_gateway/delivery/` | 可靠投递队列，负责消息预写、重试和失败落盘。 |
-| `agent_gateway/intelligence/` | Prompt、记忆、技能和 Agent 局部配置注入。 |
+| `agent_gateway/runtime/domain/` | 领域模型、Agent 配置、路由、ID 规范和消息结构。 |
+| `agent_gateway/runtime/execution/` | Agent Loop、Dispatcher、ChannelRuntime、DeliveryRuntime、Cron/Heartbeat、指标与告警运行时。 |
+| `agent_gateway/runtime/state/` | 会话、可靠投递队列、事件、指标、告警等本地状态存储。 |
+| `agent_gateway/runtime/observability/` | Runtime events、metrics、alerts 等观测模型。 |
+| `agent_gateway/gateways/messaging/` | CLI、Telegram 等消息通道适配。 |
+| `agent_gateway/gateways/feishu/` | 飞书 Webhook、长连接、发送通道和 onboarding。 |
+| `agent_gateway/gateways/control/` | WebSocket JSON-RPC 控制面。 |
+| `agent_gateway/ai/context/` | Prompt、记忆、技能和上下文装配。 |
+| `agent_gateway/ai/tools/` | 工具注册表和内置工具。 |
+| `agent_gateway/ai/news/` | AI Agent 新闻采集、去重和摘要生成。 |
 | `agent_gateway/monitoring/` | Dashboard 静态页面和本地运维视图。 |
-| `agent_gateway/observability/` | 运行事件、错误、指标和告警存储模型。 |
-| `agent_gateway/news/` | AI Agent 新闻采集、去重和摘要生成。 |
-| `agent_gateway/sessions/` | JSONL 会话存储和上下文保护。 |
-| `agent_gateway/tools/` | 工具注册表和内置工具。 |
-| `workspace/` | Prompt、记忆、技能、Cron 和 Agent 局部工作区。 |
 | `config/` | agents、bindings、channels、profiles 等静态配置。 |
-| `data/` | 会话、投递队列、事件、指标、告警等运行期数据。 |
+| `workspace/` | Prompt、记忆、skills、Cron、Heartbeat、新闻源和 Agent 局部工作区。 |
+| `data/` | sessions、delivery queue、events、metrics、alerts 等运行期数据。 |
+| `tests/` | 自动化测试。 |
 
-说明：顶层兼容层 `agent_gateway/agents.py`、`router.py`、`models.py`、`ids.py` 已移除。新代码应直接从 `agent_gateway.core` 或具体子模块导入。
+说明：旧顶层兼容层 `agent_gateway/agents.py`、`router.py`、`models.py`、`ids.py` 已移除。新代码应直接从具体子模块导入。
 
-## 3. 当前运行入口
+## 3. 运行入口与验证基线
 
 本地启动：
 
@@ -59,7 +63,7 @@ agent-gateway serve
 | Dashboard | `http://127.0.0.1:8780` |
 | 飞书扫码接入页 | `http://127.0.0.1:8780/onboarding/feishu` |
 
-进入下一阶段前建议执行：
+常规验证：
 
 ```bash
 cd ~/Desktop/claw0/gateway
@@ -67,150 +71,85 @@ cd ~/Desktop/claw0/gateway
 ./.venv/bin/python -m pytest tests -q
 ```
 
-当前最近验证基线：`168 passed`。
+最近验证基线：`195 passed`。
 
-## 4. 已完成能力
+## 4. 当前能力基线
 
 | 能力方向 | 状态 | 说明 |
 | --- | --- | --- |
 | Agent Loop | 已完成 | 支持 Anthropic Messages API 兼容调用、`stop_reason` 驱动的多轮执行和 tool calling。 |
-| Tool Calling | 已完成 | 基于 dispatch table 管理 bash、文件读写、记忆检索、Web Search 等工具。 |
+| Tool Calling | 已完成 | 基于 dispatch table 管理 bash、文件读写、记忆检索、Web Search、GitHub 分析等工具。 |
 | 会话持久化 | 已完成 | 基于 JSONL 保存 transcript，支持历史重放和上下文保护。 |
 | 路由系统 | 已完成 | 基于 `bindings.json` 将 channel、account、peer、session 路由到指定 Agent。 |
 | 配置控制面 | 已完成 | 支持 agents、bindings、channels、profiles 的查看、修改、保存和 reload。 |
 | 记忆与技能 | 已完成 | 支持 `MEMORY.md`、daily memory、`SKILL.md` 扫描和 Agent 局部 prompt 覆盖。 |
-| 主动任务 | 已完成 | Heartbeat、Cron 和 AI Agent 每日简报均接入统一执行链。 |
+| 主动任务 | 已完成 | Heartbeat、Cron、AI Agent 简报和自用 Skill 可接入统一执行链。 |
 | 可靠投递 | 已完成 | 普通回复、heartbeat、cron 输出先入本地队列，再由后台 runtime 发送、重试和失败落盘。 |
-| 并发控制 | 已完成 | 支持命名 lane，保证同一会话或任务维度的串行执行。 |
-| 飞书 Webhook | 已完成 | 支持 challenge、加密事件、签名校验、时间窗校验、事件去重和审计日志。 |
-| 飞书长连接 | 已完成 | 支持通过 `lark-cli event consume` 消费事件，适合本地开发和单机部署。 |
-| 飞书发送 | 已完成 | 支持 SDK/HTTP 发送和 `lark-cli` 发送模式。 |
-| 飞书扫码接入 | 已完成 | 支持 `/onboarding/feishu` 页面、绑定码、机器人会话入口和自动创建个人 Agent。 |
-| AI Agent 简报 | 已完成 | 支持 RSS、官网 HTML、GitHub Releases、arXiv 等来源采集和每日摘要推送。 |
-| Dashboard | 已完成 | 支持健康检查、运行态快照、投递队列、Cron、飞书接入、事件、错误、指标和告警查看。 |
+| 入站并发 | 基本完成 | ChannelRuntime 已 lane 化，支持全局并发上限、背压、长任务提示和 Dashboard 观测。 |
+| 飞书接入 | 已完成 | 支持 Webhook、长连接、签名校验、事件去重、onboarding 和消息发送。 |
+| Dashboard | 已完成 | 支持健康检查、运行态、入站队列、投递队列、Cron、事件、错误、记忆、指标和告警查看。 |
 | 运行事件流 | 已完成 | 支持 runtime event JSONL、`events.tail`、`errors.recent` 和 Dashboard 最近链路视图。 |
 | 指标与告警 | 已完成 | 支持 metrics snapshot、趋势视图、告警规则、告警历史和飞书告警投递。 |
-| 架构分层 | 已完成 | 已移除兼容层，主实现归入 `core/application/interfaces` 等分层目录。 |
 
-## 5. 已完成阶段回顾
+## 5. 阶段状态总览
 
-### Phase 1：基础工程骨架
+| 阶段 | 状态 | 主题 |
+| --- | --- | --- |
+| Phase 1 | 已完成 | 基础工程骨架、包结构、命令入口、基础 Agent Loop。 |
+| Phase 2 | 已完成 | 会话、上下文、配置和运行资产。 |
+| Phase 3 | 已完成 | 多通道、消息路由和 WebSocket 控制面。 |
+| Phase 4 | 已完成 | 记忆、技能和 Agent Manifest。 |
+| Phase 5 | 已完成 | 主动任务与可靠投递。 |
+| Phase 6 | 已完成 | 弹性、命名 lane 和 CLI 交互稳定性。 |
+| Phase 7 | 已完成 | 飞书生产化接入。 |
+| Phase 8 | 已完成 | Dashboard 与运行态状态。 |
+| Phase 9 | 已完成 | 飞书扫码接入与用户 onboarding。 |
+| Phase 10 | 已完成 | AI Agent 每日简报。 |
+| Phase 11 | 已完成 | 架构分层和兼容层移除。 |
+| Phase 12 | 待实现 | Dashboard 鉴权与安全边界。 |
+| Phase 13 | 已完成 | 运行事件流与最近错误视图。 |
+| Phase 13 增强 | 待实现 | 模型调用事件与错误分类。 |
+| Phase 14 | 已完成 | 指标快照、趋势与告警。 |
+| Phase 15 | 基本完成 | ChannelRuntime lane 化、入站背压和可观测性。 |
+| Phase 16 | 待实现 | Agent 权限预览与配置治理。 |
+| Phase 17 | 待实现 | 会话与记忆治理。 |
+| Phase 18 | 待实现 | 多 Agent 协作与任务实例状态机。 |
+| Phase 19 | 待实现 | 生产部署形态。 |
+| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级。 |
 
-- 建立 `agent_gateway/` Python 包结构。
-- 建立 `pyproject.toml` 和 `agent-gateway` 命令入口。
-- 接入 Anthropic Messages API 兼容调用。
-- 建立基础 Agent Loop 和 tool calling 闭环。
+## 6. 近期完成：Phase 15
 
-### Phase 2：会话、上下文与配置
+### 目标
 
-- 将会话存储改为 JSONL transcript。
-- 实现历史重放和上下文保护。
-- 引入 `.env`、`config/*.json`、`workspace/` 三层配置与运行资产。
-- 建立 profiles、agents、bindings、channels 配置模型。
+- 将“所有入站消息单消费者串行处理”升级为“统一入口、按 lane 分发、不同 lane 并发处理”。
+- 避免飞书、CLI、Telegram、Webhook、长连接等通道互相阻塞。
+- 保持同一 lane 内顺序稳定。
+- 在控制面和 Dashboard 中看到入站积压、活跃 lane 和并发状态。
 
-### Phase 3：多通道、路由与控制面
+### 已完成内容
 
-- 完成 CLI、Telegram、Feishu 通道抽象。
-- 完成统一 `InboundMessage` 和 dispatcher。
-- 完成 `bindings.json` 驱动的消息路由。
-- 接入 WebSocket JSON-RPC 控制面。
+| 子阶段 | 状态 | 完成内容 |
+| --- | --- | --- |
+| 15.1 graceful restart | 已完成 | `ChannelRuntime.stop/restart` 支持停止采集、关闭旧通道、等待旧线程退出、drain 队列后再停止 consumer；CLI `completion_event` 可释放。 |
+| 15.2 lane key 规则 | 已完成 | 新增 `build_preroute_lane_key()`、`build_inbound_lane_key()`，`PendingInbound` 暴露路由前 lane key。 |
+| 15.3 lane dispatcher | 已完成 | 全局入站队列只做接收和粗分发；每个 lane 独立 worker 串行处理，不同 lane 可并发。 |
+| 15.4 全局并发上限 | 已完成 | 新增 `GATEWAY_INBOUND_MAX_CONCURRENT_LANES`，默认 4，通过 `asyncio.Semaphore` 限制同时运行 lane 数。 |
+| 15.5 入站背压 | 主目标完成 | 新增 `GATEWAY_INBOUND_MAX_QUEUE_SIZE`、`GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE`，超限拒绝并提示用户稍后重试；低优先级延迟队列迁移到 Phase 18。 |
+| 15.6 长任务提示 | 主目标完成 | 新增 `GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS`，超过阈值先发送“继续处理中”提示；真正后台化迁移到 Phase 18。 |
+| 15.7 运行指标 | 已完成 | `ChannelRuntime.stats()` 暴露全局队列、lane 队列、运行中任务、活跃 lane、最老等待时间和并发上限。 |
+| 15.8 Dashboard 视图 | 已完成 | Dashboard 新增“入站队列与车道”面板，运行态快照新增“入站队列”卡片。 |
+| 15.9 控制面状态 | 已完成 | `runtime.status` 新增 `inbound` 字段，`health.check` 增加 `inbound.backlog` 检查。 |
+| 15.10 测试 | 已完成 | 覆盖 restart 不丢消息、旧线程退出、同 lane 串行、不同 lane 并发、背压、长任务提示、stats 和控制面状态。 |
 
-### Phase 4：记忆、技能与 Agent Manifest
+### Phase 15 剩余增强
 
-- 接入 `MEMORY.md` 和 daily memory。
-- 接入 `workspace/skills/*/SKILL.md`。
-- 支持 `workspace/agents/<agent_id>/` 局部 prompt 覆盖。
-- 支持 agent 级 tool policy、memory policy、prompt policy 和 capability tags。
+这些增强不阻塞 Phase 15 主目标，建议移动到后续阶段处理：
 
-### Phase 5：主动任务与可靠投递
+- `per-agent` 精准并发上限：需要基于路由后的 Agent/session 信息做调度，建议并入 Phase 18 的任务实例状态机。
+- 低优先级延迟队列：当前超限策略是拒绝，尚未实现 Cron/Heartbeat 延迟和实时用户消息优先级。
+- 真正后台化长任务：当前只是先发“继续处理中”提示，任务仍占用原 lane。释放 lane、后台状态追踪和取消/重试应并入 Phase 18。
 
-- Heartbeat 和 Cron 接入统一执行链。
-- 所有出站消息改为先写入 delivery queue。
-- 后台 `DeliveryRuntime` 负责实际发送、重试和失败落盘。
-- 控制面支持 delivery stats、list、retry、discard、flush。
-
-### Phase 6：弹性、并发与稳定性
-
-- 引入 resilience runner，支持 profile 轮换、失败分类和 overflow 处理骨架。
-- 引入命名 lane，避免同一会话并发踩踏。
-- CLI 交互改为等待当前回复处理完成后再放开下一次输入。
-
-### Phase 7：飞书生产化接入
-
-- 完成飞书 Webhook challenge、解密、签名校验、时间窗校验。
-- 完成事件去重和审计日志。
-- 支持多飞书账号路由。
-- 支持飞书卡片渲染、文本分页和投递状态记录。
-- 支持 `lark-cli` 发送模式。
-- 支持飞书长连接模式，降低本地开发对公网回调地址的依赖。
-
-### Phase 8：Dashboard 与运行态状态
-
-- 新增本地 Dashboard 静态页面。
-- 支持健康检查、运行态状态、投递队列、Cron 任务和飞书接入状态查看。
-- 支持在 Dashboard 中执行投递 retry、discard、flush 和 Cron 手动触发。
-- Dashboard 默认仅监听 `127.0.0.1`，避免未鉴权情况下暴露公网。
-
-### Phase 9：飞书扫码接入与用户 Onboarding
-
-- 新增 `/onboarding/feishu` 页面。
-- 支持短期绑定码。
-- 支持机器人打开链接扫码进入会话。
-- 用户首次私聊机器人后，可自动创建个人 Agent 和路由绑定。
-- 支持群聊自动接入的基础配置。
-
-### Phase 10：AI Agent 每日简报
-
-- 新增 `news/` 模块。
-- 支持 RSS、HTML、GitHub Releases、arXiv 等来源采集。
-- 支持已见条目去重。
-- 支持定时生成 AI Agent 相关新闻摘要并通过主动投递链路推送。
-- 新增 `workspace/agent-news-sources.json` 作为新闻源配置。
-
-### Phase 11：架构分层重构
-
-- 将领域模型迁移到 `core/`。
-- 将应用编排迁移到 `application/`。
-- 将外部接入迁移到 `interfaces/`。
-- 移除旧 `runtime/` 兼容层。
-- 移除 `agent_gateway/agents.py`、`router.py`、`models.py`、`ids.py` 顶层兼容层。
-- README 和架构文档已同步新的目录结构和运行方式。
-
-### Phase 13：运行事件流与最近错误视图
-
-- 新增 `observability/` 模块和 `RuntimeEventStore`。
-- 定义统一 runtime event JSONL schema。
-- 接入关键链路事件：
-  - `inbound.received`
-  - `route.resolved`
-  - `agent.turn.started/completed/failed`
-  - `tool.call.started/completed/failed`
-  - `delivery.enqueued/sent/failed`
-  - `cron.triggered/completed/failed`
-  - `feishu.event.accepted/ignored/rejected/error`
-- 控制面新增 `events.tail` 和 `errors.recent`。
-- Dashboard 新增最近事件、最近错误和最近链路视图。
-- 支持按 `correlation_id` 聚合链路。
-- `events.tail` 支持 `component`、`status`、`correlation_id`、`agent_id`、`channel`、`job_id`、`delivery_id` 过滤。
-- 事件文件按日期轮转，并通过 `GATEWAY_EVENTS_RETENTION_DAYS` 控制保留期。
-
-### Phase 14：指标快照、趋势与告警
-
-- 新增 `agent_gateway/observability/metrics.py`。
-- 定义 metrics snapshot JSONL schema。
-- 按日期写入 `data/metrics/metrics-YYYY-MM-DD.jsonl`。
-- 新增后台 `MetricsRuntime`，采集 delivery、lane、Cron、profiles、事件错误等指标。
-- 控制面新增 `metrics.snapshot`、`metrics.tail`、`metrics.summary`。
-- Dashboard 新增指标趋势面板。
-- 新增 `AlertRule`、`AlertState`、`AlertStore`。
-- 新增 `AlertsRuntime`，支持阈值、持续时间、冷却、恢复和通知。
-- 内置 delivery backlog、delivery failed、cron failures、profiles unavailable、feishu signature rejected、lane backlog 等规则。
-- 告警通知复用可靠投递链路，可发送到指定飞书会话。
-- 控制面新增 `alerts.active` 和 `alerts.history`。
-- Dashboard 新增当前告警和告警历史视图。
-- Dashboard 各列表类面板默认最多展示 6 条，多余内容折叠。
-
-## 6. 当前主要边界
+## 7. 当前主要边界
 
 - 当前仍是单进程本地运行时，尚未引入数据库、分布式锁或多实例协调。
 - Dashboard 默认无鉴权，仅适合本机访问，不应直接暴露公网。
@@ -218,100 +157,14 @@ cd ~/Desktop/claw0/gateway
 - Agent 权限模型已有 tool policy 和 capability tags，但缺少最终权限预览和强校验报告。
 - 会话与记忆已经可持久化，但长期运行后的归档、删除、复审和压缩治理仍不足。
 - 飞书长连接依赖本机 `lark-cli` 配置和子进程消费，适合本地/单机部署；生产多实例仍建议优先 Webhook。
-- 新闻简报能力已可运行，但来源质量评估、内容去重精度和摘要可解释性仍有提升空间。
 - 指标与告警已建立本地闭环，但没有外部 TSDB、Prometheus 或集中日志系统。
+- 当前 JSONL、内存队列和本地文件锁适合单机闭环，不适合多实例共享状态、横向扩容和集中查询。
 
-## 7. 后续路线图
-
-### Phase 15：ChannelRuntime Lane 化与入站背压
-
-状态：进行中，P0 优先级，建议优先于 Dashboard 鉴权推进。
-
-目标：
-
-- 将当前“所有通道入站消息进入单一消费者串行处理”的模型，升级为“统一入口、按会话/Agent 分 lane 并发执行”。
-- 避免飞书、CLI、Telegram、Webhook、长连接等通道互相阻塞。
-- 保持同一会话内顺序一致，同时允许不同会话、不同 Agent、不同通道并发处理。
-
-背景：
-
-- 当前 `ChannelRuntime` 使用一个全局 `asyncio.Queue` 和一个 `_consume()` 任务。
-- 这种设计简单可靠，但一条慢消息会阻塞后续所有消息。
-- 典型风险包括：飞书长任务拖慢 CLI、GitHub 仓库分析阻塞普通聊天、Telegram 批量消息影响飞书响应。
-- 当前 `restart()` 会先 `stop()` 再替换通道；`stop()` 直接向队列写入 `None` 退出哨兵，存在未消费消息被留在旧队列或旧通道线程继续投递后无人消费的风险。
-
-阶段进展：
-
-1. Phase 15.1：`ChannelRuntime.restart()` graceful drain。已完成。
-   - `stop()` 改为先停止接收新消息，再关闭通道并等待旧通道线程退出。
-   - 旧线程退出后等待当前入站队列 drain 完成，再投递 consumer 退出哨兵。
-   - CLI `completion_event` 在正常处理、失败处理和 restart drain 场景下都会释放。
-   - `ingest_external()` 在 runtime 未运行时拒绝入队，避免消息进入无人消费的旧队列。
-   - 新增回归测试覆盖：restart 前已入队消息不丢、CLI completion_event 可释放、旧通道线程会被关闭并 join。
-2. Phase 15.2：定义入站 lane key 规则。已完成。
-   - 优先使用 `agent_id + session_key`。
-   - 路由前可临时使用 `channel + account_id + peer_id`。
-   - 后台任务、Cron、Heartbeat 与用户实时消息分开 lane。
-   - 已新增 `build_preroute_lane_key()` 和 `build_inbound_lane_key()`，并让 `PendingInbound` 暴露路由前 lane key。
-   - 已补充路由前 fallback、路由后 Agent/session 优先级和 PendingInbound lane key 测试。
-3. Phase 15.3：将 `ChannelRuntime` 从单消费者改为 lane dispatcher。已完成。
-   - 全局入站队列只负责接收和粗分发。
-   - 每个 lane 内部保持顺序处理。
-   - 不同 lane 可以并发执行。
-   - 当前按 `PendingInbound.preroute_lane_key` 建立入站 lane worker。
-   - 已补充测试覆盖：不同 peer 可并发处理，慢 lane 不阻塞其他 lane；同一 peer/lane 保持串行。
-4. Phase 15.4：增加全局并发上限和 per-agent 并发上限。部分完成。
-   - 例如 `main=2`、`research=1`、`ops=1`。
-   - 防止并发过高打爆模型 API 或工具执行资源。
-   - 已新增 `GATEWAY_INBOUND_MAX_CONCURRENT_LANES`，默认限制同时运行的入站 lane 数为 4。
-   - 已通过 `asyncio.Semaphore` 在 lane worker 执行前施加全局并发上限。
-   - per-agent 精准并发上限需要基于路由后的 Agent/session 信息实现，避免在路由前阶段做不准确限流。
-5. Phase 15.5：增加入站背压策略。部分完成。
-   - 配置最大队列长度。
-   - 超过阈值时对低优先级任务延迟或拒绝。
-   - 实时用户消息优先于 Cron/Heartbeat。
-   - 已新增 `GATEWAY_INBOUND_MAX_QUEUE_SIZE` 和 `GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE`。
-   - 全局入口队列或单 lane 队列超过阈值时，新消息会被拒绝，并尽量通过原通道返回“系统繁忙，请稍后重试”提示。
-   - 低优先级任务延迟、实时消息优先级调度仍待后续补齐。
-6. Phase 15.6：增加长任务降级策略。部分完成。
-   - 超过阈值后先回复“已进入后台处理”。
-   - 后续结果通过可靠投递链路补发。
-   - 已新增 `GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS`，默认 15 秒；设为 0 可关闭。
-   - 单条入站消息超过阈值仍未完成时，会先通过可靠投递链路推送“继续处理中”提示。
-   - 当前任务仍在原 lane 内继续执行并最终投递结果；真正释放 lane 的后台任务状态机留到 Phase 18 处理。
-7. Phase 15.7：增加运行指标。已完成。
-   - 全局入站队列长度。
-   - 每个 lane 的队列长度。
-   - 最老消息等待时间。
-   - 当前运行 lane 数。
-   - 每个 Agent 的并发占用。
-   - `ChannelRuntime.stats()` 已暴露全局队列、lane 队列、运行中任务、活跃 lane、最老等待时间和并发上限。
-   - per-agent 并发占用仍依赖后续路由后调度增强。
-8. Phase 15.8：Dashboard 增加入站队列和 lane 视图。已完成。
-   - Dashboard 新增“入站队列与车道”面板，展示全局队列、单 lane 上限、运行中任务、最老等待时间和 lane 列表。
-   - 运行态快照新增“入站队列”卡片。
-9. Phase 15.9：控制面增加 `runtime.lanes` 或扩展现有 runtime status，展示当前积压和并发状态。已完成。
-   - `runtime.status` 已新增 `inbound` 字段，Dashboard 可直接消费。
-10. Phase 15.10：补充测试。进行中。
-   - restart 时已入队消息不会丢失。
-   - restart 时旧通道线程不会继续向无人消费的旧队列投递消息。
-   - 同一 session 串行。
-   - 不同 session 并发。
-   - 慢任务不阻塞其他 lane。
-   - CLI completion_event 仍能正确释放。
-   - interceptor 消费消息后不进入 Agent lane。
-
-完成标准：
-
-- 一个长耗时飞书任务不会阻塞 CLI 或其他飞书会话。
-- 控制面 reload 通道配置时，已入队消息不会因为 restart 丢失。
-- 同一会话内消息顺序仍然稳定。
-- Dashboard 能看到入站积压和 lane 运行状态。
-- 并发上限可配置，默认保持保守，适合本地单机运行。
+## 8. 后续路线图
 
 ### Phase 12：Dashboard 鉴权与安全边界
 
-状态：待实现，高优先级，但排在 Phase 15 之后。
+状态：待实现，下一阶段建议优先推进。
 
 目标：
 
@@ -334,7 +187,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 13 增强项：模型调用与错误分类
 
-状态：待实现，可在 Phase 12 后择机补齐。
+状态：进行中。
 
 目标：
 
@@ -346,16 +199,7 @@ cd ~/Desktop/claw0/gateway
 2. 增加 `profile.selected/failed/cooldown`。
 3. 增加 `context.compacted`。
 4. 记录 profile、model、失败分类、耗时和 fallback 次数。
-5. 增加错误分类器：
-   - `model_auth_failed`
-   - `model_rate_limited`
-   - `model_timeout`
-   - `tool_failed`
-   - `delivery_channel_unavailable`
-   - `delivery_invalid_target`
-   - `feishu_signature_rejected`
-   - `cron_failed`
-   - `config_invalid`
+5. 增加错误分类器：模型鉴权失败、限流、超时、工具失败、投递目标无效、飞书验签失败、Cron 失败、配置错误。
 6. `errors.recent` 返回错误类型、影响对象和建议操作。
 7. Dashboard 最近错误面板展示分类和建议。
 
@@ -363,7 +207,6 @@ cd ~/Desktop/claw0/gateway
 
 - 可以区分模型慢、模型失败、工具慢、投递失败。
 - 排查 API key、base_url、限流和上下文溢出时有明确事件依据。
-- 用户看到错误后能快速判断该检查模型、工具、通道、飞书还是配置。
 
 ### Phase 16：Agent 权限预览与配置治理
 
@@ -377,13 +220,7 @@ cd ~/Desktop/claw0/gateway
 
 1. 增加 manifest resolved preview。
 2. 增加 `agents.validate` 接口。
-3. 增加 Agent 最终权限报告：
-   - prompt files
-   - memory policy
-   - enabled skills
-   - allowed tools
-   - denied tools
-   - capability tags
+3. 增加 Agent 最终权限报告：prompt files、memory policy、enabled skills、allowed tools、denied tools、capability tags。
 4. 增加配置变更审计日志。
 5. 增加配置快照与回滚能力。
 
@@ -420,20 +257,18 @@ cd ~/Desktop/claw0/gateway
 目标：
 
 - 将系统从“多 Agent 可路由”升级到“多 Agent 可协作、任务可追踪”。
+- 承接 Phase 15 遗留的 per-agent 并发、低优先级延迟队列和长任务后台化。
 
 计划项：
 
 1. 增加 agent-to-agent handoff。
-2. 增加 task instance 模型：
-   - pending
-   - running
-   - waiting
-   - retrying
-   - done
-   - failed
+2. 增加 task instance 模型：pending、running、waiting、retrying、done、failed。
 3. 为 cron、heartbeat、新闻简报和主动任务增加幂等 key。
 4. 增加任务执行记录和失败恢复入口。
 5. 支持任务级状态在 Dashboard 展示。
+6. 支持 per-agent 并发上限。
+7. 支持低优先级任务延迟和实时消息优先级调度。
+8. 支持长任务真正后台化、取消和重试。
 
 完成标准：
 
@@ -463,52 +298,108 @@ cd ~/Desktop/claw0/gateway
 - 项目可以按文档在新机器上稳定部署。
 - 数据、配置、密钥和日志的边界清晰。
 
-## 8. 推荐执行顺序
+### Phase 20：高并发、高性能、高可用架构升级
+
+状态：待实现。
+
+目标：
+
+- 将当前“单进程本地运行时”升级为“可拆分、可横向扩展、可恢复”的生产级运行架构。
+- 把入站接入、Agent 执行、后台任务、可靠投递、状态存储和观测能力逐步外置，避免单点阻塞和单机状态瓶颈。
+- 在不破坏当前本地优先体验的前提下，为多实例部署、worker 扩容和故障恢复打基础。
+
+#### 中间件选型分析
+
+| 中间件 | 建议优先级 | 主要用途 | 选择原因 | 暂不选择或替代方案 |
+| --- | --- | --- | --- | --- |
+| Redis | 最高 | 分布式锁、事件去重、限流计数、短期状态缓存、轻量队列 | 接入成本低，Python 生态成熟，适合解决飞书事件去重、Cron 幂等、全局限流和多实例协调；也可作为后续任务队列的过渡层。 | 如果只做单机，当前内存状态够用；如果队列可靠性要求更高，应引入 RabbitMQ。 |
+| PostgreSQL | 高 | 会话、任务实例、运行事件、错误、指标快照、配置审计、记忆索引 | 当前 JSONL 适合审计和本地调试，但长期查询、筛选、归档、权限治理和 Dashboard 聚合会越来越困难；PostgreSQL 稳定、通用、便于后续做迁移和备份。 | SQLite 可作为轻量过渡，但多进程写入和远程部署能力弱于 PostgreSQL。 |
+| RabbitMQ | 中高 | 入站消息队列、后台任务队列、可靠投递队列、死信队列、延迟重试 | 对可靠投递、ack、重试、死信和消费者扩容支持成熟，适合把 ChannelRuntime、Agent worker、Delivery worker 解耦。 | Redis Streams 更轻量，适合先做 MVP；但 RabbitMQ 在投递语义和运维可解释性上更强。 |
+| Celery / Dramatiq | 中 | Cron、Heartbeat、GitHub 分析、服务器巡检、长任务 Skill 的后台执行 | 可以快速把长任务从入站 lane 中剥离，支持 worker 池、重试、任务状态和定时调度；Celery 功能更全，Dramatiq 更轻量。 | 如果希望保持完全自研，可基于 RabbitMQ/Redis Streams 写 worker，但开发成本更高。 |
+| Nginx / Caddy | 中 | HTTPS、反向代理、Dashboard 访问边界、Webhook 公网入口 | 飞书 Webhook 生产环境需要稳定 HTTPS 入口；Caddy 自动证书体验好，Nginx 更通用。 | 本地内网穿透适合测试，不适合长期生产暴露。 |
+| Prometheus + Grafana | 中 | 指标采集、趋势图、告警规则和容量评估 | 当前 Dashboard 已有本地指标，但多实例后需要统一指标面；Prometheus 是事实标准，Grafana 展示能力强。 | 早期可继续用本地 metrics JSONL，等多实例前再接入。 |
+| Loki / ELK | 低到中 | 集中日志检索、多实例排障 | 当 gateway-api、worker、scheduler 拆开后，本地日志不再方便排障；Loki 与 Grafana 组合轻量。 | 当前已有 runtime events，早期可以先增强事件流，不急于接 ELK。 |
+| Docker Compose | 高 | 本地生产化编排、依赖启动、数据卷管理 | 能把 gateway、Redis、PostgreSQL、RabbitMQ、反向代理一次性拉起，便于复现和部署。 | Kubernetes 暂不建议引入，当前项目规模还不需要。 |
+
+#### 目标运行形态
+
+```text
+飞书 / Telegram / CLI / Webhook
+        ↓
+gateway-api / channel runtime
+        ↓
+message queue
+        ↓
+agent-worker pool
+        ↓
+model api / tool runtime / skill runtime
+        ↓
+delivery queue
+        ↓
+delivery-worker
+        ↓
+飞书 / Telegram / WebSocket / CLI
+```
+
+#### 子阶段规划
+
+| 子阶段 | 目标 | 主要内容 | 完成标准 |
+| --- | --- | --- | --- |
+| 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
+| 20.2 Redis 最小接入 | 解决多实例协调的最小问题 | 增加 Redis 配置、健康检查、连接封装；接入飞书事件去重、Cron 幂等 key、全局限流计数。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
+| 20.3 后台任务队列 | 长任务从入站 lane 中剥离 | 将 Cron、Heartbeat、GitHub 分析、服务器巡检和长任务 Skill 包装为 task instance；支持入队、执行、重试、失败记录。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
+| 20.4 PostgreSQL 状态外置 | 提升长期查询和治理能力 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
+| 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
+| 20.6 生产部署编排 | 形成可复现部署形态 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
+| 20.7 统一观测与压测 | 用数据验证性能提升 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
+
+#### 开展顺序建议
+
+1. 先做 20.1：把进程边界和队列边界设计清楚，避免一开始就把代码改散。
+2. 再做 20.2：Redis 的投入最小，但能立即解决多实例去重、Cron 幂等和全局限流。
+3. 接着做 20.3：把 Phase 15 遗留的长任务后台化、低优先级任务调度和 per-agent 并发治理接到 task instance。
+4. 然后做 20.4：PostgreSQL 接管长期状态，支撑 Dashboard 查询、审计、归档和治理。
+5. 再做 20.5：当任务和状态稳定后，再升级可靠投递队列，避免同时改动执行链路和出站链路。
+6. 最后做 20.6 和 20.7：补齐部署、观测和压测，用指标验证高可用和高性能目标是否真实达成。
+
+#### 完成标准
+
+- 支持至少两个 gateway 实例同时运行，入站事件不重复处理。
+- 支持多个 agent worker 并发消费任务，长任务不阻塞实时消息入口。
+- 支持 delivery worker 水平扩展，投递失败可重试、可死信、可人工处理。
+- 关键状态不依赖单机 JSONL，Dashboard 可以分页查询任务、事件、错误和记忆。
+- Redis、PostgreSQL、队列和反向代理都有健康检查、配置说明和降级策略。
+- 有基础压测结果，能说明当前机器配置下的吞吐、延迟和瓶颈。
+
+#### 当前实现说明
+
+- `GATEWAY_RUNTIME_ROLES=all` 仍是默认值，保持原来的单进程全量启动体验。
+- `api` 角色启动入站通道、飞书 Webhook 和长连接消费。
+- `delivery` 角色启动出站可靠投递后台。
+- `scheduler` 角色启动 Heartbeat 和 Cron。
+- `dashboard` 角色启动 Dashboard，并自动包含控制面和观测后台。
+- `control` 角色只启动 WebSocket JSON-RPC 控制面。
+- `observability` 角色启动 metrics 和 alerts 后台采集。
+- `worker` 角色已保留为架构角色，但真正独立消费后台任务需要等待 Phase 20.3 的任务队列接入。
+
+## 9. 推荐执行顺序
 
 建议接下来按以下顺序推进：
 
-1. Phase 15：ChannelRuntime Lane 化与入站背压。
-2. Phase 12：Dashboard 鉴权与安全边界。
-3. Phase 13 增强项：模型调用事件与错误分类。
-4. Phase 16：Agent 权限预览与配置治理。
-5. Phase 17：会话与记忆治理。
-6. Phase 18：多 Agent 协作与任务实例状态机。
+1. Phase 12：Dashboard 鉴权与安全边界。
+2. Phase 13 增强项：模型调用事件与错误分类。
+3. Phase 16：Agent 权限预览与配置治理。
+4. Phase 17：会话与记忆治理。
+5. Phase 18：多 Agent 协作与任务实例状态机。
+6. Phase 20.1-20.3：高并发架构边界、Redis 最小接入和后台任务队列。
 7. Phase 19：生产部署形态。
+8. Phase 20.4-20.7：PostgreSQL 状态外置、可靠队列升级、统一观测和压测。
 
 排序依据：
 
-- 先解决 ChannelRuntime 全局串行带来的入站拥堵风险，避免多通道互相阻塞。
-- 再补 Dashboard 和控制面鉴权，避免管理入口暴露风险。
-- 然后补模型调用事件和错误分类，让后续排障更直接。
-- 然后做配置、权限、会话和记忆治理，提升长期运行质量。
-- 最后推进多 Agent 协作和生产部署，避免在治理能力不足时扩大复杂度。
-
-## 9. 最近一个可执行任务
-
-建议下一步实现 Phase 15 的最小闭环：
-
-1. 先修复 `ChannelRuntime.restart()`：
-   - 停止旧通道采集。
-   - 等待旧线程退出。
-   - drain 已入队消息。
-   - drain 后再停止 consumer。
-2. 增加 restart 回归测试：
-   - 已入队消息在 restart 后仍会处理。
-   - CLI `completion_event` 不会卡住。
-   - 旧线程退出后不会继续投递到旧队列。
-3. 为 `ChannelRuntime` 增加 lane key 计算函数。
-4. 保留现有全局入站队列，但将消费阶段改为按 lane 投递到 lane worker。
-5. 每个 lane 内保持串行处理，不同 lane 使用 `asyncio.Semaphore` 控制并发。
-6. 增加默认全局并发上限，例如 4。
-7. CLI 消息继续等待 `completion_event`，确保终端交互节奏不回退。
-8. 增加 lane 化测试覆盖：
-   - 两个不同 `peer_id` 的消息可以并发。
-   - 同一个 `peer_id` 的消息保持顺序。
-   - 第一条慢消息不会阻塞另一个 lane。
-   - interceptor 消费消息后不进入 Agent 执行。
-9. 在 runtime status 中先暴露最小 lane 状态：
-   - active lane 数。
-   - queued message 数。
-   - running task 数。
-
-这一阶段优先解决多通道共用单消费者导致的拥堵问题，收益直接，并且不需要先引入数据库或分布式组件。
+- Phase 15 已基本解决入站拥堵风险，下一步应优先补 Dashboard 和控制面鉴权。
+- 模型调用事件和错误分类能继续提升排障效率。
+- 配置、权限、会话和记忆治理决定长期运行质量。
+- Phase 18 的任务实例状态机是 Phase 20 后台任务队列化的前置基础。
+- Redis 和任务队列可以先于完整生产部署落地，因为它们直接解决多实例去重、长任务阻塞和队列削峰问题。
+- PostgreSQL、可靠队列、统一观测和压测放在后半段，避免数据库和队列同时改造造成排障复杂度过高。

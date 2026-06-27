@@ -25,6 +25,7 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "ANTHROPIC_API_KEY=file-key",
                 "ANTHROPIC_BASE_URL=https://example.test/anthropic",
                 "MODEL_ID=file-model",
+                "GATEWAY_RUNTIME_ROLES=api,delivery,dashboard",
                 "GATEWAY_WEB_SEARCH_ENABLED=true",
                 "GATEWAY_WEB_SEARCH_PROVIDER=tavily",
                 "TAVILY_API_KEY=tvly-test-key",
@@ -51,6 +52,7 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().anthropic_api_key == "file-key"
     assert GatewaySettings.from_env().anthropic_base_url == "https://example.test/anthropic"
     assert GatewaySettings.from_env().model_id == "file-model"
+    assert GatewaySettings.from_env().runtime_roles == ("api", "delivery", "dashboard")
     assert GatewaySettings.from_env().web_search_enabled is True
     assert GatewaySettings.from_env().web_search_provider == "tavily"
     assert GatewaySettings.from_env().tavily_api_key == "tvly-test-key"
