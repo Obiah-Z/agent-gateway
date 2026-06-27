@@ -229,9 +229,11 @@ agent-gateway postgres-smoke
 GATEWAY_POSTGRES_ENABLED=true agent-gateway serve
 ```
 
-`postgres-smoke` 会临时开启 PostgreSQL 主存储，写入带唯一 marker 的会话、任务、运行事件、记忆、指标、告警、投递队列、Telegram offset、Cron 运行记录、新闻简报状态和飞书卡片状态，并同时检查本地 JSON/JSONL fallback 文件是否生成。该命令不调用模型，也不会向外部通道发送消息。
+`postgres-smoke` 会临时开启 PostgreSQL 主存储，写入带唯一 marker 的配置表、会话、任务、运行事件、记忆、指标、告警、投递队列、Telegram offset、Cron 运行记录、新闻简报状态和飞书卡片状态，并同时检查本地 JSON/JSONL fallback 文件是否生成。该命令不调用模型，也不会向外部通道发送消息。
 
 本机实测回填约 1.65 万条配置与运行数据，批量写入约 4.4 秒完成。
+
+状态迁移边界详见 [PostgreSQL状态迁移审计](doc/PostgreSQL状态迁移审计.md)。其中 `workspace/` 下的 Prompt、Skill、Cron 配置和新闻源仍作为可版本化运行资产保留文件形态；数据库主要承载运行状态、审计记录、队列状态和可查询视图。
 
 ## 飞书接入
 

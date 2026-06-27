@@ -115,7 +115,7 @@ cd ~/Desktop/claw0/gateway
 | Phase 17 | 待实现 | 会话与记忆治理。 |
 | Phase 18 | 待实现 | 多 Agent 协作与任务实例状态机。 |
 | Phase 19 | 待实现 | 生产部署形态。 |
-| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级；已完成运行角色拆分、Redis 最小协调、后台任务队列、PostgreSQL 状态外置、schema 初始化和本地回填脚手架。 |
+| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级；已完成运行角色拆分、Redis 最小协调、后台任务队列、PostgreSQL 状态外置、schema 初始化、本地回填脚手架和状态迁移审计。 |
 
 ## 6. 近期完成：Phase 15
 
@@ -349,7 +349,7 @@ delivery-worker
 | 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
 | 20.3 后台任务队列 | 已完成 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron/Heartbeat 自动调度已进入任务链路；明确命令式长任务可配置化转入后台执行；控制面和 Dashboard 已支持任务查看、取消和重试；PostgreSQL 开启后任务预占优先使用数据库原子 reserve。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成，并可通过控制面和 Dashboard 追踪和干预；多 worker 共享 PostgreSQL 时不会重复抢占同一任务。 |
 | 20.4 PostgreSQL 状态外置 | 已完成 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
-| 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计。 |
+| 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明、状态迁移审计，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计；Prompt、Skill、Cron 配置等运行资产继续文件化。 |
 | 20.6 分布式可靠队列升级 | 待实现 | 在 PostgreSQL-backed delivery queue 基础上，新增 Redis Streams 或 RabbitMQ backend；支持多 delivery worker ack、retry、dead-letter、idempotency key 和消费组。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
 | 20.7 生产部署编排 | 待实现 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
 | 20.8 统一观测与压测 | 待实现 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
@@ -460,13 +460,14 @@ delivery-worker
 | 20.5.6 实库回放校验 | 已完成 | 已在本机 PostgreSQL 执行 `postgres-init`、`postgres-migrate-local --dry-run` 和实际回填；约 1.65 万条本地数据通过批量 upsert 在约 4.4 秒完成写入，抽样确认 agents、sessions、tasks、runtime_events、metrics、memory_entries 行数和读仓储查询正常。 |
 | 20.5.7 迁移文档 | 已完成 | README 已补充 PostgreSQL 配置、schema 初始化、dry-run、实际回填、重复执行语义、本地文件兜底和启用数据库优先读取的操作说明。 |
 | 20.5.8 可靠投递队列 PostgreSQL 主存储 | 已完成 | 新增 delivery_entries 表；DeliveryQueue 支持 PostgreSQL 读写 backend，enqueue/fail/move_to_failed/retry/ack/discard 优先写数据库并保留本地 JSON 文件兜底；本地 pending/failed 队列可通过迁移命令回填。 |
-| 20.5.9 PostgreSQL 主存储 smoke 验收 | 已完成 | 新增并增强 `agent-gateway postgres-smoke`，不调用模型和外部通道，直接验证会话、任务、事件、记忆、指标、告警、投递队列、Telegram offset、Cron 运行记录、新闻简报状态和飞书卡片状态能写入 PostgreSQL，并确认本地 JSON/JSONL fallback 文件仍会生成。 |
+| 20.5.9 PostgreSQL 主存储 smoke 验收 | 已完成 | 新增并增强 `agent-gateway postgres-smoke`，不调用模型和外部通道，直接验证配置表、会话、任务、事件、记忆、指标、告警、投递队列、Telegram offset、Cron 运行记录、新闻简报状态和飞书卡片状态能写入 PostgreSQL，并确认本地 JSON/JSONL fallback 文件仍会生成。 |
 | 20.5.10 飞书 Webhook 状态 PostgreSQL 化 | 已完成 | 新增 `feishu_dedup_entries` 和 `feishu_webhook_events`；Webhook 去重链路支持 Redis -> PostgreSQL -> 本地文件多级兜底，审计日志优先写 PostgreSQL 并保留本地 JSONL；迁移命令可回填旧 `seen-events.jsonl` 和 `events.jsonl`。 |
 | 20.5.11 飞书 onboarding 会话 PostgreSQL 化 | 已完成 | 新增 `feishu_onboarding_sessions`；扫码/绑定会话读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 `sessions.json` 作为兜底；迁移命令可回填旧 onboarding 会话文件。 |
 | 20.5.12 Telegram offset PostgreSQL 化 | 已完成 | 新增 `channel_offsets`；Telegram 轮询 offset 读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 offset 文件作为兜底；迁移命令可回填旧 `channel-state/telegram/offset-*.txt`。 |
 | 20.5.13 Cron 运行记录 PostgreSQL 化 | 已完成 | 新增 `cron_runs`；CronService 运行记录优先写 PostgreSQL，并继续写本地 `workspace/cron/cron-runs.jsonl` 作为兜底；迁移命令可回填旧 Cron 运行日志。 |
 | 20.5.14 新闻简报状态 PostgreSQL 化 | 已完成 | 新增 `news_items`；AI Agent 简报和 GitHub Skill 简报的 collected/seen 状态读取优先 PostgreSQL、写入优先 PostgreSQL，并继续写本地 JSONL 作为兜底；迁移命令可回填旧 `data/news-digest` 和 `data/github-skill-digest`。 |
 | 20.5.15 飞书卡片状态 PostgreSQL 化 | 已完成 | 新增 `feishu_card_states`；飞书有状态卡片分页、展开和收起状态读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地卡片 JSON 作为兜底；迁移命令可回填旧 `data/channel-state/feishu/*/cards/*.json`。 |
+| 20.5.16 状态迁移审计与 smoke 收口 | 已完成 | 新增 `doc/PostgreSQL状态迁移审计.md`，明确数据库主存储、文件 fallback/audit、Prompt/Skill/配置资产的边界；`postgres-smoke` 增补 agents、bindings、profiles、channels 配置表写入和读回校验。 |
 
 ## 9. 推荐执行顺序
 

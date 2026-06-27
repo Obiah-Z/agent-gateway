@@ -260,7 +260,10 @@ class PostgresReadRepository(StateReadRepository):
 
     def get(self, table: str, key: str) -> dict[str, Any] | None:
         primary_key = self._primary_key(table)
-        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name(table)} t WHERE {primary_key} = %(id)s LIMIT 1"
+        sql = (
+            f"SELECT row_to_json(t) AS row FROM {self._table_name(table)} t "
+            f"WHERE {_quote_ident(primary_key)} = %(id)s LIMIT 1"
+        )
         rows = self.query(table, sql=sql, params={"id": key})
         if not rows:
             return None
@@ -337,6 +340,27 @@ class PostgresReadRepository(StateReadRepository):
         if table == "sessions" and filters.get("agent_id"):
             clauses.append("agent_id = %(agent_id)s")
             params["agent_id"] = str(filters["agent_id"])
+        if table == "agents" and filters.get("id"):
+            clauses.append("id = %(id)s")
+            params["id"] = str(filters["id"])
+        if table == "bindings":
+            for key in ("key", "agent_id", "match_key", "match_value"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{_quote_ident(key)} = %({key})s")
+                    params[key] = value
+        if table == "profiles":
+            for key in ("name", "provider"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{_quote_ident(key)} = %({key})s")
+                    params[key] = value
+        if table == "channels":
+            for key in ("key", "channel", "account_id"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{_quote_ident(key)} = %({key})s")
+                    params[key] = value
         if table == "tasks" and filters.get("statuses"):
             clauses.append("status = ANY(%(statuses)s)")
             params["statuses"] = list(filters["statuses"])
@@ -405,7 +429,7 @@ class PostgresReadRepository(StateReadRepository):
                     params[key] = value
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += f" ORDER BY {self._order_column(table)} DESC LIMIT %(limit)s"
+        sql += f" ORDER BY {_quote_ident(self._order_column(table))} DESC LIMIT %(limit)s"
         return sql, params
 
     def _list_sessions(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
@@ -582,9 +606,17 @@ class PostgresReadRepository(StateReadRepository):
         return result[:safe_limit]
 
     def _list_agents(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
-        del filters
-        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('agents')} t ORDER BY updated_at DESC LIMIT %(limit)s"
-        rows = self.query("agents", sql=sql, params={"limit": max(1, min(int(limit), 500))})
+        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('agents')} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        agent_id = str(filters.get("id", ""))
+        if agent_id:
+            clauses.append("id = %(id)s")
+            params["id"] = agent_id
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY updated_at DESC LIMIT %(limit)s"
+        rows = self.query("agents", sql=sql, params=params)
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = row.get("row", row)
@@ -593,9 +625,18 @@ class PostgresReadRepository(StateReadRepository):
         return result
 
     def _list_bindings(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
-        del filters
-        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('bindings')} t ORDER BY agent_id ASC, tier ASC, priority DESC LIMIT %(limit)s"
-        rows = self.query("bindings", sql=sql, params={"limit": max(1, min(int(limit), 500))})
+        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('bindings')} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        for key in ("key", "agent_id", "match_key", "match_value"):
+            value = str(filters.get(key, ""))
+            if value:
+                clauses.append(f"{_quote_ident(key)} = %({key})s")
+                params[key] = value
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY agent_id ASC, tier ASC, priority DESC LIMIT %(limit)s"
+        rows = self.query("bindings", sql=sql, params=params)
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = row.get("row", row)
@@ -604,9 +645,18 @@ class PostgresReadRepository(StateReadRepository):
         return result
 
     def _list_profiles(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
-        del filters
-        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('profiles')} t ORDER BY name ASC LIMIT %(limit)s"
-        rows = self.query("profiles", sql=sql, params={"limit": max(1, min(int(limit), 500))})
+        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('profiles')} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        for key in ("name", "provider"):
+            value = str(filters.get(key, ""))
+            if value:
+                clauses.append(f"{_quote_ident(key)} = %({key})s")
+                params[key] = value
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY name ASC LIMIT %(limit)s"
+        rows = self.query("profiles", sql=sql, params=params)
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = row.get("row", row)
@@ -615,9 +665,18 @@ class PostgresReadRepository(StateReadRepository):
         return result
 
     def _list_channels(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
-        del filters
-        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('channels')} t ORDER BY channel ASC, account_id ASC LIMIT %(limit)s"
-        rows = self.query("channels", sql=sql, params={"limit": max(1, min(int(limit), 500))})
+        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name('channels')} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        for key in ("key", "channel", "account_id"):
+            value = str(filters.get(key, ""))
+            if value:
+                clauses.append(f"{_quote_ident(key)} = %({key})s")
+                params[key] = value
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY channel ASC, account_id ASC LIMIT %(limit)s"
+        rows = self.query("channels", sql=sql, params=params)
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = row.get("row", row)
@@ -718,6 +777,10 @@ class PostgresReadRepository(StateReadRepository):
     @staticmethod
     def _order_column(table: str) -> str:
         mapping = {
+            "agents": "updated_at",
+            "bindings": "updated_at",
+            "profiles": "updated_at",
+            "channels": "updated_at",
             "sessions": "updated_at",
             "delivery_entries": "enqueued_at",
             "tasks": "updated_at",

@@ -29,8 +29,6 @@ from agent_gateway.gateways.feishu.onboarding import (
     FeishuOnboardingSessionStore,
 )
 from agent_gateway.gateways.feishu.state import FeishuCardState, FeishuCardStateStore
-from agent_gateway.gateways.messaging.base import ChannelAccount
-from agent_gateway.gateways.messaging.telegram import TelegramChannel
 from agent_gateway.ai.news.models import NewsItem, NewsSourceConfig
 from agent_gateway.ai.news.store import NewsDigestStore
 from agent_gateway.runtime.domain.ids import normalize_agent_id
@@ -598,6 +596,66 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
     marker = f"pg-smoke-{uuid.uuid4().hex[:10]}"
     session_key = f"smoke:{marker}"
     now = time.time()
+    updated_at = now
+
+    if app.state_repository.write is None:
+        raise RuntimeError("PostgreSQL write repository is not configured for smoke test")
+
+    app.state_repository.write.upsert(
+        "agents",
+        {
+            "id": f"{marker}-agent",
+            "name": f"PostgreSQL Smoke {marker}",
+            "personality": "smoke",
+            "model": "",
+            "dm_scope": "all",
+            "extra_system": "",
+            "tool_policy": {},
+            "memory_policy": {},
+            "prompt_policy": {},
+            "updated_at": updated_at,
+        },
+    )
+    binding_key = f"{marker}-agent\x1fchannel\x1fpostgres-smoke"
+    app.state_repository.write.upsert(
+        "bindings",
+        {
+            "key": binding_key,
+            "agent_id": f"{marker}-agent",
+            "tier": 1,
+            "match_key": "channel",
+            "match_value": "postgres-smoke",
+            "priority": 100,
+            "updated_at": updated_at,
+        },
+    )
+    app.state_repository.write.upsert(
+        "profiles",
+        {
+            "name": f"{marker}-profile",
+            "provider": "anthropic",
+            "api_key": "",
+            "api_key_env": "ANTHROPIC_API_KEY",
+            "base_url": "",
+            "base_url_env": "ANTHROPIC_BASE_URL",
+            "updated_at": updated_at,
+        },
+    )
+    channel_key = f"postgres-smoke\x1f{marker}"
+    app.state_repository.write.upsert(
+        "channels",
+        {
+            "key": channel_key,
+            "channel": "postgres-smoke",
+            "account_id": marker,
+            "enabled": False,
+            "label": "PostgreSQL smoke",
+            "token": "",
+            "token_env": "",
+            "config": {"marker": marker},
+            "updated_at": updated_at,
+        },
+    )
 
     app.sessions.rewrite_messages(
         "main",
@@ -661,20 +719,11 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         {"kind": "postgres_smoke", "marker": marker},
     )
     telegram_account_id = "postgres-smoke"
-    telegram_channel = TelegramChannel(
-        ChannelAccount(
-            channel="telegram",
-            account_id=telegram_account_id,
-            label="PostgreSQL smoke",
-            token="postgres-smoke-token",
-        ),
-        settings.data_dir / "channel-state",
-        read_backend=app.state_repository.read,
-        write_backend=app.state_repository.write,
-    )
     telegram_offset = int(now)
-    telegram_channel._save_offset(telegram_channel._offset_path, telegram_offset)  # type: ignore[attr-defined]
-    telegram_channel.close()
+    app.state_repository.write.write_channel_offset("telegram", telegram_account_id, telegram_offset)
+    telegram_offset_path = settings.data_dir / "channel-state" / "telegram" / f"offset-{telegram_account_id}.txt"
+    telegram_offset_path.parent.mkdir(parents=True, exist_ok=True)
+    telegram_offset_path.write_text(str(telegram_offset), encoding="utf-8")
 
     cron_run_at = datetime.fromtimestamp(now, tz=timezone.utc).isoformat()
     app.autonomy_runtime.cron._write_run_log(  # type: ignore[attr-defined]
@@ -743,6 +792,10 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
     )
     checks = {
+        "agent_config": bool(reader.get("agents", f"{marker}-agent")),
+        "binding_config": bool(reader.get("bindings", binding_key)),
+        "profile_config": bool(reader.get("profiles", f"{marker}-profile")),
+        "channel_config": bool(reader.get("channels", channel_key)),
         "session": bool(reader.read_session_messages("main", session_key)),
         "task": bool(reader.get("tasks", task.id)),
         "event": bool(reader.get("runtime_events", str(event.get("event_id", "")))),
@@ -763,7 +816,7 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         "metric_file": any(settings.metrics_dir.glob("metrics-*.jsonl")),
         "alert_file": any(settings.alerts_dir.glob("alerts-*.jsonl")),
         "delivery_file": (settings.delivery_queue_dir / f"{delivery_id}.json").exists(),
-        "telegram_offset_file": (settings.data_dir / "channel-state" / "telegram" / f"offset-{telegram_account_id}.txt").exists(),
+        "telegram_offset_file": telegram_offset_path.exists(),
         "cron_run_file": (settings.workspace_root / "cron" / "cron-runs.jsonl").exists(),
         "news_seen_file": (settings.data_dir / "postgres-smoke-news" / "seen-items.jsonl").exists(),
         "news_collected_file": (settings.data_dir / "postgres-smoke-news" / "collected-items.jsonl").exists(),
