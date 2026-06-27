@@ -438,7 +438,7 @@ delivery-worker
 | 20.4.9 sessions 表级写入适配 | 已完成 | 先把 sessions 的 append/upsert/delete 拆成表级适配入口，作为后续 tasks、events、memory 写入切换的模板。 |
 | 20.4.10 tasks 表级写入适配 | 已完成 | 把 tasks 的 append/upsert/delete 拆成表级适配入口，继续推进 PostgreSQL 作为主存储的可迁移性。 |
 | 20.4.11 runtime_events 表级写入适配 | 已完成 | 把 runtime_events 的 append/upsert/delete 拆成表级适配入口，确保观测链路也能切到 PostgreSQL。 |
-| 20.4.12 memory_entries 表级写入与召回适配 | 已完成 | 把 memory_entries 的 append/upsert/delete 拆成表级适配入口；`MemoryStore.hybrid_search()` 已优先从 PostgreSQL `memory_entries` 构造检索块，数据库不可用或无数据时再回退本地 MEMORY.md 和 daily JSONL。 |
+| 20.4.12 memory_entries 表级写入、统计与召回适配 | 已完成 | 把 memory_entries 的 append/upsert/delete 拆成表级适配入口；`MemoryStore.hybrid_search()` 和 `get_stats()` 已优先从 PostgreSQL `memory_entries` 构造检索块和统计结果，数据库不可用或无数据时再回退本地 MEMORY.md 和 daily JSONL。 |
 | 20.4.13 config_audits 表级写入适配 | 已完成 | 把 config_audits 的 append/upsert/delete 拆成表级适配入口，补齐配置审计的数据库主存储。 |
 | 20.4.14 控制面配置审计接入 | 已完成 | 控制面在保存 agents / bindings / profiles / channels，以及 set/remove agent 时，都会同步写入 config_audits；主配置文件仍保留 JSON 作为落盘和回放来源。 |
 | 20.4.15 主写入口双写接入 | 已完成 | SessionStore、LocalTaskStore、RuntimeEventStore、MemoryStore 的 backup sink 已接入复合迁移层，可同时镜像到 PostgreSQL 写仓储和本地 migration 目录，主链路保留 JSONL 兜底。 |

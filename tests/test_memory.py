@@ -56,3 +56,29 @@ def test_memory_store_hybrid_search_prefers_read_backend(tmp_path: Path) -> None
     assert results
     assert "PostgreSQL memory recall" in results[0].snippet
     assert results[0].path == "postgres [database]"
+
+
+def test_memory_store_stats_prefers_read_backend(tmp_path: Path) -> None:
+    class FakeReadBackend:
+        def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+            assert table == "memory_entries"
+            return [
+                {"content": "first", "source_file": "2026-06-28.jsonl"},
+                {"content": "second", "source_file": "2026-06-28.jsonl"},
+                {"content": "third", "source_file": "2026-06-29.jsonl"},
+            ]
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "MEMORY.md").write_text("Evergreen", encoding="utf-8")
+    store = MemoryStore(workspace)
+    store.write_memory_to_disk("local fallback only", "general")
+    store.read_backend = FakeReadBackend()
+
+    stats = store.get_stats()
+
+    assert stats == {
+        "evergreen_chars": len("Evergreen"),
+        "daily_files": 2,
+        "daily_entries": 3,
+    }

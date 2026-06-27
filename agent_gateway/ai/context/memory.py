@@ -110,6 +110,37 @@ class MemoryStore:
     def get_stats(self) -> dict[str, int]:
         """返回长期记忆和日记忆的体量统计。"""
 
+        backend_stats = self._get_stats_from_backend()
+        if backend_stats is not None:
+            return backend_stats
+        return self._get_stats_from_disk()
+
+    def _get_stats_from_backend(self) -> dict[str, int] | None:
+        """优先从 PostgreSQL memory_entries 统计记忆体量。"""
+
+        backend = self.read_backend
+        if backend is None:
+            return None
+        try:
+            rows = backend.list("memory_entries", limit=2000)
+        except Exception:
+            return None
+        if not rows:
+            return None
+        source_files = {
+            str(row.get("source_file", "")).strip()
+            for row in rows
+            if str(row.get("source_file", "")).strip()
+        }
+        return {
+            "evergreen_chars": len(self.load_evergreen()),
+            "daily_files": len(source_files),
+            "daily_entries": len(rows),
+        }
+
+    def _get_stats_from_disk(self) -> dict[str, int]:
+        """从本地 daily JSONL 统计记忆体量，作为数据库不可用时的兜底。"""
+
         daily_files = list(self.daily_dir.glob("*.jsonl")) if self.daily_dir.is_dir() else []
         total_entries = 0
         for path in daily_files:

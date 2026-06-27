@@ -22,7 +22,7 @@
 | 运行事件 | `runtime_events` | 事件写入和 Dashboard 查询优先使用数据库 | `data/events/*.jsonl` 保留为审计 |
 | 最近错误 | `errors` | 告警和错误视图优先使用数据库 | `data/alerts/*.jsonl` 保留为审计 |
 | 指标快照 | `metrics` | 指标写入和趋势查询优先使用数据库 | `data/metrics/*.jsonl` 保留为审计 |
-| 记忆条目 | `memory_entries` | 记忆写入、最近记忆和召回优先使用数据库 | `workspace/memory/daily/*.jsonl` 保留为回放 |
+| 记忆条目 | `memory_entries` | 记忆写入、最近记忆、统计和召回优先使用数据库 | `workspace/memory/daily/*.jsonl` 保留为回放 |
 | 配置审计 | `config_audits` | 控制面配置变更写入数据库 | 本地配置文件保留最终快照 |
 | 飞书事件去重 | `feishu_dedup_entries` | Redis 优先，PostgreSQL 次级兜底，本地文件最终兜底 | `data/feishu-webhook/dedup/*.jsonl` 保留为降级 |
 | 飞书 Webhook 审计 | `feishu_webhook_events` | Webhook 入站审计优先写数据库 | `data/feishu-webhook/events.jsonl` 保留为审计 |
