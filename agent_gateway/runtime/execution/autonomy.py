@@ -112,6 +112,7 @@ class HeartbeatService:
         self.channels = channels
         self.default_target = default_target
         self.event_store = event_store
+        self.task_queue = task_queue
         self.heartbeat_path = settings.workspace_root / "HEARTBEAT.md"
         self.interval = settings.heartbeat_interval_seconds
         self.active_hours = (settings.heartbeat_active_start, settings.heartbeat_active_end)
@@ -193,12 +194,44 @@ class HeartbeatService:
             try:
                 ok, _ = self.should_run()
                 if ok:
-                    await self._execute(force=False)
+                    if self.task_queue is not None:
+                        self._enqueue_task(time.time())
+                    else:
+                        await self._execute(force=False)
             except Exception:
                 pass
             await asyncio.sleep(1.0)
 
-    async def _execute(self, *, force: bool) -> str:
+    def _enqueue_task(self, now: float) -> TaskInstance:
+        """把到期 heartbeat 封装成后台任务。"""
+
+        assert self.task_queue is not None
+        task = self.task_queue.enqueue(
+            task_type="heartbeat",
+            source="scheduler",
+            agent_id=self.default_target.agent_id,
+            session_key=f"system:heartbeat:{self.default_target.agent_id}",
+            priority=120,
+            idempotency_key=f"heartbeat:{self.default_target.agent_id}:{int(now // max(1, self.interval))}",
+            payload={"scheduled_at": now},
+            metadata={"target_channel": self.default_target.channel},
+        )
+        self.last_run_at = now
+        self._record_event(
+            "heartbeat.queued",
+            status="ok",
+            message="Heartbeat queued",
+            metadata={"task_id": task.id},
+        )
+        return task
+
+    async def run_task_instance(self, task: TaskInstance) -> str:
+        """执行由 task worker 预占的 heartbeat 任务。"""
+
+        scheduled_at = float(task.payload.get("scheduled_at", 0.0) or time.time())
+        return await self._execute(force=True, scheduled_at=scheduled_at)
+
+    async def _execute(self, *, force: bool, scheduled_at: float | None = None) -> str:
         """读取 HEARTBEAT.md 并作为后台 Agent 任务执行。"""
 
         if not force:
@@ -224,7 +257,7 @@ class HeartbeatService:
                 correlation_id=correlation_id,
             )
             meaningful = self._parse_response(reply.text)
-            self.last_run_at = time.time()
+            self.last_run_at = scheduled_at or time.time()
             if meaningful is None:
                 return "HEARTBEAT_OK (nothing to report)"
             if meaningful.strip() == self._last_output:
@@ -239,6 +272,28 @@ class HeartbeatService:
             return f"heartbeat delivered ({len(meaningful)} chars)"
         finally:
             self.running = False
+
+    def _record_event(
+        self,
+        event_type: str,
+        *,
+        status: str,
+        message: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """记录 heartbeat 调度事件。"""
+
+        if self.event_store is None:
+            return
+        self.event_store.record(
+            event_type,
+            component="heartbeat",
+            status=status,
+            message=message,
+            agent_id=self.default_target.agent_id,
+            channel="heartbeat",
+            metadata=metadata or {},
+        )
 
     def _parse_response(self, response: str) -> str | None:
         """把 HEARTBEAT_OK 协议字符串转换成实际要投递的内容。"""

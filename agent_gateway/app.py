@@ -186,6 +186,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     task_worker = TaskWorkerRuntime(task_queue, worker_id="local-worker")
     task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)
+    task_worker.register_handler("heartbeat", autonomy_runtime.heartbeat.run_task_instance)
     task_worker.register_handler(
         "agent_inbound",
         AgentInboundTaskHandler(dispatcher, channel_manager, delivery_runtime=None),
@@ -242,6 +243,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         alert_store=alert_store,
         alerts_runtime=alerts_runtime,
         redis_client=redis_client,
+        task_queue=task_queue,
         task_worker=task_worker,
     )
 
@@ -304,6 +306,7 @@ async def serve(app: GatewayApplication) -> None:
         max_lane_queue_size=app.settings.inbound_max_lane_queue_size,
         long_task_notice_seconds=app.settings.inbound_long_task_notice_seconds,
         task_queue=app.task_queue,
+        background_inbound_commands=app.settings.background_inbound_commands,
     )
     app.control_plane.channel_runtime = channel_runtime
     server = GatewayServer(

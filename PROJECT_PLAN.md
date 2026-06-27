@@ -115,7 +115,7 @@ cd ~/Desktop/claw0/gateway
 | Phase 17 | 待实现 | 会话与记忆治理。 |
 | Phase 18 | 待实现 | 多 Agent 协作与任务实例状态机。 |
 | Phase 19 | 待实现 | 生产部署形态。 |
-| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级。 |
+| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级；已完成运行角色拆分、Redis 最小协调和后台任务队列基础闭环。 |
 
 ## 6. 近期完成：Phase 15
 
@@ -210,7 +210,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 16：Agent 权限预览与配置治理
 
-状态：待实现。
+状态：进行中。
 
 目标：
 
@@ -347,7 +347,7 @@ delivery-worker
 | --- | --- | --- | --- |
 | 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
 | 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
-| 20.3 后台任务队列 | 进行中 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron 自动调度已进入任务链路，明确命令式长任务可转入后台执行。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
+| 20.3 后台任务队列 | 已完成 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron/Heartbeat 自动调度已进入任务链路；明确命令式长任务可配置化转入后台执行；控制面和 Dashboard 已支持任务查看、取消和重试。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成，并可通过控制面和 Dashboard 追踪和干预。 |
 | 20.4 PostgreSQL 状态外置 | 提升长期查询和治理能力 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
 | 20.6 生产部署编排 | 形成可复现部署形态 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
@@ -387,6 +387,10 @@ delivery-worker
 - 飞书 Webhook 事件去重已支持 Redis `SET NX EX`；Redis 不可用时回退本地 JSONL 去重状态。
 - Cron 自动调度已支持 Redis 幂等 key；手动 `cron-trigger` 不受幂等限制，便于主动重跑。
 - Redis 已提供固定窗口限流工具；当前先接入 Cron 自动调度限流，默认关闭，后续模型调用和通道发送可复用。
+- 后台任务控制面已提供 `tasks.list`、`tasks.get`、`tasks.cancel`、`tasks.retry`，可用于排查和人工处理 pending、retrying、failed、cancelled 等任务状态。
+- Dashboard 已增加“后台任务”视图，最多默认展示 6 条，可折叠展开，并支持对 pending/running/retrying 任务执行取消、对 failed/cancelled 任务执行重试。
+- Heartbeat 自动调度已改为创建 `heartbeat` task instance，由 `TaskWorkerRuntime` 后台执行；手动触发仍保持同步执行，便于控制面立即返回结果。
+- 后台长任务命令已支持 `GATEWAY_BACKGROUND_INBOUND_COMMANDS` 配置，默认保留 `/github-repo-analyzer,/space-advisor`，新增命令不再需要修改 `ChannelRuntime` 源码。
 
 #### Phase 20.2 Redis 子阶段
 
@@ -404,8 +408,12 @@ delivery-worker
 | 20.3.1 任务模型与本地存储 | 已完成 | 新增 `TaskInstance`，支持 pending、running、retrying、done、failed、cancelled 状态；新增本地 JSON 文件任务存储。 |
 | 20.3.2 本地任务队列接口 | 已完成 | 增加 enqueue、reserve、ack、retry、fail、cancel 和 stats 抽象，先用本地 backend 实现。 |
 | 20.3.3 Worker 运行时 | 已完成 | 增加 `TaskWorkerRuntime`，支持 handler 注册、并发 worker loop、成功 ack、失败 fail、异常 retry 和 stats。 |
-| 20.3.4 Cron/Heartbeat 任务化 | 部分完成 | Cron 自动调度已改为创建 `cron` task instance，并由 `TaskWorkerRuntime` 调用原 Cron 执行逻辑；Heartbeat 暂未迁移。 |
+| 20.3.4 Cron/Heartbeat 任务化 | 已完成 | Cron 自动调度已改为创建 `cron` task instance，Heartbeat 自动调度已改为创建 `heartbeat` task instance，二者均由 `TaskWorkerRuntime` 执行；手动触发保留同步执行。 |
 | 20.3.5 长任务 Skill 任务化 | 部分完成 | 明确命令式长任务 `/github-repo-analyzer`、`/space-advisor` 已先入 `agent_inbound` task，再由 `TaskWorkerRuntime` 走原 dispatcher 链路后台执行并投递结果；更通用的 tool-call 级后台化留到后续阶段。 |
+| 20.3.6 任务控制面接口 | 已完成 | 新增 `tasks.list`、`tasks.get`、`tasks.cancel`、`tasks.retry`，并将 `task_queue` 注入控制面；列表默认只返回 payload preview，详情可按需返回完整 payload。 |
+| 20.3.7 Dashboard 任务视图 | 已完成 | 在运维面板增加最近后台任务视图，最多展示 6 条，多余折叠；展示任务类型、状态、Agent、来源、时间、错误和取消/重试操作入口。 |
+| 20.3.8 Heartbeat 任务化 | 已完成 | 将 Heartbeat 自动调度从 scheduler 直接执行迁移为 enqueue 后由 worker 执行，避免调度器承担实际任务执行。 |
+| 20.3.9 后台命令配置化 | 已完成 | 将 `/github-repo-analyzer`、`/space-advisor` 等后台命令从硬编码迁移到 `GATEWAY_BACKGROUND_INBOUND_COMMANDS` 环境变量，支持逗号分隔扩展。 |
 
 ## 9. 推荐执行顺序
 
@@ -416,7 +424,7 @@ delivery-worker
 3. Phase 16：Agent 权限预览与配置治理。
 4. Phase 17：会话与记忆治理。
 5. Phase 18：多 Agent 协作与任务实例状态机。
-6. Phase 20.1-20.3：高并发架构边界、Redis 最小接入和后台任务队列。
+6. Phase 20.4：PostgreSQL 状态外置，为任务、事件、会话、记忆和配置审计提供可查询存储。
 7. Phase 19：生产部署形态。
 8. Phase 20.4-20.7：PostgreSQL 状态外置、可靠队列升级、统一观测和压测。
 

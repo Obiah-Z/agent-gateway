@@ -177,6 +177,12 @@ Cron 支持两层配置：
 workspace/skills/
 ```
 
+明确的长任务命令会先进入后台任务队列，再由 worker 执行。默认后台命令可通过 `.env` 扩展：
+
+```env
+GATEWAY_BACKGROUND_INBOUND_COMMANDS=/github-repo-analyzer,/space-advisor
+```
+
 当前已经支持的典型自用能力包括：
 
 - 服务器空间巡检，只分析不自动删除。
@@ -215,6 +221,7 @@ Dashboard 主要用于：
 | `events.tail` | 查看最近运行事件 |
 | `errors.recent` | 查看最近错误、失败或拒绝事件 |
 | `memory.recent` | 查看最近写入的 daily memory 记录 |
+| `tasks.list/get/cancel/retry` | 后台任务查看、详情、取消和重试 |
 | `delivery.stats/list/retry/discard/flush` | 可靠投递队列运维 |
 | `cron.list/trigger` | 主动任务查看与触发 |
 | `feishu.onboarding.start/status/list` | 飞书绑定会话管理 |

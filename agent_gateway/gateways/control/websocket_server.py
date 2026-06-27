@@ -140,6 +140,10 @@ class GatewayServer:
             "delivery.retry": self._m_delivery_retry,
             "delivery.discard": self._m_delivery_discard,
             "delivery.flush": self._m_delivery_flush,
+            "tasks.list": self._m_tasks_list,
+            "tasks.get": self._m_tasks_get,
+            "tasks.cancel": self._m_tasks_cancel,
+            "tasks.retry": self._m_tasks_retry,
         }
         handler = handlers.get(method)
         if handler is None:
@@ -716,3 +720,43 @@ class GatewayServer:
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return await self.control_plane.flush_delivery(rounds=int(params.get("rounds", 1)))
+
+    async def _m_tasks_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 后台任务 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.list_tasks(
+            status=params.get("status", "all"),
+            limit=int(params.get("limit", 50)),
+            include_payload=bool(params.get("include_payload", False)),
+        )
+
+    async def _m_tasks_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 后台任务 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        task_id = params.get("task_id", params.get("id", ""))
+        if not task_id:
+            raise ValueError("task_id is required")
+        return self.control_plane.get_task(
+            str(task_id),
+            include_payload=bool(params.get("include_payload", True)),
+        )
+
+    async def _m_tasks_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 后台任务 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        task_id = params.get("task_id", params.get("id", ""))
+        if not task_id:
+            raise ValueError("task_id is required")
+        return {"ok": self.control_plane.cancel_task(str(task_id))}
+
+    async def _m_tasks_retry(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 后台任务 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        task_id = params.get("task_id", params.get("id", ""))
+        if not task_id:
+            raise ValueError("task_id is required")
+        return {"ok": self.control_plane.retry_task(str(task_id))}

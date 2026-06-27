@@ -7,6 +7,8 @@ from agent_gateway.gateways.messaging.base import ChannelAccount
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.runtime.tasks.queue import LocalTaskQueue
+from agent_gateway.runtime.tasks.store import LocalTaskStore
 from agent_gateway.runtime.domain.models import AgentConfig, Binding
 from agent_gateway.runtime.domain.router import BindingTable
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
@@ -696,6 +698,49 @@ def test_control_plane_manages_delivery_queue(tmp_path: Path) -> None:
     assert control.retry_delivery(failed_id) is True
     assert control.delivery_stats()["failed"] == 0
     assert control.discard_delivery(pending_id, state="pending") is True
+
+
+def test_control_plane_manages_task_queue(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    pending = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        agent_id="research",
+        session_key="feishu:user-1",
+        payload={"text": "/github-repo-analyzer https://github.com/example/repo"},
+    )
+    failed = queue.enqueue(
+        task_type="cron",
+        source="cron",
+        agent_id="main",
+        payload={"job_id": "health-check"},
+    )
+    queue.fail(failed.id, error="cron failed")
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        task_queue=queue,
+    )
+
+    listed = control.list_tasks(status="all")
+    pending_rows = control.list_tasks(status="pending", include_payload=False)
+    detail = control.get_task(pending.id)
+
+    assert listed["count"] == 2
+    assert pending_rows["count"] == 1
+    assert "payload" not in pending_rows["items"][0]
+    assert detail["payload"]["text"].startswith("/github-repo-analyzer")
+    assert detail["payload_preview"].startswith("/github-repo-analyzer")
+    assert control.cancel_task(pending.id) is True
+    assert control.get_task(pending.id, include_payload=False)["status"] == "cancelled"
+    assert control.retry_task(failed.id) is True
+    assert control.get_task(failed.id, include_payload=False)["status"] == "retrying"
+    assert control.cancel_task(failed.id) is True
+    assert control.retry_task(pending.id) is True
 
 
 def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:

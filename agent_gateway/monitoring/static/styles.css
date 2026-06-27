@@ -611,6 +611,7 @@ select:focus {
 .check-list,
 .runtime-list,
 .inbound-list,
+.task-list,
 .cron-list,
 .event-list,
 .trace-list,
@@ -626,6 +627,7 @@ select:focus {
 .check-item,
 .runtime-item,
 .inbound-lane,
+.task-item,
 .cron-item,
 .runtime-section,
 .event-item,
@@ -780,6 +782,59 @@ select:focus {
 .memory-item {
   display: grid;
   gap: 7px;
+}
+
+.task-item {
+  display: grid;
+  gap: 9px;
+}
+
+.task-warning,
+.task-retrying {
+  border-color: rgba(184, 107, 0, 0.24);
+  background: var(--warn-soft);
+}
+
+.task-critical,
+.task-failed,
+.task-error {
+  border-color: rgba(199, 53, 53, 0.22);
+  background: var(--critical-soft);
+}
+
+.task-done {
+  border-color: rgba(19, 138, 94, 0.18);
+}
+
+.task-cancelled {
+  opacity: 0.86;
+}
+
+.task-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.task-title {
+  display: block;
+  font-weight: 950;
+}
+
+.task-meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.task-preview {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.55;
+  word-break: break-word;
 }
 
 .inbound-overview {

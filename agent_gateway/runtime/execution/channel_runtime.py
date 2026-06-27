@@ -32,9 +32,6 @@ from agent_gateway.runtime.tasks.handlers import inbound_to_task_payload
 from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 
 
-BACKGROUND_INBOUND_COMMANDS = ("/github-repo-analyzer", "/space-advisor")
-
-
 @dataclass(slots=True)
 class PendingInbound:
     """从具体通道进入网关主队列的待处理消息。
@@ -89,6 +86,7 @@ class ChannelRuntime:
         max_lane_queue_size: int = 20,
         long_task_notice_seconds: float = 15.0,
         task_queue: LocalTaskQueue | None = None,
+        background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor"),
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
         self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
@@ -100,6 +98,11 @@ class ChannelRuntime:
         self.max_lane_queue_size = max(1, int(max_lane_queue_size))  # 单条 lane 最大积压。
         self.long_task_notice_seconds = max(0.0, float(long_task_notice_seconds))
         self.task_queue = task_queue  # 明确命令式长任务会先入队，再由 worker 后台执行。
+        self.background_inbound_commands = tuple(
+            command.strip()
+            for command in background_inbound_commands
+            if command.strip().startswith("/")
+        )
         self._lane_semaphore = asyncio.Semaphore(self.max_concurrent_lanes)
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
@@ -502,22 +505,20 @@ class ChannelRuntime:
         await self._deliver_background_task_accepted(inbound, task.id)
         return True
 
-    @staticmethod
-    def _is_background_inbound_command(text: str) -> bool:
+    def _is_background_inbound_command(self, text: str) -> bool:
         """判断用户消息是否是明确的后台长任务命令。"""
 
         normalized = text.lstrip()
         return any(
             normalized == command or normalized.startswith(f"{command} ")
-            for command in BACKGROUND_INBOUND_COMMANDS
+            for command in self.background_inbound_commands
         )
 
-    @staticmethod
-    def _background_command_name(text: str) -> str:
+    def _background_command_name(self, text: str) -> str:
         """提取后台命令名，便于任务元数据和排障展示。"""
 
         normalized = text.lstrip()
-        for command in BACKGROUND_INBOUND_COMMANDS:
+        for command in self.background_inbound_commands:
             if normalized == command or normalized.startswith(f"{command} "):
                 return command
         return ""

@@ -28,6 +28,12 @@ def env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def parse_csv_tuple(raw_value: str) -> tuple[str, ...]:
+    """解析逗号分隔的配置项列表。"""
+
+    return tuple(item.strip() for item in raw_value.split(",") if item.strip())
+
+
 def load_env(env_file: Path | None = None) -> None:
     """从 `.env` 文件加载环境变量。"""
 
@@ -75,6 +81,7 @@ class GatewaySettings:
     inbound_max_queue_size: int = 200
     inbound_max_lane_queue_size: int = 20
     inbound_long_task_notice_seconds: float = 15.0
+    background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor")
     heartbeat_interval_seconds: float = 1800.0
     heartbeat_active_start: int = 9
     heartbeat_active_end: int = 22
@@ -159,11 +166,7 @@ class GatewaySettings:
     def from_env(cls) -> "GatewaySettings":
         """从当前环境变量构造配置对象。"""
 
-        fallback_models = tuple(
-            item.strip()
-            for item in os.getenv("GATEWAY_FALLBACK_MODELS", "").split(",")
-            if item.strip()
-        )
+        fallback_models = parse_csv_tuple(os.getenv("GATEWAY_FALLBACK_MODELS", ""))
         return cls(
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", ""),
@@ -214,6 +217,12 @@ class GatewaySettings:
             inbound_long_task_notice_seconds=max(
                 0.0,
                 float(os.getenv("GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS", "15")),
+            ),
+            background_inbound_commands=parse_csv_tuple(
+                os.getenv(
+                    "GATEWAY_BACKGROUND_INBOUND_COMMANDS",
+                    "/github-repo-analyzer,/space-advisor",
+                )
             ),
             heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")),
             heartbeat_active_start=int(os.getenv("HEARTBEAT_ACTIVE_START", "9")),

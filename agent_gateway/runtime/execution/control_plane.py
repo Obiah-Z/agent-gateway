@@ -25,6 +25,8 @@ from agent_gateway.config_loader import (
     write_json_atomic,
 )
 from agent_gateway.runtime.state.queue import DeliveryQueue, QueuedDelivery
+from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
+from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
@@ -74,6 +76,7 @@ class GatewayControlPlane:
     alerts_runtime: Any = None
     redis_client: Any = None
     task_worker: Any = None
+    task_queue: LocalTaskQueue | None = None
 
     def list_bindings(self) -> list[Binding]:
         """返回当前生效的路由绑定列表。"""
@@ -425,6 +428,67 @@ class GatewayControlPlane:
         normalized = self._normalize_delivery_state(state, allow_all=False, allow_any=True)
         return self._require_delivery_queue().discard(delivery_id, state=normalized)
 
+    def list_tasks(
+        self,
+        *,
+        status: str = "all",
+        limit: int = 50,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
+        """列出后台任务实例。"""
+
+        queue = self._require_task_queue()
+        statuses = self._normalize_task_statuses(status)
+        safe_limit = max(1, min(int(limit), 200))
+        tasks = queue.store.list(statuses=statuses, limit=safe_limit)
+        return {
+            "status": status.strip().lower() if status else "all",
+            "count": len(tasks),
+            "items": [
+                self._task_to_dict(task, include_payload=include_payload)
+                for task in tasks
+            ],
+            "limit": safe_limit,
+        }
+
+    def get_task(self, task_id: str, *, include_payload: bool = True) -> dict[str, Any]:
+        """读取单条后台任务详情。"""
+
+        if not task_id:
+            raise ValueError("task_id is required")
+        task = self._require_task_queue().store.get(task_id)
+        if task is None:
+            raise KeyError(f"task not found: {task_id}")
+        return self._task_to_dict(task, include_payload=include_payload)
+
+    def cancel_task(self, task_id: str) -> bool:
+        """取消一条尚未终态的后台任务。"""
+
+        if not task_id:
+            raise ValueError("task_id is required")
+        queue = self._require_task_queue()
+        task = queue.store.get(task_id)
+        if task is None:
+            raise KeyError(f"task not found: {task_id}")
+        if task.status in {"done", "failed", "cancelled"}:
+            return False
+        queue.cancel(task_id)
+        return True
+
+    def retry_task(self, task_id: str) -> bool:
+        """把失败或已取消的任务重新放回可执行队列。"""
+
+        if not task_id:
+            raise ValueError("task_id is required")
+        queue = self._require_task_queue()
+        task = queue.store.get(task_id)
+        if task is None:
+            raise KeyError(f"task not found: {task_id}")
+        if task.status not in {"failed", "cancelled"}:
+            return False
+        queue.retry(task_id, error="manual retry requested")
+        return True
+
     async def flush_delivery(self, *, rounds: int = 1) -> dict[str, Any]:
         """手动推进投递运行时若干轮。"""
 
@@ -712,6 +776,64 @@ class GatewayControlPlane:
         if self.delivery_queue is None:
             raise RuntimeError("delivery queue not configured")
         return self.delivery_queue
+
+    def _require_task_queue(self) -> LocalTaskQueue:
+        """确保当前控制面已经接入后台任务队列。"""
+
+        if self.task_queue is None:
+            raise RuntimeError("task queue not configured")
+        return self.task_queue
+
+    @staticmethod
+    def _normalize_task_statuses(status: str) -> list[TaskStatus] | None:
+        """把控制面传入的任务状态过滤条件规范化。"""
+
+        raw = (status or "all").strip().lower()
+        if raw in {"", "all", "any"}:
+            return None
+        allowed: set[TaskStatus] = {
+            "pending",
+            "running",
+            "retrying",
+            "done",
+            "failed",
+            "cancelled",
+        }
+        statuses = [item.strip().lower() for item in raw.split(",") if item.strip()]
+        invalid = [item for item in statuses if item not in allowed]
+        if invalid:
+            raise ValueError(f"unsupported task status: {', '.join(invalid)}")
+        return [item for item in statuses if item in allowed]  # type: ignore[list-item]
+
+    @staticmethod
+    def _task_to_dict(task: TaskInstance, *, include_payload: bool = False) -> dict[str, Any]:
+        """把任务实例转成控制面响应结构。"""
+
+        payload_preview = ""
+        if task.payload:
+            payload_preview = str(task.payload.get("text") or task.payload)[:200]
+        row: dict[str, Any] = {
+            "id": task.id,
+            "task_type": task.task_type,
+            "source": task.source,
+            "status": task.status,
+            "agent_id": task.agent_id,
+            "session_key": task.session_key,
+            "priority": task.priority,
+            "idempotency_key": task.idempotency_key,
+            "payload_preview": payload_preview,
+            "result_preview": task.result_preview,
+            "error": task.error,
+            "retry_count": task.retry_count,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+            "started_at": task.started_at,
+            "finished_at": task.finished_at,
+            "metadata": task.metadata,
+        }
+        if include_payload:
+            row["payload"] = task.payload
+        return row
 
     @staticmethod
     def _health_check(

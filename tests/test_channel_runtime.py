@@ -665,6 +665,50 @@ def test_channel_runtime_enqueues_explicit_long_task_command(tmp_path) -> None:
     assert "任务 ID" in dispatcher.delivered_texts[0]
 
 
+def test_channel_runtime_uses_configured_background_commands(tmp_path) -> None:
+    dispatcher = BackgroundTaskDispatcher()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        task_queue=task_queue,
+        background_inbound_commands=("/custom-long-task",),
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="/custom-long-task payload",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+            )
+        )
+        while not dispatcher.delivered_texts:
+            await asyncio.sleep(0)
+        await runtime.ingest_external(
+            InboundMessage(
+                text="/github-repo-analyzer https://github.com/openai/openai-python",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+            )
+        )
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    queued = task_queue.store.list(statuses=["pending"])
+    assert len(queued) == 1
+    assert queued[0].metadata["command"] == "/custom-long-task"
+    assert queued[0].payload["text"] == "/custom-long-task payload"
+    assert dispatcher.dispatch_calls == 1
+
+
 def test_channel_runtime_does_not_send_long_task_notice_for_fast_task() -> None:
     dispatcher = BackpressureDispatcher()
     dispatcher.release.set()

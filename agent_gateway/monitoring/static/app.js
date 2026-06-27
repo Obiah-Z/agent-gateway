@@ -154,6 +154,8 @@ const dom = {
   errorsList: $("#errors-list"),
   memorySummary: $("#memory-summary"),
   memoryList: $("#memory-list"),
+  tasksSummary: $("#tasks-summary"),
+  tasksList: $("#tasks-list"),
   deliveryState: $("#delivery-state"),
   includeText: $("#include-text"),
   deliveryFlushBtn: $("#delivery-flush-btn"),
@@ -184,6 +186,10 @@ const STATUS_LABELS = {
   discarded: "已丢弃",
   dead: "已终止",
   ready: "可重试",
+  running: "执行中",
+  retrying: "等待重试",
+  done: "已完成",
+  cancelled: "已取消",
 };
 
 const COMPONENT_LABELS = {
@@ -610,7 +616,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -623,6 +629,7 @@ async function refreshAll() {
       rpc("events.tail", buildEventQuery({ limit: 80 })),
       rpc("errors.recent", buildErrorQuery({ limit: 40 })),
       rpc("memory.recent", { limit: 20 }),
+      rpc("tasks.list", { status: "all", limit: 40 }),
       rpc("metrics.summary", { limit: 60 }),
       rpc("metrics.tail", { limit: 24 }),
       rpc("alerts.active"),
@@ -639,6 +646,7 @@ async function refreshAll() {
     renderEvents(events);
     renderErrors(errors);
     renderMemories(memories);
+    renderTasks(tasks);
     renderDelivery(deliveryList);
     renderCron(cronJobs);
   } catch (error) {
@@ -1714,6 +1722,81 @@ function renderMemories(payload) {
   appendCollapseToggle(dom.memoryList, "memories", items.length, () => renderMemories(payload));
 }
 
+function renderTasks(payload) {
+  clearNode(dom.tasksList);
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const counts = items.reduce((acc, item) => {
+    const status = normalizeStatus(item.status || "pending");
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  dom.tasksSummary.textContent = items.length
+    ? `${items.length} 条任务 · ${counts.running || 0} 执行中 / ${counts.failed || 0} 失败`
+    : "暂无任务";
+  dom.tasksList.className = items.length ? "task-list" : "task-list empty";
+  if (!items.length) {
+    dom.tasksList.textContent = "最近没有后台任务。Cron、Heartbeat 或长任务 Skill 入队后会显示在这里。";
+    return;
+  }
+  const visibleItems = slicePanelItems(items, "tasks");
+  for (const task of visibleItems) {
+    const card = document.createElement("article");
+    const status = normalizeStatus(task.status || "pending");
+    card.className = `task-item task-${status}`;
+    const head = document.createElement("div");
+    head.className = "task-head";
+    head.appendChild(badge(status));
+    const title = document.createElement("div");
+    appendText(title, "strong", taskTitle(task), "task-title");
+    appendText(
+      title,
+      "small",
+      [
+        `来源 ${task.source || "--"}`,
+        `智能体 ${task.agent_id || "--"}`,
+        `优先级 ${task.priority ?? "--"}`,
+        `重试 ${task.retry_count ?? 0} 次`,
+      ].join(" · "),
+      "task-meta",
+    );
+    head.appendChild(title);
+    appendText(head, "span", formatShortTime(task.updated_at), "event-time");
+    card.appendChild(head);
+    appendText(card, "p", task.payload_preview || task.result_preview || task.error || "无预览内容", "task-preview");
+    appendText(
+      card,
+      "div",
+      `创建：${formatTimestamp(task.created_at)} · 更新：${formatTimestamp(task.updated_at)} · 会话：${task.session_key || "--"}`,
+      "task-meta",
+    );
+    if (task.error) {
+      appendText(card, "pre", task.error, "event-error");
+    }
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    if (["pending", "running", "retrying"].includes(status)) {
+      appendButton(actions, "取消", "button button-small button-danger", () => cancelTask(task.id));
+    }
+    if (["failed", "cancelled"].includes(status)) {
+      appendButton(actions, "重试", "button button-small", () => retryTask(task.id));
+    }
+    if (actions.children.length) {
+      card.appendChild(actions);
+    }
+    dom.tasksList.appendChild(card);
+  }
+  appendCollapseToggle(dom.tasksList, "tasks", items.length, () => renderTasks(payload));
+}
+
+function taskTitle(task) {
+  const typeLabels = {
+    agent_inbound: "长任务消息",
+    cron: "定时任务",
+    heartbeat: "心跳任务",
+  };
+  return `${typeLabels[task.task_type] || task.task_type || "后台任务"} · ${shortId(task.id, 10, 4)}`;
+}
+
 function renderEventList({
   panelKey = "events",
   container,
@@ -1828,6 +1911,46 @@ async function discardDelivery(deliveryId, deliveryState, classification = null)
   try {
     await rpc("delivery.discard", { delivery_id: deliveryId, state: deliveryState || "any" });
     showToast(`已丢弃 ${deliveryId}`, "warning");
+    await refreshAll();
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function cancelTask(taskId) {
+  if (!taskId) {
+    return;
+  }
+  const confirmed = confirmAction(
+    `确认取消后台任务 ${taskId}？`,
+    "取消仅对尚未完成的任务生效；已进入外部调用的任务可能需要等待当前步骤结束。",
+  );
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const result = await rpc("tasks.cancel", { task_id: taskId });
+    showToast(result.ok ? `已取消任务 ${taskId}` : `任务 ${taskId} 当前状态不可取消`, result.ok ? "success" : "warning");
+    await refreshAll();
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function retryTask(taskId) {
+  if (!taskId) {
+    return;
+  }
+  const confirmed = confirmAction(
+    `确认重试后台任务 ${taskId}？`,
+    "重试会把失败或已取消任务重新放回 worker 可执行队列。",
+  );
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const result = await rpc("tasks.retry", { task_id: taskId });
+    showToast(result.ok ? `已请求重试任务 ${taskId}` : `任务 ${taskId} 当前状态不可重试`, result.ok ? "success" : "warning");
     await refreshAll();
   } catch (error) {
     showAlert(error.message);

@@ -7,6 +7,8 @@ from agent_gateway.gateways.messaging.base import ChannelAccount
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.runtime.tasks.queue import LocalTaskQueue
+from agent_gateway.runtime.tasks.store import LocalTaskStore
 from agent_gateway.runtime.domain.models import AgentConfig, Binding
 from agent_gateway.runtime.domain.router import BindingTable
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
@@ -571,6 +573,49 @@ def test_gateway_server_exposes_delivery_control_methods(tmp_path) -> None:
     assert runtime.flush_calls == 2
     assert flushed["after"]["pending"] == 1
     assert discarded == {"ok": True}
+
+
+def test_gateway_server_exposes_task_control_methods(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    pending = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        agent_id="research",
+        payload={"text": "/space-advisor 服务器空间巡检"},
+    )
+    failed = queue.enqueue(task_type="cron", source="cron", payload={"job_id": "health-check"})
+    queue.fail(failed.id, error="failed once")
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        task_queue=queue,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": AgentManager(), "bindings": BindingTable()})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    listed = asyncio.run(server._m_tasks_list({"status": "all"}))
+    detail = asyncio.run(server._m_tasks_get({"task_id": pending.id}))
+    cancelled = asyncio.run(server._m_tasks_cancel({"task_id": pending.id}))
+    retried = asyncio.run(server._m_tasks_retry({"task_id": failed.id}))
+
+    assert listed["count"] == 2
+    assert detail["payload"]["text"].startswith("/space-advisor")
+    assert cancelled == {"ok": True}
+    assert retried == {"ok": True}
 
 
 def test_gateway_server_exposes_runtime_status_and_health_check(tmp_path) -> None:

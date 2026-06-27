@@ -156,6 +156,46 @@ def test_heartbeat_trigger_delivers_message(tmp_path: Path) -> None:
     assert channel.sent == ["Please follow up with the user."]
 
 
+def test_heartbeat_queues_message_for_task_worker(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "HEARTBEAT.md").write_text("Check follow-ups.", encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    heartbeat = HeartbeatService(
+        settings,
+        FakeDispatcher("Please follow up with the user."),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        task_queue=task_queue,
+    )
+    worker = TaskWorkerRuntime(task_queue)
+    worker.register_handler("heartbeat", heartbeat.run_task_instance)
+
+    task = heartbeat._enqueue_task(time.time())
+
+    assert channel.sent == []
+    assert task.task_type == "heartbeat"
+    assert task.agent_id == "main"
+    assert task_queue.store.get(task.id).status == "pending"
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert channel.sent == ["Please follow up with the user."]
+    assert task_queue.store.get(task.id).status == "done"
+
+
 def test_cron_service_runs_system_event(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

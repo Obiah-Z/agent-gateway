@@ -43,6 +43,7 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "GATEWAY_INBOUND_MAX_QUEUE_SIZE=11",
                 "GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE=5",
                 "GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS=0.5",
+                "GATEWAY_BACKGROUND_INBOUND_COMMANDS=/custom-long-task, /another-task",
             ]
         ),
         encoding="utf-8",
@@ -74,6 +75,10 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().inbound_max_queue_size == 11
     assert GatewaySettings.from_env().inbound_max_lane_queue_size == 5
     assert GatewaySettings.from_env().inbound_long_task_notice_seconds == 0.5
+    assert GatewaySettings.from_env().background_inbound_commands == (
+        "/custom-long-task",
+        "/another-task",
+    )
 
 
 def test_config_loader_reads_default_files(tmp_path: Path, monkeypatch) -> None:

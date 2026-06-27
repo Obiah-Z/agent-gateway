@@ -36,6 +36,9 @@ def test_monitoring_json_rpc_client_covers_first_stage_methods() -> None:
         "delivery.retry",
         "delivery.discard",
         "delivery.flush",
+        "tasks.list",
+        "tasks.cancel",
+        "tasks.retry",
         "cron.list",
         "cron.trigger",
     }
@@ -51,6 +54,8 @@ def test_monitoring_dashboard_includes_triage_and_delivery_detail_ui() -> None:
     assert "指标趋势" in index
     assert "当前活跃告警" in index
     assert "delivery-detail" in index
+    assert "tasks-panel" in index
+    assert "后台任务" in index
     assert "data-jump" in index
     assert "console-sidebar" in index
     assert "Operations Console" in index
@@ -97,6 +102,21 @@ def test_monitoring_dashboard_uses_global_panel_collapse_limit() -> None:
     assert "function slicePanelItems" in app_js
     assert "function appendCollapseToggle" in app_js
     assert "展开剩余" in app_js
+
+
+def test_monitoring_dashboard_includes_task_queue_view() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+
+    assert "function renderTasks" in app_js
+    assert "function cancelTask" in app_js
+    assert "function retryTask" in app_js
+    assert "tasks.list" in app_js
+    assert "tasks.cancel" in app_js
+    assert "tasks.retry" in app_js
+    assert "slicePanelItems(items, \"tasks\")" in app_js
+    assert ".task-list" in styles
+    assert ".task-item" in styles
 
 
 def test_monitoring_static_dir_is_inside_package() -> None:
