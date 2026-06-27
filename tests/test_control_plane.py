@@ -14,6 +14,7 @@ from agent_gateway.runtime.observability.metrics import MetricsStore
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
+from agent_gateway.runtime.infra.redis_client import RedisHealth
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
@@ -76,6 +77,14 @@ class FakeChannelRuntime:
             "oldest_wait_seconds": 0.0,
             "lanes": [],
         }
+
+
+class FakeRedisClient:
+    def __init__(self, health: RedisHealth) -> None:
+        self._health = health
+
+    def health(self) -> RedisHealth:
+        return self._health
 
 
 def _build_tools() -> ToolRegistry:
@@ -713,6 +722,9 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         autonomy=FakeAutonomy(),
         channel_runtime=FakeChannelRuntime(),
         delivery_queue=DeliveryQueue(tmp_path / "delivery"),
+        redis_client=FakeRedisClient(
+            RedisHealth(enabled=False, ok=True, url="redis://127.0.0.1:6379/0")
+        ),
     )
 
     status = control.runtime_status()
@@ -722,12 +734,56 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["profiles"]["available"] == 1
     assert status["channels"]["active"] == 1
     assert status["delivery"]["pending"] == 0
+    assert status["redis"]["enabled"] is False
+    assert status["redis"]["ok"] is True
     assert status["inbound"]["configured"] is True
     assert status["inbound"]["max_concurrent_lanes"] == 4
     assert status["cron"]["count"] == 1
     assert health["ok"] is True
     assert health["status"] == "ok"
     assert all(row["status"] == "ok" for row in health["checks"])
+
+
+def test_control_plane_health_check_reports_redis_failure(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    settings.proactive_channel = "cli"
+    settings.proactive_account_id = "cli-local"
+    settings.proactive_peer_id = "cli-user"
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main", model="deepseek-v4-pro"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    profiles = ProfileManager(
+        [AuthProfile(name="primary", provider="anthropic", api_key="k", base_url="https://base")]
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=channels,
+        autonomy=FakeAutonomy(),
+        channel_runtime=FakeChannelRuntime(),
+        delivery_queue=DeliveryQueue(tmp_path / "delivery"),
+        redis_client=FakeRedisClient(
+            RedisHealth(
+                enabled=True,
+                ok=False,
+                url="redis://127.0.0.1:6379/0",
+                error="connection refused",
+            )
+        ),
+    )
+
+    health = control.health_check()
+
+    redis_check = next(row for row in health["checks"] if row["name"] == "redis.ping")
+    assert redis_check["status"] == "warning"
+    assert "connection refused" in redis_check["message"]
+    assert health["status"] == "degraded"
 
 
 def test_control_plane_generates_agent_template(tmp_path: Path) -> None:

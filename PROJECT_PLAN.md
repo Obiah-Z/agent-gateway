@@ -71,7 +71,7 @@ cd ~/Desktop/claw0/gateway
 ./.venv/bin/python -m pytest tests -q
 ```
 
-最近验证基线：`195 passed`。
+最近验证基线：`202 passed`。
 
 ## 4. 当前能力基线
 
@@ -346,7 +346,7 @@ delivery-worker
 | 子阶段 | 目标 | 主要内容 | 完成标准 |
 | --- | --- | --- | --- |
 | 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
-| 20.2 Redis 最小接入 | 解决多实例协调的最小问题 | 增加 Redis 配置、健康检查、连接封装；接入飞书事件去重、Cron 幂等 key、全局限流计数。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
+| 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
 | 20.3 后台任务队列 | 长任务从入站 lane 中剥离 | 将 Cron、Heartbeat、GitHub 分析、服务器巡检和长任务 Skill 包装为 task instance；支持入队、执行、重试、失败记录。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
 | 20.4 PostgreSQL 状态外置 | 提升长期查询和治理能力 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
@@ -381,6 +381,21 @@ delivery-worker
 - `control` 角色只启动 WebSocket JSON-RPC 控制面。
 - `observability` 角色启动 metrics 和 alerts 后台采集。
 - `worker` 角色已保留为架构角色，但真正独立消费后台任务需要等待 Phase 20.3 的任务队列接入。
+- Redis 已增加 `GATEWAY_REDIS_ENABLED`、`GATEWAY_REDIS_URL`、`GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS` 配置。
+- Redis 当前只接入基础设施层和健康检查；默认关闭，不影响本地单机运行。
+- Redis 开启但不可用时，`health.check` 会返回 `redis.ping` warning，不会直接阻塞网关启动。
+- 飞书 Webhook 事件去重已支持 Redis `SET NX EX`；Redis 不可用时回退本地 JSONL 去重状态。
+- Cron 自动调度已支持 Redis 幂等 key；手动 `cron-trigger` 不受幂等限制，便于主动重跑。
+- Redis 已提供固定窗口限流工具；当前先接入 Cron 自动调度限流，默认关闭，后续模型调用和通道发送可复用。
+
+#### Phase 20.2 Redis 子阶段
+
+| 子阶段 | 状态 | 主要内容 |
+| --- | --- | --- |
+| 20.2.1 基础设施接入 | 已完成 | 新增 Redis 配置、连接封装、ping 健康检查、控制面状态和测试。 |
+| 20.2.2 飞书事件去重 | 已完成 | 飞书 Webhook 去重已接入 Redis `SET NX EX` 后端，并保留本地去重作为 fallback；长连接去重后续可按需要补齐。 |
+| 20.2.3 Cron 幂等 key | 已完成 | Scheduler 触发 Cron 前写入 Redis 幂等 key，避免多实例重复触发；Redis 不可用时回退当前单机行为。 |
+| 20.2.4 全局限流 | 已完成 | 新增 Redis `INCR + EXPIRE` 固定窗口限流工具，并先接入 Cron 自动调度；模型调用和通道发送限流留到后续专项阶段。 |
 
 ## 9. 推荐执行顺序
 

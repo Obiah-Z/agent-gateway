@@ -42,6 +42,7 @@ from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
+from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 from agent_gateway.gateways.control.websocket_server import GatewayServer
@@ -75,6 +76,7 @@ class GatewayApplication:
     delivery_runtime: DeliveryRuntime  # 出站投递运行时，负责重试、失败归档和成功回调。
     command_queue: CommandQueue  # 命名并发车道队列，控制同类任务串行执行。
     control_plane: GatewayControlPlane  # 控制面服务，提供配置、状态和运维操作。
+    redis_client: RedisClient  # Redis 基础设施客户端，用于后续去重、锁和限流。
     event_store: RuntimeEventStore  # 运行事件 JSONL 存储。
     metrics_store: MetricsStore  # 指标快照存储。
     metrics_runtime: MetricsRuntime  # 指标采集运行时。
@@ -153,6 +155,11 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         settings.alerts_dir,
         retention_days=settings.alerts_retention_days,
     )
+    redis_client = RedisClient(
+        enabled=settings.redis_enabled,
+        url=settings.redis_url,
+        socket_timeout_seconds=settings.redis_socket_timeout_seconds,
+    )
     dispatcher = GatewayDispatcher(
         agents,
         bindings,
@@ -162,7 +169,13 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         event_store=event_store,
     )
     channel_manager = build_channel_manager(settings, load_channel_accounts(settings))
-    autonomy_runtime = AutonomyRuntime(settings, dispatcher, channel_manager, event_store=event_store)
+    autonomy_runtime = AutonomyRuntime(
+        settings,
+        dispatcher,
+        channel_manager,
+        event_store=event_store,
+        redis_client=redis_client,
+    )
     delivery_runtime = DeliveryRuntime(
         delivery_queue,
         channel_manager,
@@ -211,6 +224,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         metrics_runtime=metrics_runtime,
         alert_store=alert_store,
         alerts_runtime=alerts_runtime,
+        redis_client=redis_client,
     )
 
     return GatewayApplication(
@@ -231,6 +245,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         delivery_runtime=delivery_runtime,
         command_queue=command_queue,
         control_plane=control_plane,
+        redis_client=redis_client,
         event_store=event_store,
         metrics_store=metrics_store,
         metrics_runtime=metrics_runtime,
@@ -287,6 +302,7 @@ async def serve(app: GatewayApplication) -> None:
         signature_window_seconds=app.settings.feishu_signature_window_seconds,
         dedup_ttl_seconds=app.settings.feishu_event_dedup_ttl_seconds,
         event_store=app.event_store,
+        redis_client=app.redis_client,
     )
     feishu_long_connection = FeishuLongConnectionRuntime(
         channels=app.channel_manager,

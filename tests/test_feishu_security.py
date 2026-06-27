@@ -4,6 +4,8 @@ from pathlib import Path
 
 from agent_gateway.gateways.feishu.security import (
     FeishuEventDeduplicator,
+    FallbackFeishuEventDeduplicator,
+    RedisFeishuEventDeduplicator,
     FeishuSignatureVerifier,
     extract_event_id,
 )
@@ -61,6 +63,62 @@ def test_feishu_event_deduplicator_marks_duplicates(tmp_path: Path) -> None:
     assert first is True
     assert second is False
     assert third is True
+
+
+class FakeRedisConnection:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.calls: list[dict[str, object]] = []
+
+    def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool:
+        self.calls.append({"key": key, "value": value, "nx": nx, "ex": ex})
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+
+class FakeRedisClient:
+    enabled = True
+
+    def __init__(self, connection: FakeRedisConnection | None = None, *, fail: bool = False) -> None:
+        self.connection = connection or FakeRedisConnection()
+        self.fail = fail
+
+    def _get_client(self) -> FakeRedisConnection:
+        if self.fail:
+            raise RuntimeError("redis unavailable")
+        return self.connection
+
+
+def test_redis_feishu_event_deduplicator_uses_set_nx_ex() -> None:
+    connection = FakeRedisConnection()
+    dedup = RedisFeishuEventDeduplicator(
+        FakeRedisClient(connection),
+        ttl_seconds=60,
+        key_prefix="test:feishu:event",
+    )
+
+    assert dedup.mark_if_new("account:evt-1") is True
+    assert dedup.mark_if_new("account:evt-1") is False
+    assert connection.calls[0] == {
+        "key": "test:feishu:event:account:evt-1",
+        "value": "1",
+        "nx": True,
+        "ex": 60,
+    }
+
+
+def test_fallback_feishu_event_deduplicator_uses_local_state_when_redis_fails(
+    tmp_path: Path,
+) -> None:
+    dedup = FallbackFeishuEventDeduplicator(
+        FakeRedisClient(fail=True),
+        FeishuEventDeduplicator(tmp_path / "dedup", ttl_seconds=60),
+    )
+
+    assert dedup.mark_if_new("evt-1", now=1000.0) is True
+    assert dedup.mark_if_new("evt-1", now=1001.0) is False
 
 
 def test_extract_event_id_prefers_header_then_message_id() -> None:

@@ -79,6 +79,47 @@ class FakeDispatcher:
         return channel.send(OutboundMessage(channel=target.channel, to=target.peer_id, text=text))
 
 
+class FakeRedisOnceClient:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.claimed: set[str] = set()
+        self.calls: list[dict[str, object]] = []
+        self.rate_counts: dict[str, int] = {}
+
+    def mark_once(self, key: str, *, ttl_seconds: int, value: str = "1") -> bool:
+        self.calls.append({"key": key, "ttl_seconds": ttl_seconds, "value": value})
+        if key in self.claimed:
+            return False
+        self.claimed.add(key)
+        return True
+
+    def check_fixed_window_rate_limit(
+        self,
+        key_prefix: str,
+        *,
+        limit: int,
+        window_seconds: int,
+        now: float | None = None,
+    ):
+        window_id = int((now or time.time()) // window_seconds)
+        key = f"{key_prefix}:{window_id}"
+        self.rate_counts[key] = self.rate_counts.get(key, 0) + 1
+        count = self.rate_counts[key]
+
+        class Result:
+            def to_dict(self) -> dict[str, object]:
+                return {
+                    "allowed": count <= limit,
+                    "key": key,
+                    "limit": limit,
+                    "count": count,
+                    "window_seconds": window_seconds,
+                }
+
+        return Result()
+
+
 def _build_channel_manager() -> tuple[ChannelManager, DummyChannel]:
     manager = ChannelManager()
     channel = DummyChannel()
@@ -152,6 +193,163 @@ def test_cron_service_runs_system_event(tmp_path: Path) -> None:
     asyncio.run(cron._run_job(job, time.time()))
 
     assert channel.sent == ["[System Ping] Ping"]
+
+
+def test_cron_service_uses_redis_idempotency_for_scheduled_tick(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "system-ping",
+                "name": "System Ping",
+                "enabled": True,
+                "schedule": {
+                    "kind": "every",
+                    "every_seconds": 60,
+                    "anchor": "2026-01-01T00:00:00+00:00",
+                },
+                "payload": {"kind": "system_event", "text": "Ping"},
+            }
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    redis_client = FakeRedisOnceClient()
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        redis_client=redis_client,
+    )
+    job = cron.jobs[0]
+    due_at = time.time() - 1
+    job.next_run_at = due_at
+
+    asyncio.run(cron.tick())
+    job.next_run_at = due_at
+    asyncio.run(cron.tick())
+
+    assert channel.sent == ["[System Ping] Ping"]
+    assert len(redis_client.calls) == 2
+    assert redis_client.calls[0]["key"].startswith("gateway:cron:system-ping:")
+    assert redis_client.calls[0]["ttl_seconds"] == 120
+
+
+def test_cron_manual_trigger_does_not_use_redis_idempotency(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "system-ping",
+                "name": "System Ping",
+                "enabled": True,
+                "schedule": {
+                    "kind": "every",
+                    "every_seconds": 60,
+                    "anchor": "2026-01-01T00:00:00+00:00",
+                },
+                "payload": {"kind": "system_event", "text": "Ping"},
+            }
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    redis_client = FakeRedisOnceClient()
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        redis_client=redis_client,
+    )
+
+    asyncio.run(cron.trigger_job("system-ping"))
+    asyncio.run(cron.trigger_job("system-ping"))
+
+    assert channel.sent == ["[System Ping] Ping", "[System Ping] Ping"]
+    assert redis_client.calls == []
+
+
+def test_cron_service_uses_redis_rate_limit_for_scheduled_tick(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "system-ping-a",
+                "name": "System Ping A",
+                "enabled": True,
+                "schedule": {
+                    "kind": "every",
+                    "every_seconds": 60,
+                    "anchor": "2026-01-01T00:00:00+00:00",
+                },
+                "payload": {"kind": "system_event", "text": "Ping A"},
+            },
+            {
+                "id": "system-ping-b",
+                "name": "System Ping B",
+                "enabled": True,
+                "schedule": {
+                    "kind": "every",
+                    "every_seconds": 60,
+                    "anchor": "2026-01-01T00:00:00+00:00",
+                },
+                "payload": {"kind": "system_event", "text": "Ping B"},
+            },
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+        redis_cron_rate_limit_per_minute=1,
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    redis_client = FakeRedisOnceClient()
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        redis_client=redis_client,
+    )
+    for job in cron.jobs:
+        job.next_run_at = 120.0
+
+    asyncio.run(cron.tick())
+
+    assert channel.sent == ["[System Ping A] Ping A"]
+    assert sum(redis_client.rate_counts.values()) == 2
 
 
 def test_cron_service_runs_agent_news_digest(

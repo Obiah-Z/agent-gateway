@@ -72,6 +72,7 @@ class GatewayControlPlane:
     metrics_runtime: Any = None
     alert_store: AlertStore | None = None
     alerts_runtime: Any = None
+    redis_client: Any = None
 
     def list_bindings(self) -> list[Binding]:
         """返回当前生效的路由绑定列表。"""
@@ -460,6 +461,11 @@ class GatewayControlPlane:
             if self.channel_runtime is not None
             else {"configured": False}
         )
+        redis_status = (
+            self.redis_client.health().to_dict()
+            if self.redis_client is not None
+            else {"enabled": False, "ok": True, "url": "", "error": ""}
+        )
         return {
             "agents": {
                 "count": len(agents),
@@ -484,6 +490,7 @@ class GatewayControlPlane:
             },
             "inbound": inbound,
             "delivery": delivery,
+            "redis": redis_status,
             "heartbeat": heartbeat,
             "cron": {
                 "count": len(cron_jobs),
@@ -609,6 +616,18 @@ class GatewayControlPlane:
                     "warning",
                     "",
                     "delivery queue not configured",
+                )
+            )
+
+        redis_status = status["redis"]
+        if redis_status.get("enabled"):
+            checks.append(
+                self._health_check(
+                    "redis.ping",
+                    bool(redis_status.get("ok")),
+                    "warning",
+                    f"redis reachable in {redis_status.get('latency_ms')} ms",
+                    f"redis unavailable: {redis_status.get('error', '')}",
                 )
             )
 

@@ -19,6 +19,28 @@ class FakeChannelRuntime:
         self.messages.append(inbound)
 
 
+class FakeRedisConnection:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool:
+        del ex
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+
+class FakeRedisClient:
+    enabled = True
+
+    def __init__(self, connection: FakeRedisConnection) -> None:
+        self.connection = connection
+
+    def _get_client(self) -> FakeRedisConnection:
+        return self.connection
+
+
 async def _post_json(
     host: str,
     port: int,
@@ -110,6 +132,31 @@ def _build_server(tmp_path: Path | None = None) -> tuple[FeishuWebhookServer, Fa
         state_dir=(tmp_path or Path("/tmp")) / "feishu-webhook-test",
     )
     return server, runtime
+
+
+def _build_server_with_redis_dedup(
+    tmp_path: Path | None = None,
+) -> tuple[FeishuWebhookServer, FakeChannelRuntime, FakeRedisConnection]:
+    runtime = FakeChannelRuntime()
+    account = _build_feishu_account(
+        account_id="feishu-main",
+        verification_token="verify-token",
+        encrypt_key="encrypt-key",
+    )
+    manager = ChannelManager()
+    state_root = (tmp_path or Path("/tmp")) / "feishu-webhook-test" / "channel-state"
+    manager.register(FeishuChannel(account, state_root), account)
+    redis_connection = FakeRedisConnection()
+    server = FeishuWebhookServer(
+        host="127.0.0.1",
+        port=0,
+        path="/webhooks/feishu",
+        channels=manager,
+        channel_runtime=runtime,
+        state_dir=(tmp_path or Path("/tmp")) / "feishu-webhook-test",
+        redis_client=FakeRedisClient(redis_connection),
+    )
+    return server, runtime, redis_connection
 
 
 def _build_feishu_account(
@@ -502,6 +549,40 @@ def test_feishu_webhook_server_deduplicates_events(tmp_path: Path) -> None:
         assert second_status == 202
         assert second_payload == {"ok": True, "duplicate": True}
         assert len(runtime.messages) == 1
+
+    asyncio.run(_run())
+
+
+def test_feishu_webhook_server_deduplicates_events_with_redis(tmp_path: Path) -> None:
+    async def _run() -> None:
+        server, runtime, redis_connection = _build_server_with_redis_dedup(tmp_path)
+        await server.start()
+        assert server._server is not None
+        port = server._server.sockets[0].getsockname()[1]
+        event = {
+            "token": "verify-token",
+            "header": {"event_id": "evt-redis-dedup-1"},
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_user"}},
+                "message": {
+                    "message_id": "om_1",
+                    "chat_id": "oc_chat",
+                    "chat_type": "p2p",
+                    "msg_type": "text",
+                    "content": json.dumps({"text": "hello"}),
+                },
+            },
+        }
+        first_status, first_payload = await _post_json("127.0.0.1", port, "/webhooks/feishu", event)
+        second_status, second_payload = await _post_json("127.0.0.1", port, "/webhooks/feishu", event)
+        await server.stop()
+
+        assert first_status == 200
+        assert first_payload == {"ok": True}
+        assert second_status == 202
+        assert second_payload == {"ok": True, "duplicate": True}
+        assert len(runtime.messages) == 1
+        assert "gateway:feishu:event:feishu-main:evt-redis-dedup-1" in redis_connection.values
 
     asyncio.run(_run())
 

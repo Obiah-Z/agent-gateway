@@ -102,6 +102,7 @@ class HeartbeatService:
         channels: ChannelManager,
         default_target: ProactiveTarget,
         event_store: RuntimeEventStore | None = None,
+        redis_client: Any = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
@@ -266,12 +267,14 @@ class CronService:
         channels: ChannelManager,
         default_target: ProactiveTarget,
         event_store: RuntimeEventStore | None = None,
+        redis_client: Any = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.channels = channels
         self.default_target = default_target
         self.event_store = event_store
+        self.redis_client = redis_client
         self.cron_file = settings.workspace_root / "CRON.json"
         self.run_log_dir = settings.workspace_root / "cron"
         self.run_log_dir.mkdir(parents=True, exist_ok=True)
@@ -474,6 +477,33 @@ class CronService:
         remove_ids: list[str] = []
         for job in self.jobs:
             if not job.enabled or job.next_run_at <= 0 or now < job.next_run_at:
+                continue
+            if not self._claim_scheduled_run(job):
+                job.next_run_at = self._compute_next(job, now)
+                self._record_cron_event(
+                    "cron.skipped",
+                    job,
+                    status="skipped",
+                    message=f"Cron duplicate skipped: {job.id}",
+                    metadata={
+                        "reason": "duplicate scheduled run",
+                        "schedule_slot": self._schedule_slot(job),
+                    },
+                )
+                continue
+            rate_limit = self._check_cron_rate_limit(now)
+            if rate_limit is not None and not bool(rate_limit.get("allowed")):
+                job.next_run_at = self._compute_next(job, now)
+                self._record_cron_event(
+                    "cron.skipped",
+                    job,
+                    status="skipped",
+                    message=f"Cron rate limited: {job.id}",
+                    metadata={
+                        "reason": "redis rate limited",
+                        "rate_limit": rate_limit,
+                    },
+                )
                 continue
             await self._run_job(job, now)
             if job.delete_after_run and job.schedule_kind == "at":
@@ -759,6 +789,61 @@ class CronService:
 
         return 0.0
 
+    def _claim_scheduled_run(self, job: CronJob) -> bool:
+        """抢占某个计划时间窗口，避免多实例重复触发同一 Cron。"""
+
+        if self.redis_client is None or not getattr(self.redis_client, "enabled", False):
+            return True
+        try:
+            return bool(
+                self.redis_client.mark_once(
+                    self._cron_idempotency_key(job),
+                    ttl_seconds=self._cron_idempotency_ttl(job),
+                )
+            )
+        except Exception:
+            return True
+
+    @staticmethod
+    def _schedule_slot(job: CronJob) -> int:
+        """返回当前计划触发窗口的稳定秒级 slot。"""
+
+        return int(job.next_run_at or 0)
+
+    def _cron_idempotency_key(self, job: CronJob) -> str:
+        """生成 Redis Cron 幂等 key。"""
+
+        safe_job_id = job.id.replace(" ", "_")
+        return f"gateway:cron:{safe_job_id}:{self._schedule_slot(job)}"
+
+    def _cron_idempotency_ttl(self, job: CronJob) -> int:
+        """计算 Cron 幂等 key 的保留时间。"""
+
+        if job.schedule_kind == "every":
+            try:
+                return max(60, int(job.schedule_config.get("every_seconds", 3600)) * 2)
+            except (TypeError, ValueError):
+                return 7200
+        return 86400
+
+    def _check_cron_rate_limit(self, now: float) -> dict[str, Any] | None:
+        """检查 Cron 自动调度的跨实例限流。"""
+
+        limit = int(getattr(self.settings, "redis_cron_rate_limit_per_minute", 0) or 0)
+        if limit <= 0:
+            return None
+        if self.redis_client is None or not getattr(self.redis_client, "enabled", False):
+            return None
+        try:
+            return self.redis_client.check_fixed_window_rate_limit(
+                "gateway:rate:cron",
+                limit=limit,
+                window_seconds=60,
+                now=now,
+            ).to_dict()
+        except Exception:
+            return None
+
     def _target_from_row(self, row: dict[str, Any], *, owner_agent_id: str = "") -> ProactiveTarget:
         """从任务定义中恢复主动投递目标。"""
 
@@ -818,6 +903,7 @@ class AutonomyRuntime:
         dispatcher: GatewayDispatcher,
         channels: ChannelManager,
         event_store: RuntimeEventStore | None = None,
+        redis_client: Any = None,
     ) -> None:
         target = ProactiveTarget(
             channel=settings.proactive_channel,
@@ -838,6 +924,7 @@ class AutonomyRuntime:
             channels,
             target,
             event_store=event_store,
+            redis_client=redis_client,
         )
 
     def set_channels(self, channels: ChannelManager) -> None:

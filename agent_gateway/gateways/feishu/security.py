@@ -81,6 +81,57 @@ class FeishuEventDeduplicator:
             self._seen.pop(event_id, None)
 
 
+class RedisFeishuEventDeduplicator:
+    """基于 Redis `SET NX EX` 的飞书事件去重器。"""
+
+    def __init__(
+        self,
+        redis_client: Any,
+        *,
+        ttl_seconds: int = 86400,
+        key_prefix: str = "gateway:feishu:event",
+    ) -> None:
+        """初始化实例。"""
+
+        self.redis_client = redis_client
+        self.ttl_seconds = max(60, ttl_seconds)
+        self.key_prefix = key_prefix.rstrip(":")
+
+    def mark_if_new(self, event_id: str, *, now: float | None = None) -> bool:
+        """只有 Redis 首次写入成功时返回 True。"""
+
+        del now
+        if not event_id:
+            return True
+        client = self.redis_client._get_client()
+        return bool(
+            client.set(
+                f"{self.key_prefix}:{event_id}",
+                "1",
+                nx=True,
+                ex=self.ttl_seconds,
+            )
+        )
+
+
+class FallbackFeishuEventDeduplicator:
+    """优先使用主去重器，主去重器失败时回退到本地去重器。"""
+
+    def __init__(self, primary: Any, fallback: FeishuEventDeduplicator) -> None:
+        """初始化实例。"""
+
+        self.primary = primary
+        self.fallback = fallback
+
+    def mark_if_new(self, event_id: str, *, now: float | None = None) -> bool:
+        """执行去重判断，并在 Redis 不可用时保持 Webhook 可用。"""
+
+        try:
+            return bool(self.primary.mark_if_new(event_id, now=now))
+        except Exception:
+            return self.fallback.mark_if_new(event_id, now=now)
+
+
 @dataclass(slots=True)
 class FeishuSignatureVerifier:
     """飞书 Webhook 签名校验器。"""

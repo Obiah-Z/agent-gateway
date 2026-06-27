@@ -26,6 +26,10 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "ANTHROPIC_BASE_URL=https://example.test/anthropic",
                 "MODEL_ID=file-model",
                 "GATEWAY_RUNTIME_ROLES=api,delivery,dashboard",
+                "GATEWAY_REDIS_ENABLED=true",
+                "GATEWAY_REDIS_URL=redis://redis.test:6379/2",
+                "GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS=0.25",
+                "GATEWAY_REDIS_CRON_RATE_LIMIT_PER_MINUTE=3",
                 "GATEWAY_WEB_SEARCH_ENABLED=true",
                 "GATEWAY_WEB_SEARCH_PROVIDER=tavily",
                 "TAVILY_API_KEY=tvly-test-key",
@@ -53,6 +57,10 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().anthropic_base_url == "https://example.test/anthropic"
     assert GatewaySettings.from_env().model_id == "file-model"
     assert GatewaySettings.from_env().runtime_roles == ("api", "delivery", "dashboard")
+    assert GatewaySettings.from_env().redis_enabled is True
+    assert GatewaySettings.from_env().redis_url == "redis://redis.test:6379/2"
+    assert GatewaySettings.from_env().redis_socket_timeout_seconds == 0.25
+    assert GatewaySettings.from_env().redis_cron_rate_limit_per_minute == 3
     assert GatewaySettings.from_env().web_search_enabled is True
     assert GatewaySettings.from_env().web_search_provider == "tavily"
     assert GatewaySettings.from_env().tavily_api_key == "tvly-test-key"

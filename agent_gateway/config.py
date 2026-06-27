@@ -53,6 +53,10 @@ class GatewaySettings:
     anthropic_base_url: str = ""
     model_id: str = "deepseek-v4-pro"
     runtime_roles: tuple[str, ...] = ("all",)
+    redis_enabled: bool = False
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    redis_socket_timeout_seconds: float = 1.0
+    redis_cron_rate_limit_per_minute: int = 0
     host: str = "127.0.0.1"
     port: int = 8765
     workspace_root: Path = DEFAULT_WORKSPACE_ROOT
@@ -161,6 +165,16 @@ class GatewaySettings:
             anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", ""),
             model_id=os.getenv("MODEL_ID", "claude-opus-4-6"),
             runtime_roles=parse_runtime_roles(os.getenv("GATEWAY_RUNTIME_ROLES", "all")),
+            redis_enabled=env_bool("GATEWAY_REDIS_ENABLED", False),
+            redis_url=os.getenv("GATEWAY_REDIS_URL", "redis://127.0.0.1:6379/0"),
+            redis_socket_timeout_seconds=max(
+                0.05,
+                float(os.getenv("GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS", "1.0")),
+            ),
+            redis_cron_rate_limit_per_minute=max(
+                0,
+                int(os.getenv("GATEWAY_REDIS_CRON_RATE_LIMIT_PER_MINUTE", "0")),
+            ),
             host=os.getenv("GATEWAY_HOST", "127.0.0.1"),
             port=int(os.getenv("GATEWAY_PORT", "8765")),
             workspace_root=resolve_env_path(

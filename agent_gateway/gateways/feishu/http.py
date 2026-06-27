@@ -20,6 +20,8 @@ from agent_gateway.gateways.feishu.security import (
     FeishuEventDeduplicator,
     FeishuSignatureVerifier,
     FeishuWebhookAuditLog,
+    FallbackFeishuEventDeduplicator,
+    RedisFeishuEventDeduplicator,
     extract_event_id,
 )
 from agent_gateway.runtime.observability.events import RuntimeEventStore, new_correlation_id
@@ -40,6 +42,7 @@ class FeishuWebhookServer:
         signature_window_seconds: int = 300,
         dedup_ttl_seconds: int = 86400,
         event_store: RuntimeEventStore | None = None,
+        redis_client: Any = None,
     ) -> None:
         """初始化实例。"""
         self.host = host
@@ -48,10 +51,20 @@ class FeishuWebhookServer:
         self.channels = channels
         self.channel_runtime = channel_runtime
         self.audit = FeishuWebhookAuditLog(state_dir)
-        self.dedup = FeishuEventDeduplicator(
+        local_dedup = FeishuEventDeduplicator(
             state_dir / "dedup",
             ttl_seconds=dedup_ttl_seconds,
         )
+        if redis_client is not None and getattr(redis_client, "enabled", False):
+            self.dedup = FallbackFeishuEventDeduplicator(
+                RedisFeishuEventDeduplicator(
+                    redis_client,
+                    ttl_seconds=dedup_ttl_seconds,
+                ),
+                local_dedup,
+            )
+        else:
+            self.dedup = local_dedup
         self.signature_window_seconds = max(30, signature_window_seconds)
         self.event_store = event_store
         self._server: asyncio.base_events.Server | None = None
