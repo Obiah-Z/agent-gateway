@@ -25,6 +25,7 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
 from agent_gateway.runtime.state.adapter import LocalStateReadRepository
+from agent_gateway.runtime.state.factory import build_state_repository
 from agent_gateway.gateways.feishu.onboarding import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
@@ -175,7 +176,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     task_store = LocalTaskStore(settings.tasks_dir)
     task_queue = LocalTaskQueue(task_store)
-    state_repository = LocalStateReadRepository(
+    state_bundle = build_state_repository(
+        settings,
         sessions=sessions,
         tasks=task_store,
         events=event_store,
@@ -260,7 +262,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         alerts_runtime=alerts_runtime,
         redis_client=redis_client,
         postgres_client=postgres_client,
-        state_repository=state_repository,
+        state_repository=state_bundle.read,
         task_queue=task_queue,
         task_worker=task_worker,
     )

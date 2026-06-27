@@ -1,3 +1,14 @@
+from pathlib import Path
+
+from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.config import GatewaySettings
+from agent_gateway.runtime.observability.alerts import AlertStore
+from agent_gateway.runtime.observability.events import RuntimeEventStore
+from agent_gateway.runtime.observability.metrics import MetricsStore
+from agent_gateway.runtime.state.adapter import LocalStateReadRepository
+from agent_gateway.runtime.state.factory import build_state_repository
+from agent_gateway.runtime.state.store import SessionStore
+from agent_gateway.runtime.tasks.store import LocalTaskStore
 from agent_gateway.runtime.state import STATE_TABLES, StateRepository
 
 
@@ -34,3 +45,23 @@ def test_state_repository_protocol_is_runtime_checkable() -> None:
             return []
 
     assert isinstance(DummyRepository(), StateRepository)
+
+
+def test_build_state_repository_returns_local_backend(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    bundle = build_state_repository(
+        settings,
+        sessions=SessionStore(settings.sessions_dir),
+        tasks=LocalTaskStore(settings.tasks_dir),
+        events=RuntimeEventStore(settings.events_dir),
+        metrics=MetricsStore(settings.metrics_dir),
+        alerts=AlertStore(settings.alerts_dir),
+        memory=MemoryStore(settings.workspace_root),
+    )
+
+    assert isinstance(bundle.read, LocalStateReadRepository)
