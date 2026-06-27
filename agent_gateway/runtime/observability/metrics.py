@@ -14,6 +14,8 @@ import threading
 import time
 from typing import Any
 
+from agent_gateway.runtime.state.postgres import PostgresReadRepository
+
 
 @dataclass(slots=True)
 class MetricSnapshot:
@@ -63,6 +65,9 @@ class MetricsStore:
         self.max_line_bytes = max(1024, int(max_line_bytes))
         self.retention_days = max(1, int(retention_days))
         self._lock = threading.Lock()
+        self.read_backend: PostgresReadRepository | None = None
+        self.backup_sink = None
+        self.write_backend: Any | None = None
 
     def record(
         self,
@@ -89,12 +94,19 @@ class MetricsStore:
             metadata=self._sanitize_mapping(metadata or {}),
         )
         row = snapshot.to_dict()
+        self._write_primary(row)
         self._append(row)
         return row
 
     def latest(self) -> dict[str, Any] | None:
         """返回最近一条指标。"""
 
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("metrics", limit=1)
+                return rows[-1] if rows else None
+            except Exception:
+                pass
         rows = self.tail(limit=1)
         return rows[-1] if rows else None
 
@@ -102,6 +114,13 @@ class MetricsStore:
         """读取最近若干条指标快照。"""
 
         safe_limit = max(1, min(int(limit), 1000))
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("metrics", limit=safe_limit)
+                if rows:
+                    return rows[:safe_limit]
+            except Exception:
+                pass
         return self._read_tail(safe_limit)
 
     def cleanup(self, *, now: date | None = None) -> None:
@@ -133,6 +152,34 @@ class MetricsStore:
         with self._lock, path.open("a", encoding="utf-8") as handle:
             handle.write(payload + "\n")
         self.cleanup()
+
+    def _mirror(self, row: dict[str, Any]) -> None:
+        """把指标快照镜像到备份 sink。"""
+
+        sink = getattr(self, "backup_sink", None)
+        if sink is None:
+            return
+        method = getattr(sink, "write_metric", None) or getattr(sink, "write_metrics", None)
+        if method is None:
+            return
+        try:
+            method(row)
+        except Exception:
+            pass
+
+    def _write_primary(self, row: dict[str, Any]) -> None:
+        """优先写入数据库主存储；不可用时退回备份 sink。"""
+
+        backend = getattr(self, "write_backend", None)
+        if backend is not None:
+            method = getattr(backend, "write_metric", None) or getattr(backend, "write_metrics", None)
+            if method is not None:
+                try:
+                    method(row)
+                    return
+                except Exception:
+                    pass
+        self._mirror(row)
 
     def _read_tail(self, limit: int) -> list[dict[str, Any]]:
         """从最近文件中读取尾部指标。"""

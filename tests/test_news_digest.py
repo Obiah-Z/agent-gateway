@@ -22,6 +22,34 @@ class FakeNewsSourceClient:
         pass
 
 
+class FakeNewsStateRepository:
+    enabled = True
+
+    def __init__(self, rows=None, *, fail: bool = False) -> None:
+        self.rows = list(rows or [])
+        self.fail = fail
+        self.written: list[dict[str, object]] = []
+
+    def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+        del limit, cursor
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        if table != "news_items":
+            return []
+        filters = filters or {}
+        return [
+            row
+            for row in self.rows
+            if all(str(row.get(key, "")) == str(value) for key, value in filters.items())
+        ]
+
+    def write_news_item(self, row: dict[str, object]):
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        self.written.append(dict(row))
+        return row
+
+
 def _source(source_id: str) -> NewsSourceConfig:
     return NewsSourceConfig(id=source_id, type="github_releases", repo="owner/repo")
 
@@ -63,6 +91,54 @@ def test_news_collector_loads_sources_filters_seen_and_records_items(tmp_path: P
     assert "Fresh release" in (tmp_path / "news-store" / "collected-items.jsonl").read_text(
         encoding="utf-8"
     )
+
+
+def test_news_digest_store_prefers_postgres_seen_ids(tmp_path: Path) -> None:
+    old = _item("enabled", "Old release", "https://example.com/old")
+    fresh = _item("enabled", "Fresh release", "https://example.com/fresh")
+    repo = FakeNewsStateRepository(
+        [
+            {
+                "store_name": "news-store",
+                "state": "seen",
+                "item_id": old.id,
+            }
+        ]
+    )
+    store = NewsDigestStore(tmp_path / "news-store", read_backend=repo)
+
+    assert [item.id for item in store.filter_new([old, fresh])] == [fresh.id]
+
+
+def test_news_digest_store_writes_postgres_and_local_files(tmp_path: Path) -> None:
+    item = _item("enabled", "Fresh release", "https://example.com/fresh")
+    repo = FakeNewsStateRepository()
+    store = NewsDigestStore(tmp_path / "news-store", write_backend=repo)
+
+    store.append_collected([item])
+    store.mark_seen([item])
+
+    assert [row["state"] for row in repo.written] == ["collected", "seen"]
+    assert repo.written[0]["store_name"] == "news-store"
+    assert repo.written[0]["item_id"] == item.id
+    assert "Fresh release" in (tmp_path / "news-store" / "collected-items.jsonl").read_text(
+        encoding="utf-8"
+    )
+    assert item.id in (tmp_path / "news-store" / "seen-items.jsonl").read_text(encoding="utf-8")
+
+
+def test_news_digest_store_keeps_local_files_when_postgres_fails(tmp_path: Path) -> None:
+    item = _item("enabled", "Fresh release", "https://example.com/fresh")
+    store = NewsDigestStore(
+        tmp_path / "news-store",
+        read_backend=FakeNewsStateRepository(fail=True),
+        write_backend=FakeNewsStateRepository(fail=True),
+    )
+
+    store.append_collected([item])
+    store.mark_seen([item])
+
+    assert item.id in store.seen_ids()
 
 
 def test_news_collector_dedupes_same_url_across_sources(tmp_path: Path) -> None:

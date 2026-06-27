@@ -6,6 +6,7 @@ import hashlib
 import json
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -114,6 +115,30 @@ class RedisFeishuEventDeduplicator:
         )
 
 
+class PostgresFeishuEventDeduplicator:
+    """基于 PostgreSQL 唯一键的飞书事件去重器。"""
+
+    def __init__(self, repository: Any, *, ttl_seconds: int = 86400) -> None:
+        """初始化实例。"""
+
+        self.repository = repository
+        self.ttl_seconds = max(60, ttl_seconds)
+
+    def mark_if_new(self, event_id: str, *, now: float | None = None) -> bool:
+        """只有 PostgreSQL 首次插入成功时返回 True。"""
+
+        if not event_id:
+            return True
+        current = now if now is not None else time.time()
+        return bool(
+            self.repository.mark_feishu_event_if_new(
+                event_id,
+                seen_at=current,
+                expires_at=current + self.ttl_seconds,
+            )
+        )
+
+
 class FallbackFeishuEventDeduplicator:
     """优先使用主去重器，主去重器失败时回退到本地去重器。"""
 
@@ -182,13 +207,14 @@ class FeishuSignatureVerifier:
 
 
 class FeishuWebhookAuditLog:
-    """把飞书请求落盘成 JSONL 审计日志。"""
+    """把飞书请求写入 PostgreSQL，并保留本地 JSONL 审计兜底。"""
 
-    def __init__(self, state_dir: Path) -> None:
+    def __init__(self, state_dir: Path, *, repository: Any = None) -> None:
         """初始化实例。"""
         self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.events_file = self.state_dir / "events.jsonl"
+        self.repository = repository
 
     def write(
         self,
@@ -207,36 +233,60 @@ class FeishuWebhookAuditLog:
         message = event.get("message", {}) if isinstance(event.get("message"), dict) else {}
         sender = event.get("sender", {}) if isinstance(event.get("sender"), dict) else {}
         sender_id = sender.get("sender_id", {}) if isinstance(sender.get("sender_id"), dict) else {}
-        append_jsonl(
-            self.events_file,
-            {
-                "ts": time.time(),
-                "outcome": outcome,
-                "reason": reason,
-                "http_status": http_status,
-                "channel_account": channel_account,
-                "event_id": str(
-                    body.get("event_id")
-                    or body.get("header", {}).get("event_id", "")
-                    if isinstance(body.get("header"), dict)
-                    else body.get("event_id", "")
-                ),
-                "message_id": str(message.get("message_id", "")),
-                "chat_id": str(message.get("chat_id", "")),
-                "chat_type": str(message.get("chat_type", "")),
-                "sender_open_id": str(sender_id.get("open_id", "")),
-                "sender_user_id": str(sender_id.get("user_id", "")),
-                "headers": {
-                    "x-lark-request-timestamp": headers.get("x-lark-request-timestamp", ""),
-                    "x-lark-request-nonce": headers.get("x-lark-request-nonce", ""),
-                    "x-lark-signature": headers.get("x-lark-signature", ""),
-                },
-                "body_sha256": hashlib.sha256(
-                    json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
-                ).hexdigest(),
-                "inbound": inbound or {},
+        received_at = time.time()
+        row = {
+            "ts": received_at,
+            "outcome": outcome,
+            "reason": reason,
+            "http_status": http_status,
+            "channel_account": channel_account,
+            "event_id": str(
+                body.get("event_id")
+                or body.get("header", {}).get("event_id", "")
+                if isinstance(body.get("header"), dict)
+                else body.get("event_id", "")
+            ),
+            "message_id": str(message.get("message_id", "")),
+            "chat_id": str(message.get("chat_id", "")),
+            "chat_type": str(message.get("chat_type", "")),
+            "sender_open_id": str(sender_id.get("open_id", "")),
+            "sender_user_id": str(sender_id.get("user_id", "")),
+            "headers": {
+                "x-lark-request-timestamp": headers.get("x-lark-request-timestamp", ""),
+                "x-lark-request-nonce": headers.get("x-lark-request-nonce", ""),
+                "x-lark-signature": headers.get("x-lark-signature", ""),
             },
-        )
+            "body_sha256": hashlib.sha256(
+                json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+            "inbound": inbound or {},
+        }
+        if self.repository is not None:
+            try:
+                self.repository.write_feishu_webhook_event(
+                    {
+                        "id": f"feishu_evt_{uuid.uuid4().hex}",
+                        "received_at": received_at,
+                        "outcome": outcome,
+                        "reason": reason,
+                        "http_status": http_status,
+                        "channel_account": channel_account,
+                        "event_id": row["event_id"],
+                        "message_id": row["message_id"],
+                        "chat_id": row["chat_id"],
+                        "chat_type": row["chat_type"],
+                        "sender_open_id": row["sender_open_id"],
+                        "sender_user_id": row["sender_user_id"],
+                        "body_sha256": row["body_sha256"],
+                        "metadata": {
+                            "headers": row["headers"],
+                            "inbound": row["inbound"],
+                        },
+                    }
+                )
+            except Exception:
+                pass
+        append_jsonl(self.events_file, row)
 
 
 def extract_event_id(body: dict[str, Any]) -> str:

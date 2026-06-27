@@ -52,8 +52,13 @@ class LocalTaskQueue:
     ) -> TaskInstance | None:
         """预占一条可执行任务，并标记为 running。"""
 
+        type_list = list(task_types or [])
+        reserved = self._reserve_primary(worker_id=worker_id, task_types=type_list, now=now)
+        if reserved is not None:
+            self.store.write_task_to_disk(reserved)
+            return reserved
         candidates = self.store.list(statuses=["pending", "retrying"], limit=500)
-        type_set = set(task_types or [])
+        type_set = set(type_list)
         if type_set:
             candidates = [task for task in candidates if task.task_type in type_set]
         if not candidates:
@@ -63,6 +68,30 @@ class LocalTaskQueue:
         task.metadata = {**task.metadata, "worker_id": worker_id}
         self.store.create(task)
         return self.store.mark_running(task.id, now=now)
+
+    def _reserve_primary(
+        self,
+        *,
+        worker_id: str,
+        task_types: list[str],
+        now: float | None,
+    ) -> TaskInstance | None:
+        """优先通过数据库原子预占任务，避免多 worker 重复消费。"""
+
+        backend = getattr(self.store, "write_backend", None)
+        method = getattr(backend, "reserve_task", None) if backend is not None else None
+        if method is None:
+            return None
+        try:
+            row = method(worker_id=worker_id, task_types=task_types, now=now)
+        except Exception:
+            return None
+        if not isinstance(row, dict):
+            return None
+        try:
+            return TaskInstance.from_dict(row)
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def ack(
         self,

@@ -18,7 +18,14 @@ class TelegramChannel(Channel):
     name = "telegram"
     max_message_length = 4096
 
-    def __init__(self, account: ChannelAccount, state_dir: Path) -> None:
+    def __init__(
+        self,
+        account: ChannelAccount,
+        state_dir: Path,
+        *,
+        read_backend: Any = None,
+        write_backend: Any = None,
+    ) -> None:
         """初始化实例。"""
         if httpx is None:
             raise RuntimeError("TelegramChannel requires httpx")
@@ -32,6 +39,8 @@ class TelegramChannel(Channel):
         }
         self._http = httpx.Client(timeout=35.0)
         self._offset_path = state_dir / "telegram" / f"offset-{self.account_id}.txt"
+        self.read_backend = read_backend
+        self.write_backend = write_backend
         self._offset = self._load_offset(self._offset_path)
         self._seen: set[int] = set()
         self._media_groups: dict[str, dict[str, Any]] = {}
@@ -240,15 +249,48 @@ class TelegramChannel(Channel):
             current = current[cut:].lstrip("\n")
         return chunks
 
-    @staticmethod
-    def _save_offset(path: Path, offset: int) -> None:
+    def _save_offset(self, path: Path, offset: int) -> None:
         """保存运行状态。"""
+        if self.write_backend is not None:
+            try:
+                write_offset = getattr(self.write_backend, "write_channel_offset", None)
+                if write_offset is not None:
+                    write_offset(self.name, self.account_id, offset)
+                else:
+                    self.write_backend.upsert(
+                        "channel_offsets",
+                        {
+                            "key": f"{self.name}\x1f{self.account_id}",
+                            "channel": self.name,
+                            "account_id": self.account_id,
+                            "offset_value": int(offset),
+                            "updated_at": time.time(),
+                            "metadata": {},
+                        },
+                    )
+            except Exception:
+                pass
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(str(offset), encoding="utf-8")
 
-    @staticmethod
-    def _load_offset(path: Path) -> int:
+    def _load_offset(self, path: Path) -> int:
         """加载运行状态。"""
+        if self.read_backend is not None:
+            try:
+                read_offset = getattr(self.read_backend, "read_channel_offset", None)
+                if read_offset is not None:
+                    value = read_offset(self.name, self.account_id)
+                    if value is not None:
+                        return int(value)
+                rows = self.read_backend.list(
+                    "channel_offsets",
+                    limit=1,
+                    filters={"channel": self.name, "account_id": self.account_id},
+                )
+                if rows:
+                    return int(rows[0].get("offset_value", 0) or 0)
+            except Exception:
+                pass
         try:
             return int(path.read_text(encoding="utf-8").strip())
         except Exception:

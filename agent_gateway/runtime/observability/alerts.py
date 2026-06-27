@@ -10,6 +10,8 @@ import threading
 import time
 from typing import Any
 
+from agent_gateway.runtime.state.postgres import PostgresReadRepository
+
 
 @dataclass(slots=True)
 class AlertRule:
@@ -77,6 +79,9 @@ class AlertStore:
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.retention_days = max(1, int(retention_days))
         self._lock = threading.Lock()
+        self.read_backend: PostgresReadRepository | None = None
+        self.backup_sink = None
+        self.write_backend: Any | None = None
 
     def append(
         self,
@@ -110,6 +115,7 @@ class AlertStore:
             "value": value,
             "metadata": _sanitize_value(metadata or {}),
         }
+        self._write_primary(row)
         path = self._path_for_timestamp(ts)
         payload = json.dumps(row, ensure_ascii=False, sort_keys=True)
         with self._lock, path.open("a", encoding="utf-8") as handle:
@@ -121,6 +127,13 @@ class AlertStore:
         """读取最近若干条告警历史。"""
 
         safe_limit = max(1, min(int(limit), 1000))
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("errors", limit=safe_limit)
+                if rows:
+                    return rows[:safe_limit]
+            except Exception:
+                pass
         rows: list[dict[str, Any]] = []
         remaining = safe_limit
         for path in reversed(self._alert_files()):
@@ -168,6 +181,34 @@ class AlertStore:
 
         alert_date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
         return self.root_dir / f"alerts-{alert_date.isoformat()}.jsonl"
+
+    def _mirror(self, row: dict[str, Any]) -> None:
+        """把告警历史镜像到备份 sink。"""
+
+        sink = getattr(self, "backup_sink", None)
+        if sink is None:
+            return
+        method = getattr(sink, "write_alert", None) or getattr(sink, "write_alerts", None)
+        if method is None:
+            return
+        try:
+            method(row)
+        except Exception:
+            pass
+
+    def _write_primary(self, row: dict[str, Any]) -> None:
+        """优先写入数据库主存储；不可用时退回备份 sink。"""
+
+        backend = getattr(self, "write_backend", None)
+        if backend is not None:
+            method = getattr(backend, "write_alert", None) or getattr(backend, "write_alerts", None)
+            if method is not None:
+                try:
+                    method(row)
+                    return
+                except Exception:
+                    pass
+        self._mirror(row)
 
 
 def _isoformat(timestamp: float | None) -> str | None:

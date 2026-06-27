@@ -23,6 +23,7 @@ from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.runtime.infra.redis_client import RedisHealth
 from agent_gateway.runtime.infra.postgres_client import PostgresHealth
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
+from agent_gateway.runtime.state.postgres import PostgresWriteRepository
 
 
 class FakeHeartbeat:
@@ -100,6 +101,26 @@ class FakePostgresClient:
 
     def health(self) -> PostgresHealth:
         return self._health
+
+
+class FakePostgresWriteRepository(PostgresWriteRepository):
+    def __init__(self) -> None:
+        super().__init__(url="postgresql://example", enabled=False)
+        self.append_calls: list[tuple[str, dict[str, object]]] = []
+        self.upsert_calls: list[tuple[str, dict[str, object]]] = []
+        self.delete_calls: list[tuple[str, str]] = []
+
+    def append(self, table: str, row: dict[str, object]) -> dict[str, object]:
+        self.append_calls.append((table, row))
+        return row
+
+    def upsert(self, table: str, row: dict[str, object]) -> dict[str, object]:
+        self.upsert_calls.append((table, row))
+        return row
+
+    def delete(self, table: str, key: str) -> bool:
+        self.delete_calls.append((table, key))
+        return True
 
 
 def _build_tools() -> ToolRegistry:
@@ -334,6 +355,68 @@ def test_control_plane_lists_and_saves_runtime_state(tmp_path: Path) -> None:
     assert '"name": "primary"' in settings.profiles_config_file.read_text(encoding="utf-8")
     assert '"account_id": "cli-local"' in settings.channels_config_file.read_text(encoding="utf-8")
     assert control.get_source("agents")["agents"][0]["id"] == "main"
+
+
+def test_control_plane_records_config_audit_when_state_repository_is_postgres_like(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main", model="deepseek-v4-pro"))
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=BindingTable(),
+        profiles=ProfileManager(
+            [AuthProfile(name="primary", provider="anthropic", api_key="k", base_url="https://base")]
+        ),
+        channels=ChannelManager(),
+        state_repository=FakePostgresWriteRepository(),
+    )
+
+    control.save_agents()
+
+    repo = control.state_repository
+    assert isinstance(repo, FakePostgresWriteRepository)
+    assert len(repo.append_calls) == 1
+    table, row = repo.append_calls[0]
+    assert table == "config_audits"
+    assert row["entity_type"] == "agents"
+    assert row["action"] == "save"
+    assert row["after"]["count"] == 1
+
+
+def test_control_plane_saves_config_to_postgres_before_local_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+
+    class OrderedFakePostgresWriteRepository(FakePostgresWriteRepository):
+        def upsert(self, table: str, row: dict[str, object]) -> dict[str, object]:
+            events.append(f"db:{table}")
+            return super().upsert(table, row)
+
+    def fake_save_agents(settings: GatewaySettings, agents: list[AgentConfig]) -> None:
+        events.append("file:agents")
+
+    settings = _build_settings(tmp_path)
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main", model="deepseek-v4-pro"))
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_write_repository=OrderedFakePostgresWriteRepository(),
+    )
+    monkeypatch.setattr(
+        "agent_gateway.runtime.execution.control_plane.save_agents",
+        fake_save_agents,
+    )
+
+    control.save_agents()
+
+    assert events[:2] == ["db:agents", "file:agents"]
 
 
 def test_control_plane_uses_state_repository_for_read_views(tmp_path: Path) -> None:

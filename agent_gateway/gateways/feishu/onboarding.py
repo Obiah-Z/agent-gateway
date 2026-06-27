@@ -87,13 +87,19 @@ class FeishuOnboardingSession:
 
 
 class FeishuOnboardingSessionStore:
-    """接入会话的本地 JSON 持久化存储。"""
+    """接入会话存储。
 
-    def __init__(self, root: Path) -> None:
+    PostgreSQL 后端存在时优先读写数据库；本地 `sessions.json` 始终作为
+    fallback/audit 保留，确保数据库不可用时 onboarding 流程仍可继续。
+    """
+
+    def __init__(self, root: Path, *, read_backend: Any = None, write_backend: Any = None) -> None:
         """初始化实例。"""
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.sessions_file = self.root / "sessions.json"
+        self.read_backend = read_backend
+        self.write_backend = write_backend
 
     def create(
         self,
@@ -162,6 +168,29 @@ class FeishuOnboardingSessionStore:
 
     def _load_all(self) -> list[FeishuOnboardingSession]:
         """加载运行状态。"""
+        sessions = self._load_all_from_backend()
+        if sessions:
+            return sessions
+        return self._load_all_from_disk()
+
+    def _load_all_from_backend(self) -> list[FeishuOnboardingSession]:
+        """优先从外部状态仓储加载会话。"""
+
+        if self.read_backend is None:
+            return []
+        try:
+            rows = self.read_backend.list("feishu_onboarding_sessions", limit=500)
+        except Exception:
+            return []
+        return [
+            FeishuOnboardingSession.from_dict(row)
+            for row in rows
+            if isinstance(row, dict) and row.get("session_id") and row.get("binding_code")
+        ]
+
+    def _load_all_from_disk(self) -> list[FeishuOnboardingSession]:
+        """从本地 JSON 文件加载会话。"""
+
         if not self.sessions_file.exists():
             return []
         try:
@@ -176,6 +205,29 @@ class FeishuOnboardingSessionStore:
         ]
 
     def _save_all(self, sessions: list[FeishuOnboardingSession]) -> None:
+        """保存会话列表：先写数据库，再写本地 JSON 兜底。"""
+
+        if self.write_backend is not None:
+            for session in sessions:
+                self._write_backend_session(session)
+        self._save_all_to_disk(sessions)
+
+    def _write_backend_session(self, session: FeishuOnboardingSession) -> None:
+        """写入单条会话到外部状态仓储。"""
+
+        payload = session.to_dict()
+        payload["updated_at"] = time.time()
+        payload["metadata"] = {}
+        try:
+            write_session = getattr(self.write_backend, "write_feishu_onboarding_session", None)
+            if write_session is not None:
+                write_session(payload)
+                return
+            self.write_backend.upsert("feishu_onboarding_sessions", payload)
+        except Exception:
+            return
+
+    def _save_all_to_disk(self, sessions: list[FeishuOnboardingSession]) -> None:
         """原子写入会话列表，避免进程中断留下半截 JSON。"""
 
         tmp = self.sessions_file.with_suffix(".tmp")

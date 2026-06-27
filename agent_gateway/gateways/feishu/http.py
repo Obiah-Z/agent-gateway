@@ -21,6 +21,7 @@ from agent_gateway.gateways.feishu.security import (
     FeishuSignatureVerifier,
     FeishuWebhookAuditLog,
     FallbackFeishuEventDeduplicator,
+    PostgresFeishuEventDeduplicator,
     RedisFeishuEventDeduplicator,
     extract_event_id,
 )
@@ -43,6 +44,7 @@ class FeishuWebhookServer:
         dedup_ttl_seconds: int = 86400,
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
+        state_write_repository: Any = None,
     ) -> None:
         """初始化实例。"""
         self.host = host
@@ -50,21 +52,30 @@ class FeishuWebhookServer:
         self.path = path
         self.channels = channels
         self.channel_runtime = channel_runtime
-        self.audit = FeishuWebhookAuditLog(state_dir)
+        self.audit = FeishuWebhookAuditLog(state_dir, repository=state_write_repository)
         local_dedup = FeishuEventDeduplicator(
             state_dir / "dedup",
             ttl_seconds=dedup_ttl_seconds,
         )
+        fallback_dedup: Any = local_dedup
+        if state_write_repository is not None and getattr(state_write_repository, "enabled", False):
+            fallback_dedup = FallbackFeishuEventDeduplicator(
+                PostgresFeishuEventDeduplicator(
+                    state_write_repository,
+                    ttl_seconds=dedup_ttl_seconds,
+                ),
+                local_dedup,
+            )
         if redis_client is not None and getattr(redis_client, "enabled", False):
             self.dedup = FallbackFeishuEventDeduplicator(
                 RedisFeishuEventDeduplicator(
                     redis_client,
                     ttl_seconds=dedup_ttl_seconds,
                 ),
-                local_dedup,
+                fallback_dedup,
             )
         else:
-            self.dedup = local_dedup
+            self.dedup = fallback_dedup
         self.signature_window_seconds = max(30, signature_window_seconds)
         self.event_store = event_store
         self._server: asyncio.base_events.Server | None = None

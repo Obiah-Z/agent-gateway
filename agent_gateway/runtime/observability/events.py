@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from typing import Any
+from typing import Any
 
 
 ERROR_STATUSES = {"error", "failed", "rejected", "critical"}
@@ -109,6 +110,8 @@ class RuntimeEventStore:
         self.retention_days = max(1, int(retention_days))
         self._lock = threading.Lock()
         self.backup_sink = None
+        self.read_backend: Any | None = None
+        self.write_backend: Any | None = None
 
     def record(
         self,
@@ -147,8 +150,8 @@ class RuntimeEventStore:
             metadata=self._sanitize_metadata(metadata or {}),
         )
         row = event.to_dict()
+        self._write_primary(row)
         self.write_event_row(row)
-        self._mirror(row)
         return row
 
     def write_event_row(self, row: dict[str, Any]) -> None:
@@ -171,6 +174,24 @@ class RuntimeEventStore:
     ) -> list[dict[str, Any]]:
         """按过滤条件回看最近事件。"""
 
+        if self.read_backend is not None:
+            try:
+                return self.read_backend.list(
+                    "runtime_events",
+                    limit=limit,
+                    filters={
+                        "event_type": event_type,
+                        "component": component,
+                        "status": status,
+                        "correlation_id": correlation_id,
+                        "agent_id": agent_id,
+                        "channel": channel,
+                        "job_id": job_id,
+                        "delivery_id": delivery_id,
+                    },
+                )
+            except Exception:
+                pass
         safe_limit = max(1, min(int(limit), 500))
         rows = self._read_tail(max(safe_limit, min(safe_limit * 5, 2000)))
         filtered = []
@@ -203,6 +224,18 @@ class RuntimeEventStore:
     ) -> list[dict[str, Any]]:
         """返回最近错误事件，并排除约定的无害拒绝项。"""
 
+        if self.read_backend is not None:
+            try:
+                return self.read_backend.list(
+                    "errors",
+                    limit=limit,
+                    filters={
+                        "component": component,
+                        "correlation_id": correlation_id,
+                    },
+                )
+            except Exception:
+                pass
         rows = self._read_tail(max(50, min(int(limit) * 5, 1000)))
         errors = [
             row
@@ -260,6 +293,20 @@ class RuntimeEventStore:
             method(row)
         except Exception:
             pass
+
+    def _write_primary(self, row: dict[str, Any]) -> None:
+        """优先写入数据库主存储；不可用时退回备份 sink。"""
+
+        backend = getattr(self, "write_backend", None)
+        if backend is not None:
+            method = getattr(backend, "write_event", None)
+            if method is not None:
+                try:
+                    method(row)
+                    return
+                except Exception:
+                    pass
+        self._mirror(row)
 
     def _read_tail(self, limit: int) -> list[dict[str, Any]]:
         """从最近文件中逆序读取尾部事件。"""

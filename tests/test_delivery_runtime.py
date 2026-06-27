@@ -9,6 +9,43 @@ from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 
 
+class RecordingDeliveryBackend:
+    """测试用内存 delivery_entries backend。"""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, object]] = {}
+        self.deleted: list[str] = []
+        self.fail_writes = False
+
+    def list(self, table: str, *, limit: int = 50, filters=None):
+        assert table == "delivery_entries"
+        filters = filters or {}
+        state = filters.get("state")
+        rows = [
+            row
+            for row in self.rows.values()
+            if not state or row.get("state") == state
+        ]
+        return rows[:limit]
+
+    def get(self, table: str, key: str):
+        assert table == "delivery_entries"
+        return self.rows.get(key)
+
+    def write_delivery_entry(self, entry, *, state: str = "pending"):
+        if self.fail_writes:
+            raise RuntimeError("db unavailable")
+        row = entry.to_dict()
+        row["state"] = state
+        row["updated_at"] = 1.0
+        self.rows[entry.id] = row
+        return row
+
+    def delete_delivery_entry(self, delivery_id: str) -> bool:
+        self.deleted.append(delivery_id)
+        return self.rows.pop(delivery_id, None) is not None
+
+
 class DummyChannel(Channel):
     name = "cli"
 
@@ -172,6 +209,46 @@ def test_delivery_queue_can_retry_failed_and_discard_entries(tmp_path: Path) -> 
 
     assert queue.discard(pending_id, state="pending") is True
     assert queue.get_pending(pending_id) is None
+
+
+def test_delivery_queue_uses_database_backend_for_state_transitions(tmp_path: Path) -> None:
+    backend = RecordingDeliveryBackend()
+    queue = DeliveryQueue(tmp_path / "queue")
+    queue.read_backend = backend
+    queue.write_backend = backend
+
+    delivery_id = queue.enqueue("cli", "peer-1", "hello", {"account_id": "cli-local"})
+
+    assert backend.rows[delivery_id]["state"] == "pending"
+    assert [entry.id for entry in queue.pending_entries()] == [delivery_id]
+
+    pending = queue.get_pending(delivery_id)
+    assert pending is not None
+    queue.move_to_failed(pending)
+    assert queue.pending_entries() == []
+    assert [entry.id for entry in queue.failed_entries()] == [delivery_id]
+    assert backend.rows[delivery_id]["state"] == "failed"
+
+    assert queue.retry_now(delivery_id) is True
+    assert backend.rows[delivery_id]["state"] == "pending"
+    assert backend.rows[delivery_id]["retry_count"] == 0
+
+    queue.ack(delivery_id)
+    assert delivery_id in backend.deleted
+    assert queue.pending_entries() == []
+
+
+def test_delivery_queue_falls_back_to_local_files_when_backend_write_fails(tmp_path: Path) -> None:
+    backend = RecordingDeliveryBackend()
+    backend.fail_writes = True
+    queue = DeliveryQueue(tmp_path / "queue")
+    queue.read_backend = None
+    queue.write_backend = backend
+
+    delivery_id = queue.enqueue("cli", "peer-1", "hello", {})
+
+    assert backend.rows == {}
+    assert queue.get_pending(delivery_id) is not None
 
 
 def test_delivery_runner_moves_permanent_failure_to_failed_without_retry(tmp_path: Path) -> None:

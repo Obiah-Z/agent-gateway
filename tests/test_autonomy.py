@@ -121,6 +121,20 @@ class FakeRedisOnceClient:
         return Result()
 
 
+class FakeCronRunRepository:
+    enabled = True
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.rows: list[dict[str, object]] = []
+
+    def write_cron_run(self, row: dict[str, object]) -> dict[str, object]:
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        self.rows.append(dict(row))
+        return row
+
+
 def _build_channel_manager() -> tuple[ChannelManager, DummyChannel]:
     manager = ChannelManager()
     channel = DummyChannel()
@@ -234,6 +248,95 @@ def test_cron_service_runs_system_event(tmp_path: Path) -> None:
     asyncio.run(cron._run_job(job, time.time()))
 
     assert channel.sent == ["[System Ping] Ping"]
+
+
+def test_cron_service_writes_postgres_and_local_run_log(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "system-ping",
+                "name": "System Ping",
+                "enabled": True,
+                "schedule": {"kind": "every", "every_seconds": 1, "anchor": "2026-01-01T00:00:00+00:00"},
+                "payload": {"kind": "system_event", "text": "Ping"},
+            }
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, _channel = _build_channel_manager()
+    repo = FakeCronRunRepository()
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        state_write_repository=repo,
+    )
+
+    asyncio.run(cron._run_job(cron.jobs[0], 1782631200.0))
+
+    assert repo.rows[0]["job_id"] == "system-ping"
+    assert repo.rows[0]["status"] == "ok"
+    local_rows = (workspace / "cron" / "cron-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(local_rows) == 1
+    assert json.loads(local_rows[0])["job_id"] == "system-ping"
+
+
+def test_cron_service_keeps_local_run_log_when_postgres_fails(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "CRON.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "system-ping",
+                        "name": "System Ping",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "every_seconds": 1, "anchor": "2026-01-01T00:00:00+00:00"},
+                        "payload": {"kind": "system_event", "text": "Ping"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, _channel = _build_channel_manager()
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        state_write_repository=FakeCronRunRepository(fail=True),
+    )
+
+    asyncio.run(cron._run_job(cron.jobs[0], 1782631200.0))
+
+    local_rows = (workspace / "cron" / "cron-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(local_rows) == 1
+    assert json.loads(local_rows[0])["status"] == "ok"
 
 
 def test_cron_service_queues_system_event_for_task_worker(tmp_path: Path) -> None:
@@ -502,7 +605,7 @@ def test_cron_service_runs_agent_news_digest(
             pass
 
     class FakeStore:
-        def __init__(self, root: Path) -> None:
+        def __init__(self, root: Path, *args, **kwargs) -> None:
             self.root = root
 
         def mark_seen(self, items: list[NewsItem]) -> None:
@@ -599,7 +702,7 @@ def test_cron_service_runs_github_skill_digest(
             pass
 
     class FakeStore:
-        def __init__(self, root: Path) -> None:
+        def __init__(self, root: Path, *args, **kwargs) -> None:
             self.root = root
 
         def mark_seen(self, items: list[NewsItem]) -> None:

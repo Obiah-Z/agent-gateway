@@ -31,3 +31,28 @@ def test_memory_store_lists_recent_entries(tmp_path: Path) -> None:
     assert rows[0]["content"] == "second memory"
     assert rows[0]["category"] == "preference"
     assert rows[0]["file"].endswith(".jsonl")
+
+
+def test_memory_store_hybrid_search_prefers_read_backend(tmp_path: Path) -> None:
+    class FakeReadBackend:
+        def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+            assert table == "memory_entries"
+            return [
+                {
+                    "content": "PostgreSQL memory recall should be used first.",
+                    "category": "database",
+                    "source_file": "postgres",
+                }
+            ]
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "MEMORY.md").write_text("Local only content.", encoding="utf-8")
+    store = MemoryStore(workspace)
+    store.read_backend = FakeReadBackend()
+
+    results = store.hybrid_search("PostgreSQL recall", top_k=3)
+
+    assert results
+    assert "PostgreSQL memory recall" in results[0].snippet
+    assert results[0].path == "postgres [database]"

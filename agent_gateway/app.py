@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
+from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+import time
+import uuid
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from agent_gateway.runtime.domain.agents import AgentManager
-from agent_gateway.gateways.messaging.bootstrap import build_channel_manager
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings, load_env
 from agent_gateway.config_loader import (
     ensure_default_project_files,
-    load_agents,
-    load_auth_profiles,
-    load_bindings,
-    load_channel_accounts,
 )
 from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.ai.context.prompt import PromptAssembler
@@ -22,10 +21,9 @@ from agent_gateway.ai.context.memory import MemoryStore, register_memory_tools
 from agent_gateway.ai.context.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
 from agent_gateway.runtime.observability.events import RuntimeEventStore
-from agent_gateway.runtime.observability.alerts import AlertStore
+from agent_gateway.runtime.observability.alerts import AlertRule, AlertState, AlertStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
-from agent_gateway.runtime.state.adapter import LocalStateReadRepository
-from agent_gateway.runtime.state.factory import build_state_repository
+from agent_gateway.runtime.state.factory import StateRepositoryBundle, build_state_repository
 from agent_gateway.gateways.feishu.onboarding import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
@@ -42,7 +40,7 @@ from agent_gateway.runtime.execution.lanes import CommandQueue
 from agent_gateway.runtime.execution.loop import AgentLoopRunner
 from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
-from agent_gateway.runtime.execution.resilience import ProfileManager, ResilienceRunner
+from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
@@ -51,6 +49,13 @@ from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 from agent_gateway.gateways.control.websocket_server import GatewayServer
+from agent_gateway.runtime.state.postgres import (
+    PostgresReadRepository,
+    PostgresWriteRepository,
+    build_postgres_schema_sql,
+    initialize_postgres_schema,
+)
+from agent_gateway.runtime.state.migration import backfill_local_state_to_repository
 from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.ai.tools.builtin import register_builtin_tools
 from agent_gateway.ai.tools.registry import ToolRegistry
@@ -81,6 +86,7 @@ class GatewayApplication:
     delivery_runtime: DeliveryRuntime  # 出站投递运行时，负责重试、失败归档和成功回调。
     command_queue: CommandQueue  # 命名并发车道队列，控制同类任务串行执行。
     control_plane: GatewayControlPlane  # 控制面服务，提供配置、状态和运维操作。
+    state_repository: StateRepositoryBundle  # 统一状态仓储装配结果，包含读仓储、写仓储和本地备份。
     redis_client: RedisClient  # Redis 基础设施客户端，用于后续去重、锁和限流。
     postgres_client: PostgresClient  # PostgreSQL 基础设施客户端，用于状态外置健康检查与接入。
     task_store: LocalTaskStore  # 后台任务本地状态存储。
@@ -112,46 +118,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     settings.ensure_directories()
     ensure_default_project_files(settings)
 
-    agents = AgentManager()
-    for config in load_agents(settings):
-        agents.register(config)
-    if not agents.list():
-        raise RuntimeError("No agents loaded from config")
-
-    bindings = BindingTable()
-    for binding in load_bindings(settings):
-        binding.agent_id = normalize_agent_id(binding.agent_id)
-        bindings.add(binding)
-
     sessions = SessionStore(settings.sessions_dir)
-    tools = ToolRegistry()
     memory_store = MemoryStore(settings.workspace_root)
-    skills_manager = SkillsManager(settings.workspace_root)
-    skills_manager.discover()
-    register_builtin_tools(
-        tools,
-        settings.workspace_root,
-        max_output_chars=settings.max_tool_output_chars,
-        default_timeout=settings.tool_timeout_seconds,
-    )
-    register_memory_tools(tools, memory_store)
-    register_web_search_tools(tools, settings)
-    prompt_assembler = PromptAssembler(
-        settings.workspace_root,
-        memory_store=memory_store,
-        skills_manager=skills_manager,
-    )
-    profile_manager = ProfileManager(load_auth_profiles(settings))
-    resilience_runner = ResilienceRunner(settings, profile_manager, tools)
-    runner = AgentLoopRunner(
-        settings,
-        agents,
-        sessions,
-        prompt_assembler,
-        resilience_runner,
-    )
-    command_queue = CommandQueue()
-    delivery_queue = DeliveryQueue(settings.delivery_queue_dir)
     event_store = RuntimeEventStore(
         settings.events_dir,
         retention_days=settings.events_retention_days,
@@ -175,7 +143,6 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
     )
     task_store = LocalTaskStore(settings.tasks_dir)
-    task_queue = LocalTaskQueue(task_store)
     state_bundle = build_state_repository(
         settings,
         sessions=sessions,
@@ -185,6 +152,80 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         alerts=alert_store,
         memory=memory_store,
     )
+    sessions.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    task_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    event_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    memory_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    metrics_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    alert_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    sessions.backup_sink = state_bundle.backup
+    task_store.backup_sink = state_bundle.backup
+    event_store.backup_sink = state_bundle.backup
+    memory_store.backup_sink = state_bundle.backup
+    primary_write = state_bundle.write if state_bundle.write is not None and state_bundle.write.enabled else None
+    sessions.write_backend = primary_write
+    task_store.write_backend = primary_write
+    event_store.write_backend = primary_write
+    memory_store.write_backend = primary_write
+    metrics_store.write_backend = primary_write
+    alert_store.write_backend = primary_write
+
+    agents = AgentManager()
+    bindings = BindingTable()
+    profile_manager = ProfileManager(
+        [
+            AuthProfile(
+                name="bootstrap",
+                provider="anthropic",
+                api_key=settings.anthropic_api_key,
+                base_url=settings.anthropic_base_url,
+            )
+        ]
+    )
+    channel_manager = ChannelManager()
+    config_loader = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profile_manager,
+        channels=channel_manager,
+        state_repository=state_bundle.read,
+        state_write_repository=state_bundle.config_write,
+    )
+    config_loader.reload_agents()
+    config_loader.reload_bindings()
+    config_loader.reload_profiles()
+    asyncio.run(config_loader.reload_channels())
+
+    tools = ToolRegistry()
+    skills_manager = SkillsManager(settings.workspace_root)
+    skills_manager.discover()
+    register_builtin_tools(
+        tools,
+        settings.workspace_root,
+        max_output_chars=settings.max_tool_output_chars,
+        default_timeout=settings.tool_timeout_seconds,
+    )
+    register_memory_tools(tools, memory_store)
+    register_web_search_tools(tools, settings)
+    prompt_assembler = PromptAssembler(
+        settings.workspace_root,
+        memory_store=memory_store,
+        skills_manager=skills_manager,
+    )
+    resilience_runner = ResilienceRunner(settings, profile_manager, tools)
+    runner = AgentLoopRunner(
+        settings,
+        agents,
+        sessions,
+        prompt_assembler,
+        resilience_runner,
+    )
+    command_queue = CommandQueue()
+    delivery_queue = DeliveryQueue(settings.delivery_queue_dir)
+    delivery_queue.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None
+    delivery_queue.write_backend = primary_write
+    task_queue = LocalTaskQueue(task_store)
     dispatcher = GatewayDispatcher(
         agents,
         bindings,
@@ -193,7 +234,6 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         delivery_queue,
         event_store=event_store,
     )
-    channel_manager = build_channel_manager(settings, load_channel_accounts(settings))
     autonomy_runtime = AutonomyRuntime(
         settings,
         dispatcher,
@@ -201,6 +241,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         event_store=event_store,
         redis_client=redis_client,
         task_queue=task_queue,
+        state_read_repository=state_bundle.read,
+        state_write_repository=primary_write,
     )
     task_worker = TaskWorkerRuntime(task_queue, worker_id="local-worker")
     task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)
@@ -263,6 +305,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         redis_client=redis_client,
         postgres_client=postgres_client,
         state_repository=state_bundle.read,
+        state_write_repository=state_bundle.config_write,
         task_queue=task_queue,
         task_worker=task_worker,
     )
@@ -285,6 +328,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         delivery_runtime=delivery_runtime,
         command_queue=command_queue,
         control_plane=control_plane,
+        state_repository=state_bundle,
         redis_client=redis_client,
         postgres_client=postgres_client,
         task_store=task_store,
@@ -302,7 +346,11 @@ async def serve(app: GatewayApplication) -> None:
     """启动网关所有常驻服务，并在退出时统一回收。"""
 
     role_plan = build_runtime_role_plan(app.settings.runtime_roles)
-    onboarding_store = FeishuOnboardingSessionStore(app.settings.data_dir / "onboarding" / "feishu")
+    onboarding_store = FeishuOnboardingSessionStore(
+        app.settings.data_dir / "onboarding" / "feishu",
+        read_backend=app.state_repository.read,
+        write_backend=app.state_repository.write,
+    )
     onboarding_service = FeishuOnboardingService(
         store=onboarding_store,
         control_plane=app.control_plane,
@@ -350,6 +398,7 @@ async def serve(app: GatewayApplication) -> None:
         dedup_ttl_seconds=app.settings.feishu_event_dedup_ttl_seconds,
         event_store=app.event_store,
         redis_client=app.redis_client,
+        state_write_repository=app.state_repository.write,
     )
     feishu_long_connection = FeishuLongConnectionRuntime(
         channels=app.channel_manager,
@@ -513,6 +562,160 @@ async def trigger_cron_once_with_timeout(
         }
 
 
+def run_postgres_smoke(settings: GatewaySettings) -> dict[str, object]:
+    """执行 PostgreSQL 主存储最小端到端验证。
+
+    该验证只触发状态层写入，不调用模型、不发送外部消息。成功标准是核心运行状态
+    能从 PostgreSQL 读回，同时本地 fallback 文件也已经生成。
+    """
+
+    with TemporaryDirectory(prefix="agent-gateway-pg-smoke-") as temp_dir:
+        root = Path(temp_dir)
+        smoke_settings = replace(
+            settings,
+            postgres_enabled=True,
+            data_dir=root / "data",
+            config_dir=root / "config",
+            workspace_root=root / "workspace",
+        )
+        return _run_postgres_smoke_with_settings(smoke_settings)
+
+
+def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, object]:
+    """在隔离 settings 下执行 PostgreSQL smoke 主逻辑。"""
+
+    settings.ensure_directories()
+    initialize_postgres_schema(
+        url=settings.postgres_url,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
+    app = build_application(settings)
+    marker = f"pg-smoke-{uuid.uuid4().hex[:10]}"
+    session_key = f"smoke:{marker}"
+    now = time.time()
+
+    app.sessions.rewrite_messages(
+        "main",
+        session_key,
+        [{"role": "user", "content": f"{marker}: session"}],
+    )
+    task = app.task_queue.enqueue(
+        task_type="postgres_smoke",
+        source="postgres-smoke",
+        agent_id="main",
+        session_key=session_key,
+        priority=1,
+        idempotency_key=marker,
+        payload={"marker": marker},
+    )
+    reserved = app.task_queue.reserve(
+        worker_id="postgres-smoke",
+        task_types=["postgres_smoke"],
+        now=now,
+    )
+    if reserved is not None:
+        app.task_queue.ack(reserved.id, result_preview=marker, now=now + 1)
+    event = app.event_store.record(
+        "postgres.smoke",
+        status="ok",
+        component="postgres_smoke",
+        message=marker,
+        correlation_id=marker,
+        agent_id="main",
+        session_key=session_key,
+        metadata={"marker": marker},
+    )
+    app.memory_store.write_memory(f"{marker}: memory", category="postgres_smoke")
+    app.metrics_store.record(
+        runtime={"marker": marker},
+        metadata={"marker": marker},
+        timestamp=now,
+    )
+    alert_rule = AlertRule(
+        id=f"{marker}-rule",
+        title="PostgreSQL smoke",
+        severity="info",
+        description="PostgreSQL smoke verification",
+        threshold=1.0,
+    )
+    alert_state = AlertState(rule_id=alert_rule.id, status="inactive", metadata={"marker": marker})
+    app.alert_store.append(
+        rule=alert_rule,
+        state=alert_state,
+        event="postgres_smoke",
+        message=marker,
+        value=0.0,
+        metadata={"marker": marker},
+        timestamp=now,
+    )
+    alert_id = f"alert_{int(now * 1000)}"
+    delivery_id = app.delivery_queue.enqueue(
+        "cli",
+        "postgres-smoke",
+        marker,
+        {"kind": "postgres_smoke", "marker": marker},
+    )
+
+    reader = PostgresReadRepository(
+        url=settings.postgres_url,
+        enabled=True,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
+    checks = {
+        "session": bool(reader.read_session_messages("main", session_key)),
+        "task": bool(reader.get("tasks", task.id)),
+        "event": bool(reader.get("runtime_events", str(event.get("event_id", "")))),
+        "memory": _postgres_smoke_has_marker(reader, "memory_entries", marker, "metadata"),
+        "metric": _postgres_smoke_has_marker(reader, "metrics", marker, "metadata"),
+        "alert": bool(reader.get("errors", alert_id)),
+        "delivery": bool(reader.get("delivery_entries", delivery_id)),
+    }
+    local_checks = {
+        "session_file": app.sessions.session_path("main", session_key).exists(),
+        "task_file": (settings.tasks_dir / f"{task.id}.json").exists(),
+        "event_file": any(settings.events_dir.glob("runtime-events-*.jsonl")),
+        "memory_file": (settings.workspace_root / "memory" / "daily" / f"{datetime.now(timezone.utc).date().isoformat()}.jsonl").exists(),
+        "metric_file": any(settings.metrics_dir.glob("metrics-*.jsonl")),
+        "alert_file": any(settings.alerts_dir.glob("alerts-*.jsonl")),
+        "delivery_file": (settings.delivery_queue_dir / f"{delivery_id}.json").exists(),
+    }
+    ok = all(checks.values()) and all(local_checks.values())
+    app.delivery_queue.discard(delivery_id)
+    write_backend = app.task_store.write_backend
+    if write_backend is not None and hasattr(write_backend, "delete"):
+        try:
+            write_backend.delete("tasks", task.id)
+        except Exception:
+            pass
+    return {
+        "result": "ok" if ok else "failed",
+        "marker": marker,
+        "postgres_checks": checks,
+        "local_fallback_checks": local_checks,
+    }
+
+
+def _postgres_smoke_has_marker(
+    reader: PostgresReadRepository,
+    table: str,
+    marker: str,
+    metadata_key: str,
+) -> bool:
+    """检查最近若干行是否包含 smoke marker。"""
+
+    try:
+        rows = reader.list(table, limit=50)
+    except Exception:
+        return False
+    for row in rows:
+        metadata = row.get(metadata_key, {})
+        if isinstance(metadata, dict) and metadata.get("marker") == marker:
+            return True
+        if marker in str(row):
+            return True
+    return False
+
+
 def main() -> None:
     """CLI 入口。"""
 
@@ -543,11 +746,66 @@ def main() -> None:
         default=180.0,
         help="Maximum time to wait for the cron job and delivery flush.",
     )
+    postgres_init = subparsers.add_parser(
+        "postgres-init",
+        help="Initialize PostgreSQL tables used by the gateway.",
+    )
+    postgres_init.add_argument(
+        "--print-sql",
+        action="store_true",
+        help="Print the generated schema SQL instead of executing it.",
+    )
+    postgres_migrate = subparsers.add_parser(
+        "postgres-migrate-local",
+        help="Backfill local JSON/JSONL state files into PostgreSQL.",
+    )
+    postgres_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Scan local files and print counts without writing to PostgreSQL.",
+    )
+    subparsers.add_parser(
+        "postgres-smoke",
+        help="Verify PostgreSQL primary storage and local fallback writes.",
+    )
 
     parser.add_argument("--env-file", default="")
     args = parser.parse_args()
 
     load_env(Path(args.env_file) if args.env_file else None)
+    if args.command == "postgres-init":
+        settings = GatewaySettings.from_env()
+        sql = build_postgres_schema_sql()
+        if args.print_sql:
+            print(sql)
+            return
+        initialize_postgres_schema(
+            url=settings.postgres_url,
+            connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+        )
+        print({"result": "ok", "postgres_url": settings.postgres_url})
+        return
+    if args.command == "postgres-migrate-local":
+        settings = GatewaySettings.from_env()
+        settings.ensure_directories()
+        writer = PostgresWriteRepository(
+            url=settings.postgres_url,
+            enabled=True,
+            connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+        )
+        report = backfill_local_state_to_repository(
+            settings,
+            writer,
+            dry_run=bool(args.dry_run),
+        )
+        print(report.to_dict())
+        return
+    if args.command == "postgres-smoke":
+        settings = GatewaySettings.from_env()
+        result = run_postgres_smoke(settings)
+        print(result)
+        return
+
     app = build_application()
     if args.command in {None, "serve"}:
         asyncio.run(serve(app))

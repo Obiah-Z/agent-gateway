@@ -139,6 +139,98 @@ agent-gateway cron-trigger <job_id> --no-flush
 | `config/profiles.json` | 模型服务 profile |
 | `workspace/` | 系统提示词、长期记忆、skills、Heartbeat、Cron、新闻源和 Agent 局部提示词 |
 
+## PostgreSQL 状态存储与迁移
+
+系统已经支持把配置和运行状态迁移到 PostgreSQL，并在开启后优先从数据库读取；本地 JSON/JSONL 文件仍保留为审计、回放和兜底来源。
+
+当前已覆盖的数据包括：
+
+- `agents`、`bindings`、`profiles`、`channels`
+- `delivery_entries`、`sessions`、`tasks`
+- `runtime_events`、`errors`
+- `metrics`、`memory_entries`
+- `config_audits`
+- `feishu_dedup_entries`、`feishu_webhook_events`
+- `feishu_onboarding_sessions`
+- `channel_offsets`
+- `cron_runs`
+- `news_items`
+
+### 1. 配置连接
+
+`.env` 中的默认 PostgreSQL 配置如下：
+
+```env
+GATEWAY_POSTGRES_ENABLED=false
+GATEWAY_POSTGRES_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres
+GATEWAY_POSTGRES_CONNECT_TIMEOUT_SECONDS=2.0
+```
+
+说明：
+
+- `GATEWAY_POSTGRES_ENABLED=false` 时，运行时默认仍读取本地文件。
+- `postgres-migrate-local` 命令会显式写入 PostgreSQL，不依赖 `GATEWAY_POSTGRES_ENABLED`。
+- 完成建表和回填验证后，可把 `GATEWAY_POSTGRES_ENABLED=true`，让运行时优先读取 PostgreSQL。
+
+### 2. 初始化表结构
+
+```bash
+agent-gateway postgres-init --print-sql
+agent-gateway postgres-init
+```
+
+`--print-sql` 只打印建表 SQL，不构建完整网关应用；不带参数时通过本机 `psql` 执行 `CREATE TABLE IF NOT EXISTS` 和索引初始化。
+
+### 3. 迁移本地数据
+
+先 dry-run 预检：
+
+```bash
+agent-gateway postgres-migrate-local --dry-run
+```
+
+确认扫描数量和错误列表后执行实际回填：
+
+```bash
+agent-gateway postgres-migrate-local
+```
+
+回填行为：
+
+- 只读取本地文件，不删除、不移动源数据。
+- 使用稳定主键和 `upsert`，重复执行不会重复插入配置和运行记录。
+- 飞书 Webhook 的旧去重文件和审计文件也会回填到 PostgreSQL，便于多实例共享入站去重状态和集中查询审计记录。
+- 飞书扫码接入的旧 onboarding 会话也会回填到 PostgreSQL，运行时会优先使用数据库并保留本地 `sessions.json` 兜底。
+- Telegram 轮询 offset 会回填到 PostgreSQL，运行时优先使用数据库 offset 并保留本地 offset 文件兜底。
+- Cron 运行记录会回填到 PostgreSQL，运行时优先写入数据库并保留本地 `cron-runs.jsonl` 兜底。
+- AI Agent 简报和 GitHub Skill 简报的已采集/已推送条目会回填到 PostgreSQL，运行时优先用 `news_items` 去重并继续保留本地 JSONL 兜底。
+- 大量 runtime events 和 metrics 使用批量 upsert，避免逐条启动 `psql`。
+- 本地文件继续作为保底路径，数据库不可用时读路径会回退到本地。
+
+### 4. 启用数据库优先读取
+
+回填完成后再开启：
+
+```env
+GATEWAY_POSTGRES_ENABLED=true
+```
+
+开启后，控制面和 Dashboard 的会话、任务、投递队列、事件、错误、指标、记忆以及配置读取会优先访问 PostgreSQL；控制面配置保存会先写 PostgreSQL，再写本地 JSON 作为 fallback/audit；记忆召回会优先使用 `memory_entries`，新闻简报去重会优先使用 `news_items`，当数据库无数据或读取失败时，仍回退到本地 JSON/JSONL。
+
+### 5. 验证
+
+常用验证命令：
+
+```bash
+psql "$GATEWAY_POSTGRES_URL" -c "select count(*) from runtime_events;"
+agent-gateway postgres-smoke
+GATEWAY_POSTGRES_ENABLED=true agent-gateway serve
+```
+
+`postgres-smoke` 会临时开启 PostgreSQL 主存储，写入带唯一 marker 的会话、任务、运行事件、记忆、指标、告警和投递队列记录，并同时检查本地 JSON/JSONL fallback 文件是否生成。该命令不调用模型，也不会向外部通道发送消息。
+
+本机实测回填约 1.65 万条配置与运行数据，批量写入约 4.4 秒完成。
+
 ## 飞书接入
 
 项目支持两种飞书接入方式：
@@ -244,8 +336,9 @@ cd ~/Desktop/claw0/gateway
 
 ## 当前边界
 
-- 当前主要面向单机本地运行，尚未引入数据库、分布式锁或多实例协调。
+- 当前主要面向单机本地运行，已接入 Redis 最小协调和 PostgreSQL 状态外置，但完整多实例部署仍在推进中。
 - Dashboard 默认无鉴权，仅建议绑定本机或可信网络访问。
-- 当前以本地 JSONL 和文件状态为主，尚未接入集中式数据库、消息系统或多实例共享状态。
+- PostgreSQL 已支持配置、运行状态、记忆召回和可靠投递队列的优先读取、主写入、schema 初始化和本地回填；控制面配置变更已改为数据库写入先行，本地 JSON/JSONL 仍保留为审计和兜底。
+- 可靠投递队列已支持 PostgreSQL primary storage，但尚未迁移到 Redis Streams 或 RabbitMQ 以支持多 delivery worker 水平扩展。
 - Agent 权限模型已支持工具策略和 capability tags，但仍需继续增强审计、校验和权限预览。
-- ChannelRuntime 当前仍以统一入站队列为主，lane 化、背压和热重启不丢消息已进入后续高优先级计划。
+- ChannelRuntime 已完成 lane 化、背压和热重启保护；更细粒度的 per-agent 并发、低优先级延迟队列和长任务后台化仍需继续增强。

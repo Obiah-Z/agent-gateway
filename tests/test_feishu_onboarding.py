@@ -25,6 +25,29 @@ class FakeDispatcher:
         return "delivery-1"
 
 
+class FakeOnboardingStateRepository:
+    enabled = True
+
+    def __init__(self, rows=None, *, fail: bool = False) -> None:
+        self.rows = list(rows or [])
+        self.fail = fail
+        self.written: list[dict[str, object]] = []
+
+    def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+        del limit, cursor, filters
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        if table == "feishu_onboarding_sessions":
+            return list(self.rows)
+        return []
+
+    def write_feishu_onboarding_session(self, row: dict[str, object]):
+        if self.fail:
+            raise RuntimeError("postgres unavailable")
+        self.written.append(dict(row))
+        return row
+
+
 def _build_control(tmp_path: Path) -> GatewayControlPlane:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",
@@ -87,6 +110,51 @@ def test_feishu_onboarding_store_creates_pending_session(tmp_path: Path) -> None
     assert session.status == "pending"
     assert session.binding_code.startswith("GATEWAY-")
     assert store.find_pending_by_code(session.binding_code) is not None
+
+
+def test_feishu_onboarding_store_prefers_postgres_read_backend(tmp_path: Path) -> None:
+    repo = FakeOnboardingStateRepository(
+        [
+            {
+                "session_id": "ob_db",
+                "binding_code": "GATEWAY-DB1234",
+                "mode": "personal",
+                "status": "pending",
+                "account_id": "feishu-long-local",
+                "created_at": 1.0,
+                "expires_at": 9999999999.0,
+            }
+        ]
+    )
+    store = FeishuOnboardingSessionStore(tmp_path, read_backend=repo)
+
+    session = store.find_pending_by_code("gateway-db1234")
+
+    assert session is not None
+    assert session.session_id == "ob_db"
+
+
+def test_feishu_onboarding_store_writes_postgres_and_local(tmp_path: Path) -> None:
+    repo = FakeOnboardingStateRepository()
+    store = FeishuOnboardingSessionStore(tmp_path, write_backend=repo)
+
+    session = store.create(mode="personal", account_id="feishu-long-local", ttl_seconds=60)
+
+    assert repo.written[0]["session_id"] == session.session_id
+    assert repo.written[0]["binding_code"] == session.binding_code
+    local_payload = json.loads((tmp_path / "sessions.json").read_text(encoding="utf-8"))
+    assert local_payload["sessions"][0]["session_id"] == session.session_id
+
+
+def test_feishu_onboarding_store_falls_back_to_local_when_postgres_fails(tmp_path: Path) -> None:
+    repo = FakeOnboardingStateRepository(fail=True)
+    store = FeishuOnboardingSessionStore(tmp_path, read_backend=repo, write_backend=repo)
+
+    session = store.create(mode="personal", account_id="feishu-long-local", ttl_seconds=60)
+
+    assert store.find_pending_by_code(session.binding_code) is not None
+    local_payload = json.loads((tmp_path / "sessions.json").read_text(encoding="utf-8"))
+    assert local_payload["sessions"][0]["session_id"] == session.session_id
 
 
 def test_feishu_onboarding_consumes_binding_code_and_creates_agent(tmp_path: Path) -> None:

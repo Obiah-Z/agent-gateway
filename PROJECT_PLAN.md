@@ -115,7 +115,7 @@ cd ~/Desktop/claw0/gateway
 | Phase 17 | 待实现 | 会话与记忆治理。 |
 | Phase 18 | 待实现 | 多 Agent 协作与任务实例状态机。 |
 | Phase 19 | 待实现 | 生产部署形态。 |
-| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级；已完成运行角色拆分、Redis 最小协调和后台任务队列基础闭环。 |
+| Phase 20 | 进行中 | 高并发、高性能、高可用架构升级；已完成运行角色拆分、Redis 最小协调、后台任务队列、PostgreSQL 状态外置、schema 初始化和本地回填脚手架。 |
 
 ## 6. 近期完成：Phase 15
 
@@ -347,11 +347,12 @@ delivery-worker
 | --- | --- | --- | --- |
 | 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
 | 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
-| 20.3 后台任务队列 | 已完成 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron/Heartbeat 自动调度已进入任务链路；明确命令式长任务可配置化转入后台执行；控制面和 Dashboard 已支持任务查看、取消和重试。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成，并可通过控制面和 Dashboard 追踪和干预。 |
+| 20.3 后台任务队列 | 已完成 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron/Heartbeat 自动调度已进入任务链路；明确命令式长任务可配置化转入后台执行；控制面和 Dashboard 已支持任务查看、取消和重试；PostgreSQL 开启后任务预占优先使用数据库原子 reserve。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成，并可通过控制面和 Dashboard 追踪和干预；多 worker 共享 PostgreSQL 时不会重复抢占同一任务。 |
 | 20.4 PostgreSQL 状态外置 | 已完成 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
-| 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
-| 20.6 生产部署编排 | 形成可复现部署形态 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
-| 20.7 统一观测与压测 | 用数据验证性能提升 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
+| 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计。 |
+| 20.6 分布式可靠队列升级 | 待实现 | 在 PostgreSQL-backed delivery queue 基础上，新增 Redis Streams 或 RabbitMQ backend；支持多 delivery worker ack、retry、dead-letter、idempotency key 和消费组。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
+| 20.7 生产部署编排 | 待实现 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
+| 20.8 统一观测与压测 | 待实现 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
 
 #### 开展顺序建议
 
@@ -359,8 +360,9 @@ delivery-worker
 2. 再做 20.2：Redis 的投入最小，但能立即解决多实例去重、Cron 幂等和全局限流。
 3. 接着做 20.3：把 Phase 15 遗留的长任务后台化、低优先级任务调度和 per-agent 并发治理接到 task instance。
 4. 然后做 20.4：PostgreSQL 接管长期状态，支撑 Dashboard 查询、审计、归档和治理。
-5. 再做 20.5：当任务和状态稳定后，再升级可靠投递队列，避免同时改动执行链路和出站链路。
-6. 最后做 20.6 和 20.7：补齐部署、观测和压测，用指标验证高可用和高性能目标是否真实达成。
+5. 再做 20.5：补齐 PostgreSQL schema 初始化和本地数据回填，确保主存储切换不是只停留在代码路径。
+6. 然后做 20.6：当任务和状态稳定后，再升级可靠投递队列，避免同时改动执行链路和出站链路。
+7. 最后做 20.7 和 20.8：补齐部署、观测和压测，用指标验证高可用和高性能目标是否真实达成。
 
 #### 完成标准
 
@@ -380,7 +382,7 @@ delivery-worker
 - `dashboard` 角色启动 Dashboard，并自动包含控制面和观测后台。
 - `control` 角色只启动 WebSocket JSON-RPC 控制面。
 - `observability` 角色启动 metrics 和 alerts 后台采集。
-- `worker` 角色已接入本地任务队列，可消费 Cron task 和明确命令式长任务；后续可替换为 Redis/RabbitMQ/PostgreSQL backend。
+- `worker` 角色已接入任务队列，可消费 Cron task 和明确命令式长任务；PostgreSQL 开启后 reserve 使用 `FOR UPDATE SKIP LOCKED` 原子预占，本地文件仍作为兜底和审计；后续可替换为 Redis/RabbitMQ backend。
 - Redis 已增加 `GATEWAY_REDIS_ENABLED`、`GATEWAY_REDIS_URL`、`GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS` 配置。
 - Redis 当前只接入基础设施层和健康检查；默认关闭，不影响本地单机运行。
 - Redis 开启但不可用时，`health.check` 会返回 `redis.ping` warning，不会直接阻塞网关启动。
@@ -414,6 +416,7 @@ delivery-worker
 | 20.3.7 Dashboard 任务视图 | 已完成 | 在运维面板增加最近后台任务视图，最多展示 6 条，多余折叠；展示任务类型、状态、Agent、来源、时间、错误和取消/重试操作入口。 |
 | 20.3.8 Heartbeat 任务化 | 已完成 | 将 Heartbeat 自动调度从 scheduler 直接执行迁移为 enqueue 后由 worker 执行，避免调度器承担实际任务执行。 |
 | 20.3.9 后台命令配置化 | 已完成 | 将 `/github-repo-analyzer`、`/space-advisor` 等后台命令从硬编码迁移到 `GATEWAY_BACKGROUND_INBOUND_COMMANDS` 环境变量，支持逗号分隔扩展。 |
+| 20.3.10 PostgreSQL 任务原子预占 | 已完成 | `LocalTaskQueue.reserve()` 在 PostgreSQL 写仓储可用时优先调用 `reserve_task()`；数据库侧使用 `UPDATE ... FOR UPDATE SKIP LOCKED` 原子选择并标记 running，避免多 worker 重复消费同一任务。 |
 
 #### Phase 20.4 PostgreSQL 状态外置子阶段
 
@@ -429,6 +432,40 @@ delivery-worker
 | 20.4.4.3.1 错误视图对齐 | 已完成 | PostgreSQL `errors` 输出对齐 `RuntimeEventStore.recent_errors` 的事件形态，避免控制面重复适配。 |
 | 20.4.4.3.2 记忆视图对齐 | 已完成 | PostgreSQL `memory_entries` 输出对齐 `MemoryStore.recent_entries` 的摘要形态，保持 Dashboard 视图一致。 |
 | 20.4.5 双写与迁移脚手架 | 已完成 | 为会话、任务、事件和记忆补齐迁移备份脚手架，主链路仍保留 JSONL，新增独立 migration 备份目录用于后续切换和回放验证。 |
+| 20.4.6 PostgreSQL 写入后端草案 | 已完成 | 已补齐 PostgreSQL 写入仓储骨架，并在状态仓储装配中显式暴露 `write` 接口；默认仍保持本地 JSONL 主链路。 |
+| 20.4.7 PostgreSQL 通用写入接口 | 已完成 | 为 PostgreSQL 写后端补齐通用 `append/upsert/delete/query` 实现，先保证写入骨架和 SQL 形态可用，再做表级细化。 |
+| 20.4.8 PostgreSQL 写入可执行化 | 已完成 | 修正写后端 SQL 参数展开与返回形态，让通用写路径具备最小可执行能力，并保持现有测试通过。 |
+| 20.4.9 sessions 表级写入适配 | 已完成 | 先把 sessions 的 append/upsert/delete 拆成表级适配入口，作为后续 tasks、events、memory 写入切换的模板。 |
+| 20.4.10 tasks 表级写入适配 | 已完成 | 把 tasks 的 append/upsert/delete 拆成表级适配入口，继续推进 PostgreSQL 作为主存储的可迁移性。 |
+| 20.4.11 runtime_events 表级写入适配 | 已完成 | 把 runtime_events 的 append/upsert/delete 拆成表级适配入口，确保观测链路也能切到 PostgreSQL。 |
+| 20.4.12 memory_entries 表级写入与召回适配 | 已完成 | 把 memory_entries 的 append/upsert/delete 拆成表级适配入口；`MemoryStore.hybrid_search()` 已优先从 PostgreSQL `memory_entries` 构造检索块，数据库不可用或无数据时再回退本地 MEMORY.md 和 daily JSONL。 |
+| 20.4.13 config_audits 表级写入适配 | 已完成 | 把 config_audits 的 append/upsert/delete 拆成表级适配入口，补齐配置审计的数据库主存储。 |
+| 20.4.14 控制面配置审计接入 | 已完成 | 控制面在保存 agents / bindings / profiles / channels，以及 set/remove agent 时，都会同步写入 config_audits；主配置文件仍保留 JSON 作为落盘和回放来源。 |
+| 20.4.15 主写入口双写接入 | 已完成 | SessionStore、LocalTaskStore、RuntimeEventStore、MemoryStore 的 backup sink 已接入复合迁移层，可同时镜像到 PostgreSQL 写仓储和本地 migration 目录，主链路保留 JSONL 兜底。 |
+| 20.4.16 PostgreSQL 读路径优先 | 已完成 | Session、task、event、memory、metrics、alerts 的读取现在可优先走 PostgreSQL 读后端，文件系统仍作为兜底回退。 |
+| 20.4.17 观测数据写入镜像 | 已完成 | MetricsStore 和 AlertStore 现在会把写入镜像到 PostgreSQL 备份层，同时继续保留本地 JSONL 作为保底。 |
+| 20.4.18 配置表读写适配 | 已完成 | PostgreSQL 写仓储补齐 agents、bindings、profiles、channels 表级 upsert/delete；读仓储支持四类配置表查询，内部 key 字段在控制面读取时自动清理。 |
+| 20.4.19 控制面配置数据库优先 | 已完成 | 控制面 `get_source/reload/save/set/remove` 已支持数据库优先读取；配置保存和 set/remove 路径已改为 PostgreSQL 写入先行，本地 JSON 文件作为 fallback/audit；profiles 和 channels 保持 `_env` 环境变量解析语义。 |
+| 20.4.20 启动阶段配置数据库优先 | 已完成 | `build_application()` 通过临时控制面加载 agents、bindings、profiles、channels，启动时优先使用 PostgreSQL 配置，数据库无数据或不可用时回退 JSON 文件。 |
+
+#### Phase 20.5 PostgreSQL 初始化与回填子阶段
+
+| 子阶段 | 状态 | 主要内容 |
+| --- | --- | --- |
+| 20.5.1 schema 初始化 SQL | 已完成 | 新增 `build_postgres_schema_sql()`，可根据 `POSTGRES_STATE_TABLES` 生成 agents、bindings、profiles、channels、delivery_entries、sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits、feishu_dedup_entries、feishu_webhook_events、feishu_onboarding_sessions、channel_offsets、cron_runs、news_items 建表和索引 SQL。 |
+| 20.5.2 schema 初始化命令 | 已完成 | 新增 `agent-gateway postgres-init`；`--print-sql` 只打印 SQL，不构建完整应用；默认通过本机 `psql` 执行初始化。 |
+| 20.5.3 本地回填 dry-run | 已完成 | 新增 `backfill_local_state_to_repository()` 和 `agent-gateway postgres-migrate-local --dry-run`，可扫描本地配置、会话、任务、投递、飞书 Webhook 去重/审计、飞书 onboarding 会话、Telegram offset、Cron 运行记录、新闻简报状态、事件、指标、告警和记忆并输出计数，不写数据库。 |
+| 20.5.4 本地数据回填 | 已完成 | `postgres-migrate-local` 可把本地 JSON/JSONL 回填到 PostgreSQL 写仓储；配置表使用自然键，运行数据使用稳定主键，飞书审计使用内容 hash 生成稳定主键，便于重复执行。 |
+| 20.5.5 回填测试保护 | 已完成 | 增加 schema 初始化、CLI 入口、dry-run 和代表性运行数据回填测试，确保迁移命令不误启动完整网关。 |
+| 20.5.6 实库回放校验 | 已完成 | 已在本机 PostgreSQL 执行 `postgres-init`、`postgres-migrate-local --dry-run` 和实际回填；约 1.65 万条本地数据通过批量 upsert 在约 4.4 秒完成写入，抽样确认 agents、sessions、tasks、runtime_events、metrics、memory_entries 行数和读仓储查询正常。 |
+| 20.5.7 迁移文档 | 已完成 | README 已补充 PostgreSQL 配置、schema 初始化、dry-run、实际回填、重复执行语义、本地文件兜底和启用数据库优先读取的操作说明。 |
+| 20.5.8 可靠投递队列 PostgreSQL 主存储 | 已完成 | 新增 delivery_entries 表；DeliveryQueue 支持 PostgreSQL 读写 backend，enqueue/fail/move_to_failed/retry/ack/discard 优先写数据库并保留本地 JSON 文件兜底；本地 pending/failed 队列可通过迁移命令回填。 |
+| 20.5.9 PostgreSQL 主存储 smoke 验收 | 已完成 | 新增 `agent-gateway postgres-smoke`，不调用模型和外部通道，直接验证会话、任务、事件、记忆、指标、告警和投递队列能写入 PostgreSQL，并确认本地 JSON/JSONL fallback 文件仍会生成。 |
+| 20.5.10 飞书 Webhook 状态 PostgreSQL 化 | 已完成 | 新增 `feishu_dedup_entries` 和 `feishu_webhook_events`；Webhook 去重链路支持 Redis -> PostgreSQL -> 本地文件多级兜底，审计日志优先写 PostgreSQL 并保留本地 JSONL；迁移命令可回填旧 `seen-events.jsonl` 和 `events.jsonl`。 |
+| 20.5.11 飞书 onboarding 会话 PostgreSQL 化 | 已完成 | 新增 `feishu_onboarding_sessions`；扫码/绑定会话读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 `sessions.json` 作为兜底；迁移命令可回填旧 onboarding 会话文件。 |
+| 20.5.12 Telegram offset PostgreSQL 化 | 已完成 | 新增 `channel_offsets`；Telegram 轮询 offset 读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 offset 文件作为兜底；迁移命令可回填旧 `channel-state/telegram/offset-*.txt`。 |
+| 20.5.13 Cron 运行记录 PostgreSQL 化 | 已完成 | 新增 `cron_runs`；CronService 运行记录优先写 PostgreSQL，并继续写本地 `workspace/cron/cron-runs.jsonl` 作为兜底；迁移命令可回填旧 Cron 运行日志。 |
+| 20.5.14 新闻简报状态 PostgreSQL 化 | 已完成 | 新增 `news_items`；AI Agent 简报和 GitHub Skill 简报的 collected/seen 状态读取优先 PostgreSQL、写入优先 PostgreSQL，并继续写本地 JSONL 作为兜底；迁移命令可回填旧 `data/news-digest` 和 `data/github-skill-digest`。 |
 
 ## 9. 推荐执行顺序
 
@@ -439,9 +476,8 @@ delivery-worker
 3. Phase 16：Agent 权限预览与配置治理。
 4. Phase 17：会话与记忆治理。
 5. Phase 18：多 Agent 协作与任务实例状态机。
-6. Phase 20.4.1-20.4.2：先完成状态边界、表设计和仓储接口草案。
-7. Phase 19：生产部署形态。
-8. Phase 20.4-20.7：PostgreSQL 状态外置、可靠队列升级、统一观测和压测。
+6. Phase 20.6：可靠投递队列升级。
+7. Phase 19 / Phase 20.7-20.8：生产部署、统一观测和压测。
 
 排序依据：
 

@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from agent_gateway.runtime.domain.models import ConversationMessage
+from typing import Any
 
 
 class SessionStore:
@@ -22,6 +23,8 @@ class SessionStore:
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.backup_sink = None
+        self.read_backend: Any | None = None
+        self.write_backend: Any | None = None
 
     def session_path(self, agent_id: str, session_key: str) -> Path:
         """返回会话文件路径。
@@ -47,14 +50,14 @@ class SessionStore:
         需要增量写入的场景。
         """
 
-        self.append_message_to_disk(agent_id, session_key, role, content)
-        self._mirror(
+        self._write_primary(
             "write_session_message",
             agent_id,
             session_key,
             role,
             content,
         )
+        self.append_message_to_disk(agent_id, session_key, role, content)
 
     def rewrite_messages(
         self,
@@ -67,13 +70,13 @@ class SessionStore:
         先写临时文件再 replace，避免重写过程中中断导致原会话损坏。
         """
 
-        self.rewrite_messages_to_disk(agent_id, session_key, messages)
-        self._mirror(
+        self._write_primary(
             "rewrite_session_messages",
             agent_id,
             session_key,
             messages,
         )
+        self.rewrite_messages_to_disk(agent_id, session_key, messages)
 
     def append_message_to_disk(
         self,
@@ -112,6 +115,14 @@ class SessionStore:
     def load_messages(self, agent_id: str, session_key: str) -> list[ConversationMessage]:
         """加载并重建可传给模型的 messages 历史。"""
 
+        if self.read_backend is not None:
+            try:
+                if hasattr(self.read_backend, "read_session_messages"):
+                    history = self.read_backend.read_session_messages(agent_id, session_key)
+                    if history:
+                        return history
+            except Exception:
+                pass
         path = self.session_path(agent_id, session_key)
         if not path.exists():
             return []
@@ -121,6 +132,19 @@ class SessionStore:
     def list_sessions(self, agent_id: str = "") -> dict[str, int]:
         """列出会话文件及其消息条数，用于控制面查看。"""
 
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("sessions", limit=500, filters={"agent_id": agent_id} if agent_id else {})
+                result: dict[str, int] = {}
+                for row in rows:
+                    session_key = str(row.get("session_key", ""))
+                    if not session_key:
+                        continue
+                    result[session_key] = int(row.get("message_count", 0) or 0)
+                if result:
+                    return result
+            except Exception:
+                pass
         agents_dir = self.base_dir / "agents"
         if not agents_dir.exists():
             return {}
@@ -287,6 +311,20 @@ class SessionStore:
             method(*args)
         except Exception:
             pass
+
+    def _write_primary(self, method_name: str, *args: Any) -> None:
+        """优先写入数据库主存储；不可用时退回备份 sink。"""
+
+        backend = getattr(self, "write_backend", None)
+        if backend is not None:
+            method = getattr(backend, method_name, None)
+            if method is not None:
+                try:
+                    method(*args)
+                    return
+                except Exception:
+                    pass
+        self._mirror(method_name, *args)
 
     @staticmethod
     def _normalize_assistant_blocks(content: Any) -> list[dict[str, Any]]:

@@ -106,6 +106,8 @@ class HeartbeatService:
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
         task_queue: LocalTaskQueue | None = None,
+        state_read_repository: Any = None,
+        state_write_repository: Any = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
@@ -327,6 +329,8 @@ class CronService:
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
         task_queue: LocalTaskQueue | None = None,
+        state_read_repository: Any = None,
+        state_write_repository: Any = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
@@ -335,6 +339,8 @@ class CronService:
         self.event_store = event_store
         self.redis_client = redis_client
         self.task_queue = task_queue
+        self.state_read_repository = state_read_repository
+        self.state_write_repository = state_write_repository
         self.cron_file = settings.workspace_root / "CRON.json"
         self.run_log_dir = settings.workspace_root / "cron"
         self.run_log_dir.mkdir(parents=True, exist_ok=True)
@@ -372,7 +378,7 @@ class CronService:
             if item.id:
                 items.append(item)
         if items:
-            NewsDigestStore(self.settings.data_dir / store_name).mark_seen(items)
+            self._news_store(store_name).mark_seen(items)
 
     async def start(self) -> None:
         """启动后台轮询任务。"""
@@ -653,11 +659,7 @@ class CronService:
         }
         if error:
             entry["error"] = error
-        try:
-            with self.run_log.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError:
-            pass
+        self._write_run_log(entry)
 
         if output and status != "skipped":
             metadata: dict[str, object] = {
@@ -730,6 +732,49 @@ class CronService:
         )
         return task
 
+    def _write_run_log(self, entry: dict[str, Any]) -> None:
+        """写入 Cron 运行记录，PostgreSQL 优先，本地 JSONL 兜底。"""
+
+        if self.state_write_repository is not None:
+            try:
+                write_cron_run = getattr(self.state_write_repository, "write_cron_run", None)
+                payload = self._cron_run_row(entry)
+                if write_cron_run is not None:
+                    write_cron_run(payload)
+                else:
+                    self.state_write_repository.upsert("cron_runs", payload)
+            except Exception:
+                pass
+        try:
+            with self.run_log.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    @staticmethod
+    def _cron_run_row(entry: dict[str, Any]) -> dict[str, Any]:
+        """把 JSONL 运行记录转换为 PostgreSQL 行。"""
+
+        run_at_raw = str(entry.get("run_at", ""))
+        try:
+            run_at = datetime.fromisoformat(run_at_raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            run_at = time.time()
+        job_id = str(entry.get("job_id", ""))
+        config_id = str(entry.get("config_id", ""))
+        return {
+            "id": f"{job_id}:{run_at_raw or run_at}",
+            "job_id": job_id,
+            "config_id": config_id,
+            "agent_id": str(entry.get("agent_id", "")),
+            "scope": str(entry.get("scope", "")),
+            "run_at": run_at,
+            "status": str(entry.get("status", "")),
+            "output_preview": str(entry.get("output_preview", "")),
+            "error": str(entry.get("error", "")),
+            "metadata": dict(entry),
+        }
+
     async def run_task_instance(self, task: TaskInstance) -> str:
         """执行由 task worker 预占的 Cron 任务。"""
 
@@ -757,7 +802,7 @@ class CronService:
         sources_file = self.settings.workspace_root / str(
             payload.get("sources_file", "agent-news-sources.json")
         )
-        store = NewsDigestStore(self.settings.data_dir / "news-digest")
+        store = self._news_store("news-digest")
         collector = NewsCollector(
             sources_file,
             store,
@@ -801,6 +846,15 @@ class CronService:
             return "github-skill-digest"
         return "news-digest"
 
+    def _news_store(self, store_name: str) -> NewsDigestStore:
+        """构建带 PostgreSQL 读写后端的新闻简报状态存储。"""
+
+        return NewsDigestStore(
+            self.settings.data_dir / store_name,
+            read_backend=self.state_read_repository,
+            write_backend=self.state_write_repository,
+        )
+
     async def _run_github_skill_digest(
         self,
         job: CronJob,
@@ -817,7 +871,7 @@ class CronService:
         sources_file = self.settings.workspace_root / str(
             payload.get("sources_file", "github-skill-sources.json")
         )
-        store = NewsDigestStore(self.settings.data_dir / "github-skill-digest")
+        store = self._news_store("github-skill-digest")
         collector = NewsCollector(
             sources_file,
             store,
@@ -1011,6 +1065,8 @@ class AutonomyRuntime:
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
         task_queue: LocalTaskQueue | None = None,
+        state_read_repository: Any = None,
+        state_write_repository: Any = None,
     ) -> None:
         target = ProactiveTarget(
             channel=settings.proactive_channel,
@@ -1033,6 +1089,8 @@ class AutonomyRuntime:
             event_store=event_store,
             redis_client=redis_client,
             task_queue=task_queue,
+            state_read_repository=state_read_repository,
+            state_write_repository=state_write_repository,
         )
 
     def set_channels(self, channels: ChannelManager) -> None:

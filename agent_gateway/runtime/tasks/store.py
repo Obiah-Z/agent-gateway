@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
+from typing import Any
 
 
 TASK_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -25,18 +26,27 @@ class LocalTaskStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self.backup_sink = None
+        self.read_backend: Any | None = None
+        self.write_backend: Any | None = None
 
     def create(self, task: TaskInstance) -> TaskInstance:
         """写入新任务。"""
 
         task.updated_at = time.time()
+        self._write_primary(task)
         self.write_task_to_disk(task)
-        self._mirror(task)
         return task
 
     def get(self, task_id: str) -> TaskInstance | None:
         """按 ID 读取任务。"""
 
+        if self.read_backend is not None:
+            try:
+                row = self.read_backend.get("tasks", task_id)
+                if row is not None:
+                    return TaskInstance.from_dict(row)
+            except Exception:
+                pass
         return self._read(self._task_path(task_id))
 
     def list(
@@ -47,6 +57,14 @@ class LocalTaskStore:
     ) -> list[TaskInstance]:
         """按更新时间倒序列出任务。"""
 
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("tasks", limit=limit, filters={"statuses": list(statuses or [])})
+                tasks = [TaskInstance.from_dict(row) for row in rows]
+                if tasks:
+                    return tasks[: max(1, limit)]
+            except Exception:
+                pass
         status_set = set(statuses or [])
         rows = []
         for path in self.root.glob("*.json"):
@@ -67,8 +85,8 @@ class LocalTaskStore:
         task.status = "running"
         task.started_at = current
         task.updated_at = current
+        self._write_primary(task)
         self.write_task_to_disk(task)
-        self._mirror(task)
         return task
 
     def mark_done(
@@ -86,8 +104,8 @@ class LocalTaskStore:
         task.result_preview = result_preview[:500]
         task.finished_at = current
         task.updated_at = current
+        self._write_primary(task)
         self.write_task_to_disk(task)
-        self._mirror(task)
         return task
 
     def mark_failed(
@@ -107,8 +125,8 @@ class LocalTaskStore:
         task.retry_count += 1 if retryable else 0
         task.finished_at = 0.0 if retryable else current
         task.updated_at = current
+        self._write_primary(task)
         self.write_task_to_disk(task)
-        self._mirror(task)
         return task
 
     def cancel(self, task_id: str, *, now: float | None = None) -> TaskInstance:
@@ -119,8 +137,8 @@ class LocalTaskStore:
         task.status = "cancelled"
         task.finished_at = current
         task.updated_at = current
+        self._write_primary(task)
         self.write_task_to_disk(task)
-        self._mirror(task)
         return task
 
     def _require(self, task_id: str) -> TaskInstance:
@@ -156,6 +174,20 @@ class LocalTaskStore:
             method(task)
         except Exception:
             pass
+
+    def _write_primary(self, task: TaskInstance) -> None:
+        """优先写入数据库主存储；不可用时退回备份 sink。"""
+
+        backend = getattr(self, "write_backend", None)
+        if backend is not None:
+            method = getattr(backend, "write_task", None)
+            if method is not None:
+                try:
+                    method(task)
+                    return
+                except Exception:
+                    pass
+        self._mirror(task)
 
     @staticmethod
     def _read(path: Path) -> TaskInstance | None:

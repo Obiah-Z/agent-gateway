@@ -34,12 +34,14 @@ class MemoryStore:
         self.daily_dir.mkdir(parents=True, exist_ok=True)
         self.migration_root = workspace_root / "_migration"
         self.backup_sink = None
+        self.read_backend: Any | None = None
+        self.write_backend: Any | None = None
 
     def write_memory(self, content: str, category: str = "general") -> str:
         """把一条新记忆追加到当天的 daily memory 文件。"""
 
+        self._write_primary(content, category)
         self.write_memory_to_disk(content, category=category)
-        self._mirror(content, category)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return f"Memory saved to {today}.jsonl ({category})"
 
@@ -69,6 +71,20 @@ class MemoryStore:
             method(content, category=category)
         except Exception:
             pass
+
+    def _write_primary(self, content: str, category: str) -> None:
+        """优先写入数据库主存储；不可用时退回备份 sink。"""
+
+        backend = getattr(self, "write_backend", None)
+        if backend is not None:
+            method = getattr(backend, "write_memory", None)
+            if method is not None:
+                try:
+                    method(content, category=category)
+                    return
+                except Exception:
+                    pass
+        self._mirror(content, category)
 
     def write_memory_migration(self, content: str, category: str = "general") -> None:
         """把记忆写入迁移专用目录。"""
@@ -113,6 +129,13 @@ class MemoryStore:
         """读取最近写入的 daily memory 条目，用于运维排查。"""
 
         safe_limit = max(1, min(int(limit), 200))
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("memory_entries", limit=safe_limit)
+                if rows:
+                    return rows[:safe_limit]
+            except Exception:
+                pass
         rows: list[dict[str, Any]] = []
         if not self.daily_dir.is_dir():
             return rows
@@ -184,6 +207,35 @@ class MemoryStore:
 
     def _load_all_chunks(self) -> list[dict[str, str]]:
         """把长期记忆和日记忆切成统一检索块。"""
+
+        backend_chunks = self._load_chunks_from_backend()
+        if backend_chunks:
+            return backend_chunks
+        return self._load_chunks_from_disk()
+
+    def _load_chunks_from_backend(self) -> list[dict[str, str]]:
+        """优先从 PostgreSQL memory_entries 构造检索块。"""
+
+        backend = self.read_backend
+        if backend is None:
+            return []
+        try:
+            rows = backend.list("memory_entries", limit=2000)
+        except Exception:
+            return []
+        chunks: list[dict[str, str]] = []
+        for row in rows:
+            content = str(row.get("content", "")).strip()
+            if not content:
+                continue
+            category = str(row.get("category", "")).strip()
+            source_file = str(row.get("source_file", "")).strip() or "postgres"
+            label = f"{source_file} [{category}]" if category else source_file
+            chunks.append({"path": label, "text": content})
+        return chunks
+
+    def _load_chunks_from_disk(self) -> list[dict[str, str]]:
+        """从本地 MEMORY.md 和 daily JSONL 构造检索块，作为数据库不可用时的兜底。"""
 
         chunks: list[dict[str, str]] = []
         evergreen = self.load_evergreen()

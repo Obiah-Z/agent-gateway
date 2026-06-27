@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import os
 import time
 from typing import Any
 
 from agent_gateway.runtime.domain.agents import AgentManager
+from agent_gateway.gateways.messaging.base import ChannelAccount
 from agent_gateway.gateways.messaging.bootstrap import build_channel_manager
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
@@ -28,6 +30,7 @@ from agent_gateway.runtime.state.queue import DeliveryQueue, QueuedDelivery
 from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
 from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
+from agent_gateway.runtime.state.postgres import PostgresWriteRepository
 from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
@@ -80,8 +83,81 @@ class GatewayControlPlane:
     redis_client: Any = None
     postgres_client: PostgresClient | None = None
     state_repository: StateReadRepository | None = None
+    state_write_repository: PostgresWriteRepository | None = None
     task_worker: Any = None
     task_queue: LocalTaskQueue | None = None
+
+    def _record_config_audit(
+        self,
+        *,
+        entity_type: str,
+        entity_id: str,
+        action: str,
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
+        actor: str = "control-plane",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """把配置变更写入 PostgreSQL 审计表，失败时不影响主流程。"""
+
+        writer = self.state_write_repository
+        if writer is None and isinstance(self.state_repository, PostgresWriteRepository):
+            writer = self.state_repository
+        if writer is None:
+            return
+        payload = {
+            "id": f"{entity_type}:{entity_id}:{action}:{int(time.time() * 1000)}",
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "action": action,
+            "before": before or {},
+            "after": after or {},
+            "actor": actor,
+            "created_at": time.time(),
+            "metadata": metadata or {},
+        }
+        try:
+            writer.append("config_audits", payload)
+        except Exception:
+            return
+
+    def _state_repo_list(
+        self,
+        table: str,
+        *,
+        limit: int = 500,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if self.state_repository is None:
+            return []
+        try:
+            return self.state_repository.list(table, limit=limit, filters=filters or {})
+        except Exception:
+            return []
+
+    def _state_repo_upsert(self, table: str, row: dict[str, Any]) -> bool:
+        writer = self.state_write_repository
+        if writer is None and isinstance(self.state_repository, PostgresWriteRepository):
+            writer = self.state_repository
+        if writer is None:
+            return False
+        try:
+            writer.upsert(table, row)
+            return True
+        except Exception:
+            return False
+
+    def _state_repo_delete(self, table: str, key: str) -> bool:
+        writer = self.state_write_repository
+        if writer is None and isinstance(self.state_repository, PostgresWriteRepository):
+            writer = self.state_repository
+        if writer is None:
+            return False
+        try:
+            writer.delete(table, key)
+            return True
+        except Exception:
+            return False
 
     def list_bindings(self) -> list[Binding]:
         """返回当前生效的路由绑定列表。"""
@@ -830,6 +906,22 @@ class GatewayControlPlane:
     def get_source(self, kind: str) -> dict[str, Any]:
         """读取指定配置源文件的原始内容。"""
 
+        if kind == "agents":
+            rows = self._state_repo_list("agents", limit=1000)
+            if rows:
+                return {"agents": self._normalize_agents_rows(rows)}
+        if kind == "bindings":
+            rows = self._state_repo_list("bindings", limit=1000)
+            if rows:
+                return {"bindings": self._normalize_bindings_rows(rows)}
+        if kind == "profiles":
+            rows = self._state_repo_list("profiles", limit=1000)
+            if rows:
+                return {"profiles": self._normalize_profiles_rows(rows)}
+        if kind == "channels":
+            rows = self._state_repo_list("channels", limit=1000)
+            if rows:
+                return {"channels": self._normalize_channels_rows(rows)}
         readers = {
             "agents": read_agents_source,
             "bindings": read_bindings_source,
@@ -1071,11 +1163,21 @@ class GatewayControlPlane:
         issues = self.validate_agent(candidate)
         if issues:
             raise ValueError("; ".join(issues))
+        before = dict(existing) if existing is not None else None
+        self._state_repo_upsert("agents", row)
         self._write_rows(self.settings.agents_config_file, "agents", rows, existing_index, row)
         self.reload_agents()
         agent = self.agents.get(normalized)
         if agent is None:
             raise RuntimeError(f"agent '{normalized}' was not reloaded")
+        self._record_config_audit(
+            entity_type="agent",
+            entity_id=normalized,
+            action="set",
+            before=before,
+            after=row,
+            metadata={"source": "control_plane.set_agent"},
+        )
         return agent
 
     def generate_agent_template(
@@ -1125,9 +1227,19 @@ class GatewayControlPlane:
             raise RuntimeError(f"agent '{normalized}' is still referenced by bindings")
         if normalize_agent_id(self.settings.proactive_agent_id) == normalized:
             raise RuntimeError(f"agent '{normalized}' is configured as proactive agent")
+        before = dict(rows[existing_index])
         del rows[existing_index]
+        self._state_repo_delete("agents", normalized)
         write_json_atomic(self.settings.agents_config_file, {"agents": rows})
         self.reload_agents()
+        self._record_config_audit(
+            entity_type="agent",
+            entity_id=normalized,
+            action="remove",
+            before=before,
+            after={},
+            metadata={"source": "control_plane.remove_agent"},
+        )
         return True
 
     def remove_binding(self, agent_id: str, match_key: str, match_value: str) -> bool:
@@ -1136,31 +1248,94 @@ class GatewayControlPlane:
         return self.bindings.remove(normalize_agent_id(agent_id), match_key, match_value)
 
     def save_bindings(self) -> int:
-        """把当前 bindings 持久化到配置文件。"""
+        """把当前 bindings 持久化到 PostgreSQL，并把 JSON 文件作为 fallback/audit。"""
 
         bindings = self.bindings.list_all()
+        for binding in bindings:
+            self._state_repo_upsert(
+                "bindings",
+                {
+                    "agent_id": binding.agent_id,
+                    "tier": binding.tier,
+                    "match_key": binding.match_key,
+                    "match_value": binding.match_value,
+                    "priority": binding.priority,
+                },
+            )
         save_bindings(self.settings, bindings)
+        self._record_config_audit(
+            entity_type="bindings",
+            entity_id="all",
+            action="save",
+            after={"count": len(bindings)},
+            metadata={"source": "control_plane.save_bindings"},
+        )
         return len(bindings)
 
     def save_agents(self) -> int:
-        """把当前 agents 持久化到配置文件。"""
+        """把当前 agents 持久化到 PostgreSQL，并把 JSON 文件作为 fallback/audit。"""
 
         agents = self.agents.list()
+        for agent in agents:
+            self._state_repo_upsert("agents", agent.manifest_row())
         save_agents(self.settings, agents)
+        self._record_config_audit(
+            entity_type="agents",
+            entity_id="all",
+            action="save",
+            after={"count": len(agents)},
+            metadata={"source": "control_plane.save_agents"},
+        )
         return len(agents)
 
     def save_profiles(self) -> int:
-        """把当前 profiles 持久化到配置文件。"""
+        """把当前 profiles 持久化到 PostgreSQL，并把 JSON 文件作为 fallback/audit。"""
 
         profiles = list(self.profiles.profiles)
+        for profile in profiles:
+            self._state_repo_upsert(
+                "profiles",
+                {
+                    "name": profile.name,
+                    "provider": profile.provider,
+                    "api_key": profile.api_key,
+                    "base_url": profile.base_url,
+                },
+            )
         save_auth_profiles(self.settings, profiles)
+        self._record_config_audit(
+            entity_type="profiles",
+            entity_id="all",
+            action="save",
+            after={"count": len(profiles)},
+            metadata={"source": "control_plane.save_profiles"},
+        )
         return len(profiles)
 
     def save_channels(self) -> int:
-        """把当前通道账号配置持久化到配置文件。"""
+        """把当前通道账号配置持久化到 PostgreSQL，并把 JSON 文件作为 fallback/audit。"""
 
         accounts = list(self.channels.accounts)
+        for account in accounts:
+            self._state_repo_upsert(
+                "channels",
+                {
+                    "channel": account.channel,
+                    "account_id": account.account_id,
+                    "enabled": True,
+                    "label": account.label,
+                    "token": account.token,
+                    "config": account.config,
+                },
+            )
         save_channel_accounts(self.settings, accounts)
+        self._record_config_audit(
+            entity_type="channels",
+            entity_id="all",
+            action="save",
+            after={"count": len(accounts)},
+            metadata={"source": "control_plane.save_channels"},
+        )
         return len(accounts)
 
     def set_profile(
@@ -1188,6 +1363,17 @@ class GatewayControlPlane:
         row.setdefault("provider", "anthropic")
         self._apply_secret_field(row, "api_key", api_key, api_key_env)
         self._apply_secret_field(row, "base_url", base_url, base_url_env)
+        self._state_repo_upsert(
+            "profiles",
+            {
+                "name": row["name"],
+                "provider": row["provider"],
+                "api_key": row.get("api_key", ""),
+                "api_key_env": row.get("api_key_env", ""),
+                "base_url": row.get("base_url", ""),
+                "base_url_env": row.get("base_url_env", ""),
+            },
+        )
         self._write_rows(self.settings.profiles_config_file, "profiles", rows, existing_index, row)
         snapshot = self.reload_profiles()
         return self._find_profile_snapshot(snapshot, name)
@@ -1202,6 +1388,7 @@ class GatewayControlPlane:
         if len(rows) <= 1:
             raise RuntimeError("cannot remove the last profile")
         del rows[existing_index]
+        self._state_repo_delete("profiles", name)
         write_json_atomic(self.settings.profiles_config_file, {"profiles": rows})
         self.reload_profiles()
         return True
@@ -1210,6 +1397,20 @@ class GatewayControlPlane:
         """从磁盘重载全部 bindings。"""
 
         bindings = load_bindings(self.settings)
+        if self.state_repository is not None:
+            repo_bindings = self.get_source("bindings").get("bindings", [])
+            if repo_bindings:
+                bindings = [
+                    Binding(
+                        agent_id=str(row.get("agent_id", "")),
+                        tier=int(row.get("tier", 0)),
+                        match_key=str(row.get("match_key", "")),
+                        match_value=str(row.get("match_value", "")),
+                        priority=int(row.get("priority", 0)),
+                    )
+                    for row in repo_bindings
+                    if isinstance(row, dict) and row.get("agent_id") and row.get("match_key")
+                ]
         for binding in bindings:
             binding.agent_id = normalize_agent_id(binding.agent_id)
         self.bindings.replace_all(bindings)
@@ -1219,6 +1420,67 @@ class GatewayControlPlane:
         """从磁盘重载全部 agents。"""
 
         agents = load_agents(self.settings)
+        if self.state_repository is not None:
+            repo_agents = self.get_source("agents").get("agents", [])
+            if repo_agents:
+                agents = [
+                    AgentConfig(
+                        id=str(row.get("id", "")),
+                        name=str(row.get("name", "")),
+                        personality=str(row.get("personality", "")),
+                        model=str(row.get("model", "")),
+                        dm_scope=str(row.get("dm_scope", "per-peer")),
+                        extra_system=str(row.get("extra_system", "")),
+                        tool_policy_mode=str(
+                            row.get("tool_policy", {}).get("mode", "all")
+                            if isinstance(row.get("tool_policy"), dict)
+                            else "all"
+                        ),
+                        tool_names=tuple(
+                            str(name)
+                            for name in (
+                                row.get("tool_policy", {}).get("tool_names", [])
+                                if isinstance(row.get("tool_policy"), dict)
+                                else []
+                            )
+                        ),
+                        memory_enabled=bool(
+                            row.get("memory_policy", {}).get("enabled", True)
+                            if isinstance(row.get("memory_policy"), dict)
+                            else True
+                        ),
+                        memory_auto_recall=bool(
+                            row.get("memory_policy", {}).get("auto_recall", True)
+                            if isinstance(row.get("memory_policy"), dict)
+                            else True
+                        ),
+                        memory_top_k=max(
+                            1,
+                            int(
+                                row.get("memory_policy", {}).get("top_k", 3)
+                                if isinstance(row.get("memory_policy"), dict)
+                                else 3
+                            ),
+                        ),
+                        prompt_dir=str(
+                            row.get("prompt_policy", {}).get("prompt_dir", "")
+                            if isinstance(row.get("prompt_policy"), dict)
+                            else ""
+                        ),
+                        use_global_prompt_files=bool(
+                            row.get("prompt_policy", {}).get("use_global_files", True)
+                            if isinstance(row.get("prompt_policy"), dict)
+                            else True
+                        ),
+                        skills_enabled=bool(
+                            row.get("prompt_policy", {}).get("skills_enabled", True)
+                            if isinstance(row.get("prompt_policy"), dict)
+                            else True
+                        ),
+                    )
+                    for row in repo_agents
+                    if isinstance(row, dict) and row.get("id") and row.get("name")
+                ]
         if not agents:
             raise RuntimeError("No agents loaded from config")
         self.agents.replace_all(agents)
@@ -1228,6 +1490,19 @@ class GatewayControlPlane:
         """从磁盘重载全部 profiles，并保留旧冷却状态。"""
 
         profiles = load_auth_profiles(self.settings)
+        if self.state_repository is not None:
+            repo_profiles = self.get_source("profiles").get("profiles", [])
+            if repo_profiles:
+                profiles = [
+                    AuthProfile(
+                        name=str(row.get("name", "primary")),
+                        provider=str(row.get("provider", "anthropic")),
+                        api_key=self._resolve_secret_value(row, "api_key"),
+                        base_url=self._resolve_secret_value(row, "base_url"),
+                    )
+                    for row in repo_profiles
+                    if isinstance(row, dict) and row.get("name")
+                ]
         self.profiles.replace_profiles(profiles)
         return self.profiles.snapshot()
 
@@ -1268,6 +1543,18 @@ class GatewayControlPlane:
             config or {},
         )
         row["config"] = merged_config
+        self._state_repo_upsert(
+            "channels",
+            {
+                "channel": row["channel"],
+                "account_id": row["account_id"],
+                "enabled": row.get("enabled", True),
+                "label": row.get("label", ""),
+                "token": row.get("token", ""),
+                "token_env": row.get("token_env", ""),
+                "config": row.get("config", {}),
+            },
+        )
         self._write_rows(self.settings.channels_config_file, "channels", rows, existing_index, row)
         await self.reload_channels()
         return self._find_channel_descriptor(normalized_channel, account_id)
@@ -1286,6 +1573,7 @@ class GatewayControlPlane:
         ):
             raise RuntimeError("cannot remove the configured proactive channel account")
         del rows[existing_index]
+        self._state_repo_delete("channels", f"{normalized_channel}\x1f{account_id}")
         write_json_atomic(self.settings.channels_config_file, {"channels": rows})
         await self.reload_channels()
         return True
@@ -1293,7 +1581,34 @@ class GatewayControlPlane:
     async def reload_channels(self) -> list[str]:
         """从磁盘重载全部通道，并同步替换依赖它们的运行时。"""
 
-        next_manager = build_channel_manager(self.settings, load_channel_accounts(self.settings))
+        next_manager = build_channel_manager(
+            self.settings,
+            load_channel_accounts(self.settings),
+            state_read_repository=self.state_repository,
+            state_write_repository=self.state_write_repository,
+        )
+        if self.state_repository is not None:
+            repo_channels = self.get_source("channels").get("channels", [])
+            if repo_channels:
+                next_manager = build_channel_manager(
+                    self.settings,
+                    [
+                        ChannelAccount(
+                            channel=str(row.get("channel", "")).strip().lower(),
+                            account_id=str(row.get("account_id", "")),
+                            label=str(row.get("label", "")),
+                            token=self._resolve_secret_value(row, "token"),
+                            config=self._resolve_channel_config(row),
+                        )
+                        for row in repo_channels
+                        if isinstance(row, dict)
+                        and row.get("channel")
+                        and row.get("account_id")
+                        and bool(row.get("enabled", True))
+                    ],
+                    state_read_repository=self.state_repository,
+                    state_write_repository=self.state_write_repository,
+                )
         if self.channel_runtime is not None:
             await self.channel_runtime.restart(next_manager)
             self.channels.replace_from(next_manager)
@@ -1408,3 +1723,70 @@ class GatewayControlPlane:
             if row.get("channel") == channel and row.get("account_id") == account_id:
                 return row
         raise RuntimeError(f"channel '{channel}/{account_id}' was not reloaded")
+
+    @staticmethod
+    def _normalize_agents_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized.append(
+                {
+                    "id": row.get("id", ""),
+                    "name": row.get("name", ""),
+                    "personality": row.get("personality", ""),
+                    "model": row.get("model", ""),
+                    "dm_scope": row.get("dm_scope", "per-peer"),
+                    "extra_system": row.get("extra_system", ""),
+                    "tool_policy": row.get("tool_policy", {"mode": "all", "tool_names": []}),
+                    "memory_policy": row.get("memory_policy", {"enabled": True, "auto_recall": True, "top_k": 3}),
+                    "prompt_policy": row.get("prompt_policy", {"prompt_dir": "", "use_global_files": True, "skills_enabled": True}),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _normalize_bindings_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            payload = dict(row)
+            payload.pop("key", None)
+            normalized.append(payload)
+        return normalized
+
+    @staticmethod
+    def _normalize_profiles_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized.append(dict(row))
+        return normalized
+
+    @staticmethod
+    def _normalize_channels_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            payload = dict(row)
+            payload.pop("key", None)
+            normalized.append(payload)
+        return normalized
+
+    @staticmethod
+    def _resolve_secret_value(row: dict[str, Any], field: str) -> str:
+        env_name = str(row.get(f"{field}_env", "") or "")
+        if env_name:
+            return os.getenv(env_name, "")
+        return str(row.get(field, "") or "")
+
+    @classmethod
+    def _resolve_channel_config(cls, row: dict[str, Any]) -> dict[str, Any]:
+        config = dict(row.get("config", {}) if isinstance(row.get("config"), dict) else {})
+        for key, value in list(config.items()):
+            if key.endswith("_env") and isinstance(value, str):
+                config[key[:-4]] = os.getenv(value, "")
+        return config
