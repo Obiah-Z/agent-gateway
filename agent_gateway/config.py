@@ -67,6 +67,7 @@ class GatewaySettings:
     inbound_max_concurrent_lanes: int = 4
     inbound_max_queue_size: int = 200
     inbound_max_lane_queue_size: int = 20
+    inbound_long_task_notice_seconds: float = 15.0
     heartbeat_interval_seconds: float = 1800.0
     heartbeat_active_start: int = 9
     heartbeat_active_end: int = 22
@@ -187,6 +188,10 @@ class GatewaySettings:
             inbound_max_lane_queue_size=max(
                 1,
                 int(os.getenv("GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE", "20")),
+            ),
+            inbound_long_task_notice_seconds=max(
+                0.0,
+                float(os.getenv("GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS", "15")),
             ),
             heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")),
             heartbeat_active_start=int(os.getenv("HEARTBEAT_ACTIVE_START", "9")),

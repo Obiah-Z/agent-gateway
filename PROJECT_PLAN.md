@@ -273,9 +273,12 @@ cd ~/Desktop/claw0/gateway
    - 已新增 `GATEWAY_INBOUND_MAX_QUEUE_SIZE` 和 `GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE`。
    - 全局入口队列或单 lane 队列超过阈值时，新消息会被拒绝，并尽量通过原通道返回“系统繁忙，请稍后重试”提示。
    - 低优先级任务延迟、实时消息优先级调度仍待后续补齐。
-6. Phase 15.6：增加长任务降级策略。待实现。
+6. Phase 15.6：增加长任务降级策略。部分完成。
    - 超过阈值后先回复“已进入后台处理”。
    - 后续结果通过可靠投递链路补发。
+   - 已新增 `GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS`，默认 15 秒；设为 0 可关闭。
+   - 单条入站消息超过阈值仍未完成时，会先通过可靠投递链路推送“继续处理中”提示。
+   - 当前任务仍在原 lane 内继续执行并最终投递结果；真正释放 lane 的后台任务状态机留到 Phase 18 处理。
 7. Phase 15.7：增加运行指标。待实现。
    - 全局入站队列长度。
    - 每个 lane 的队列长度。

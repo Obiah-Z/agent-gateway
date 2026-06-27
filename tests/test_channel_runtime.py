@@ -144,11 +144,18 @@ class BackpressureDispatcher(SlowDispatcher):
         super().__init__()
         self.delivered_backpressure: list[str] = []
         self.delivered_backpressure_metadata: list[dict] = []
+        self.delivered_notices: list[str] = []
+        self.delivered_notice_metadata: list[dict] = []
 
     async def deliver_text(self, channels: ChannelManager, target, text: str, *, metadata=None) -> str:
         del channels, target
+        payload = dict(metadata or {})
+        if payload.get("kind") == "long_task_notice":
+            self.delivered_notices.append(text)
+            self.delivered_notice_metadata.append(payload)
+            return "long-task-notice-delivery-1"
         self.delivered_backpressure.append(text)
-        self.delivered_backpressure_metadata.append(dict(metadata or {}))
+        self.delivered_backpressure_metadata.append(payload)
         return "backpressure-delivery-1"
 
 
@@ -507,6 +514,69 @@ def test_channel_runtime_rejects_when_lane_queue_is_full() -> None:
         "当前网关入站消息积压较多，本条消息已被拒绝。请稍后重试。"
     ]
     assert dispatcher.dispatched == ["already queued"]
+
+
+def test_channel_runtime_sends_long_task_notice_once_before_final_reply() -> None:
+    dispatcher = BackpressureDispatcher()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        long_task_notice_seconds=0.01,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="slow",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+            )
+        )
+        while not dispatcher.delivered_notices:
+            await asyncio.sleep(0)
+        dispatcher.release.set()
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.delivered_notices == [
+        "本轮任务处理时间较长，网关已进入后台继续处理，完成后会继续推送结果。"
+    ]
+    assert dispatcher.delivered_notice_metadata[0]["kind"] == "long_task_notice"
+    assert dispatcher.dispatched == ["slow"]
+
+
+def test_channel_runtime_does_not_send_long_task_notice_for_fast_task() -> None:
+    dispatcher = BackpressureDispatcher()
+    dispatcher.release.set()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        long_task_notice_seconds=1.0,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="fast",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+            )
+        )
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.delivered_notices == []
+    assert dispatcher.dispatched == ["fast"]
 
 
 def test_channel_runtime_flushes_cli_delivery_before_next_prompt() -> None:
