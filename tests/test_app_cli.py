@@ -166,6 +166,31 @@ def test_postgres_init_execute_initializes_schema(monkeypatch, capsys) -> None:
     assert "'result': 'ok'" in capsys.readouterr().out
 
 
+def test_postgres_check_schema_does_not_build_application(monkeypatch, capsys) -> None:
+    calls = []
+
+    class FakeResult:
+        def to_dict(self):
+            return {"ok": True, "missing_tables": []}
+
+    def fake_check_postgres_schema(*, url: str, connect_timeout_seconds: float):
+        calls.append((url, connect_timeout_seconds))
+        return FakeResult()
+
+    def fail_build_application():
+        raise AssertionError("postgres-check-schema must not build the gateway app")
+
+    monkeypatch.setattr(sys, "argv", ["agent-gateway", "postgres-check-schema"])
+    monkeypatch.setenv("GATEWAY_POSTGRES_URL", "postgresql://postgres:postgres@127.0.0.1:5432/postgres")
+    monkeypatch.setattr(gateway_app, "check_postgres_schema", fake_check_postgres_schema)
+    monkeypatch.setattr(gateway_app, "build_application", fail_build_application)
+
+    gateway_app.main()
+
+    assert calls == [("postgresql://postgres:postgres@127.0.0.1:5432/postgres", 2.0)]
+    assert "'ok': True" in capsys.readouterr().out
+
+
 def test_postgres_migrate_local_dry_run_uses_migration_path(monkeypatch, capsys) -> None:
     calls = []
 

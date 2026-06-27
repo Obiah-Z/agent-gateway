@@ -2,6 +2,7 @@ from agent_gateway.runtime.state.postgres import (
     POSTGRES_STATE_TABLES,
     PostgresWriteRepository,
     build_postgres_schema_sql,
+    check_postgres_schema,
     initialize_postgres_schema,
 )
 
@@ -95,6 +96,43 @@ def test_initialize_postgres_schema_runs_generated_sql(monkeypatch) -> None:
 
     assert calls == [("postgresql://local/db", sql, 1.5)]
     assert 'CREATE TABLE IF NOT EXISTS "agents"' in sql
+
+
+def test_check_postgres_schema_reports_drift(monkeypatch) -> None:
+    rows = [
+        {"table": "agents", "column": "id", "type": "text"},
+        {"table": "agents", "column": "name", "type": "text"},
+        {"table": "agents", "column": "personality", "type": "text"},
+        {"table": "agents", "column": "model", "type": "text"},
+        {"table": "agents", "column": "dm_scope", "type": "text"},
+        {"table": "agents", "column": "extra_system", "type": "text"},
+        {"table": "agents", "column": "tool_policy", "type": "jsonb"},
+        {"table": "agents", "column": "memory_policy", "type": "jsonb"},
+        {"table": "agents", "column": "prompt_policy", "type": "jsonb"},
+        {"table": "agents", "column": "updated_at", "type": "text"},
+    ]
+
+    class Completed:
+        stdout = "\n".join(__import__("json").dumps(row) for row in rows)
+
+    def fake_run(command, **kwargs):
+        return Completed()
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/psql")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = check_postgres_schema(
+        url="postgresql://local/db",
+        tables=(POSTGRES_STATE_TABLES[0], POSTGRES_STATE_TABLES[1]),
+    )
+
+    assert result.ok is False
+    assert result.missing_tables == ["bindings"]
+    assert result.type_mismatches["agents"]["updated_at"] == {
+        "expected": "double precision",
+        "actual": "text",
+    }
+    assert result.to_dict()["ok"] is False
 
 
 def test_postgres_write_query_sends_sql_via_stdin(monkeypatch) -> None:

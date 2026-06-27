@@ -56,6 +56,7 @@ from agent_gateway.runtime.state.postgres import (
     PostgresReadRepository,
     PostgresWriteRepository,
     build_postgres_schema_sql,
+    check_postgres_schema,
     initialize_postgres_schema,
 )
 from agent_gateway.runtime.state.migration import backfill_local_state_to_repository
@@ -900,6 +901,10 @@ def main() -> None:
         action="store_true",
         help="Print the generated schema SQL instead of executing it.",
     )
+    subparsers.add_parser(
+        "postgres-check-schema",
+        help="Check PostgreSQL tables against the gateway schema specification.",
+    )
     postgres_migrate = subparsers.add_parser(
         "postgres-migrate-local",
         help="Backfill local JSON/JSONL state files into PostgreSQL.",
@@ -929,6 +934,14 @@ def main() -> None:
             connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
         )
         print({"result": "ok", "postgres_url": settings.postgres_url})
+        return
+    if args.command == "postgres-check-schema":
+        settings = GatewaySettings.from_env()
+        result = check_postgres_schema(
+            url=settings.postgres_url,
+            connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+        )
+        print(result.to_dict())
         return
     if args.command == "postgres-migrate-local":
         settings = GatewaySettings.from_env()

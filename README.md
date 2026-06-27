@@ -178,9 +178,12 @@ GATEWAY_POSTGRES_CONNECT_TIMEOUT_SECONDS=2.0
 ```bash
 agent-gateway postgres-init --print-sql
 agent-gateway postgres-init
+agent-gateway postgres-check-schema
 ```
 
 `--print-sql` 只打印建表 SQL，不构建完整网关应用；不带参数时通过本机 `psql` 执行 `CREATE TABLE IF NOT EXISTS` 和索引初始化。
+
+`postgres-check-schema` 会读取 `information_schema.columns`，检查实库表、列和基础类型是否与当前代码声明一致。旧库如果曾经用早期 schema 初始化过，建议先运行该命令；如果出现 `missing_tables`、`missing_columns` 或 `type_mismatches`，应先处理 schema 漂移，再执行回填或 smoke。
 
 ### 3. 迁移本地数据
 
@@ -225,6 +228,7 @@ GATEWAY_POSTGRES_ENABLED=true
 
 ```bash
 psql "$GATEWAY_POSTGRES_URL" -c "select count(*) from runtime_events;"
+agent-gateway postgres-check-schema
 agent-gateway postgres-smoke
 GATEWAY_POSTGRES_ENABLED=true agent-gateway serve
 ```

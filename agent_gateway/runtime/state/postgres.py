@@ -53,6 +53,26 @@ class PostgresTableSpec:
     retention_days: int = 14
 
 
+@dataclass(slots=True)
+class PostgresSchemaCheckResult:
+    """PostgreSQL 实库 schema 与当前代码规格的对比结果。"""
+
+    ok: bool
+    missing_tables: list[str]
+    missing_columns: dict[str, list[str]]
+    type_mismatches: dict[str, dict[str, dict[str, str]]]
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为 CLI 友好的字典结构。"""
+
+        return {
+            "ok": self.ok,
+            "missing_tables": self.missing_tables,
+            "missing_columns": self.missing_columns,
+            "type_mismatches": self.type_mismatches,
+        }
+
+
 def build_postgres_schema_sql(
     tables: tuple[PostgresTableSpec, ...] = (),
 ) -> str:
@@ -93,6 +113,77 @@ def initialize_postgres_schema(
     sql = build_postgres_schema_sql(tables)
     _run_psql_sql(url=url, sql=sql, connect_timeout_seconds=connect_timeout_seconds)
     return sql
+
+
+def check_postgres_schema(
+    *,
+    url: str,
+    connect_timeout_seconds: float = 2.0,
+    tables: tuple[PostgresTableSpec, ...] = (),
+) -> PostgresSchemaCheckResult:
+    """检查实库表结构是否与当前代码声明的状态表规格一致。"""
+
+    specs = tables or POSTGRES_STATE_TABLES
+    if shutil.which("psql") is None:
+        raise RuntimeError("psql is not installed")
+    sql = (
+        "SELECT json_build_object("
+        "'table', table_name, "
+        "'column', column_name, "
+        "'type', data_type"
+        ") AS row "
+        "FROM information_schema.columns "
+        "WHERE table_schema = 'public' "
+        "ORDER BY table_name, ordinal_position;"
+    )
+    completed = subprocess.run(
+        ["psql", url, "-X", "-q", "-t", "-A", "-F", "\t", "-c", sql],
+        check=True,
+        text=True,
+        capture_output=True,
+        timeout=connect_timeout_seconds,
+    )
+    actual: dict[str, dict[str, str]] = {}
+    for line in completed.stdout.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        table = str(row.get("table", ""))
+        column = str(row.get("column", ""))
+        data_type = str(row.get("type", ""))
+        if table and column:
+            actual.setdefault(table, {})[column] = data_type
+
+    missing_tables: list[str] = []
+    missing_columns: dict[str, list[str]] = {}
+    type_mismatches: dict[str, dict[str, dict[str, str]]] = {}
+    for spec in specs:
+        actual_columns = actual.get(spec.name)
+        if actual_columns is None:
+            missing_tables.append(spec.name)
+            continue
+        for column in spec.columns:
+            actual_type = actual_columns.get(column)
+            if actual_type is None:
+                missing_columns.setdefault(spec.name, []).append(column)
+                continue
+            expected_type = _expected_information_schema_type(spec.name, column)
+            if actual_type != expected_type:
+                type_mismatches.setdefault(spec.name, {})[column] = {
+                    "expected": expected_type,
+                    "actual": actual_type,
+                }
+
+    return PostgresSchemaCheckResult(
+        ok=not missing_tables and not missing_columns and not type_mismatches,
+        missing_tables=missing_tables,
+        missing_columns=missing_columns,
+        type_mismatches=type_mismatches,
+    )
 
 
 def _run_psql_sql(*, url: str, sql: str, connect_timeout_seconds: float) -> None:
@@ -174,6 +265,21 @@ def _column_type(table: str, column: str) -> str:
     if table == "sessions" and column == "id":
         return "TEXT NOT NULL"
     return "TEXT NOT NULL DEFAULT ''"
+
+
+def _expected_information_schema_type(table: str, column: str) -> str:
+    """返回 `_column_type()` 在 information_schema 中对应的标准类型名。"""
+
+    column_type = _column_type(table, column)
+    if column_type.startswith("JSONB"):
+        return "jsonb"
+    if column_type.startswith("DOUBLE PRECISION"):
+        return "double precision"
+    if column_type.startswith("INTEGER"):
+        return "integer"
+    if column_type.startswith("BOOLEAN"):
+        return "boolean"
+    return "text"
 
 
 class PostgresStateStore(Protocol):
