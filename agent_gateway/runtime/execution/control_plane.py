@@ -30,7 +30,7 @@ from agent_gateway.runtime.state.queue import DeliveryQueue, QueuedDelivery
 from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
 from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
-from agent_gateway.runtime.state.postgres import PostgresWriteRepository
+from agent_gateway.runtime.state.postgres import PostgresWriteRepository, check_postgres_schema
 from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
@@ -665,6 +665,8 @@ class GatewayControlPlane:
             if self.postgres_client is not None
             else {"enabled": False, "ok": True, "url": "", "error": ""}
         )
+        if postgres_status.get("enabled") and postgres_status.get("ok"):
+            postgres_status["schema"] = self._postgres_schema_status()
         tasks = (
             {"configured": True, **self.task_worker.stats()}
             if self.task_worker is not None
@@ -848,6 +850,17 @@ class GatewayControlPlane:
                     f"postgres unavailable: {postgres_status.get('error', '')}",
                 )
             )
+            schema_status = postgres_status.get("schema")
+            if isinstance(schema_status, dict):
+                checks.append(
+                    self._health_check(
+                        "postgres.schema",
+                        bool(schema_status.get("ok")),
+                        "warning",
+                        "postgres schema matches gateway specification",
+                        self._format_postgres_schema_error(schema_status),
+                    )
+                )
 
         cron = status["cron"]
         cron_errors = int(cron.get("errored", 0) or 0)
@@ -1013,6 +1026,45 @@ class GatewayControlPlane:
             "status": "ok" if passed else failure_status,
             "message": ok_message if passed else failure_message,
         }
+
+    def _postgres_schema_status(self) -> dict[str, Any]:
+        """返回 PostgreSQL schema drift 检查结果。"""
+
+        try:
+            result = check_postgres_schema(
+                url=self.settings.postgres_url,
+                connect_timeout_seconds=self.settings.postgres_connect_timeout_seconds,
+            )
+            return result.to_dict()
+        except Exception as exc:
+            return {
+                "ok": False,
+                "missing_tables": [],
+                "missing_columns": {},
+                "type_mismatches": {},
+                "error": str(exc),
+            }
+
+    @staticmethod
+    def _format_postgres_schema_error(schema_status: dict[str, Any]) -> str:
+        """把 schema drift 结果压缩成健康检查消息。"""
+
+        if schema_status.get("error"):
+            return f"postgres schema check failed: {schema_status.get('error')}"
+        missing_columns = sum(
+            len(columns)
+            for columns in dict(schema_status.get("missing_columns", {})).values()
+        )
+        type_mismatches = sum(
+            len(columns)
+            for columns in dict(schema_status.get("type_mismatches", {})).values()
+        )
+        return (
+            "postgres schema drift detected: "
+            f"missing_tables={len(schema_status.get('missing_tables', []))}, "
+            f"missing_columns={missing_columns}, "
+            f"type_mismatches={type_mismatches}"
+        )
 
     @staticmethod
     def _normalize_delivery_state(

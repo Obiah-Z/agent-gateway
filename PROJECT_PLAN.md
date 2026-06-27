@@ -469,6 +469,7 @@ delivery-worker
 | 20.5.15 飞书卡片状态 PostgreSQL 化 | 已完成 | 新增 `feishu_card_states`；飞书有状态卡片分页、展开和收起状态读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地卡片 JSON 作为兜底；迁移命令可回填旧 `data/channel-state/feishu/*/cards/*.json`。 |
 | 20.5.16 状态迁移审计与 smoke 收口 | 已完成 | 新增 `doc/PostgreSQL状态迁移审计.md`，明确数据库主存储、文件 fallback/audit、Prompt/Skill/配置资产的边界；`postgres-smoke` 增补 agents、bindings、profiles、channels 配置表写入和读回校验。 |
 | 20.5.17 schema drift 预检命令 | 已完成 | 新增 `agent-gateway postgres-check-schema`，基于 `information_schema.columns` 检查实库表、列和基础类型是否与当前代码声明一致，提前暴露旧库 schema 漂移问题。 |
+| 20.5.18 控制面 schema 健康检查 | 已完成 | `runtime.status` 在 PostgreSQL 启用且连通时返回 `postgres.schema`，`health.check` 增加 `postgres.schema` 检查项，schema drift 会以 warning 形式暴露到控制面和 Dashboard。 |
 
 ## 9. 推荐执行顺序
 

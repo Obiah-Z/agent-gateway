@@ -998,6 +998,72 @@ def test_control_plane_health_check_reports_redis_failure(tmp_path: Path) -> Non
     assert health["status"] == "degraded"
 
 
+def test_control_plane_health_check_reports_postgres_schema_drift(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = _build_settings(tmp_path)
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    settings.proactive_channel = "cli"
+    settings.proactive_account_id = "cli-local"
+    settings.proactive_peer_id = "cli-user"
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main", model="deepseek-v4-pro"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    profiles = ProfileManager(
+        [AuthProfile(name="primary", provider="anthropic", api_key="k", base_url="https://base")]
+    )
+
+    class FakeSchemaResult:
+        def to_dict(self):
+            return {
+                "ok": False,
+                "missing_tables": ["memory_entries"],
+                "missing_columns": {"tasks": ["payload"]},
+                "type_mismatches": {"agents": {"updated_at": {"expected": "double precision", "actual": "text"}}},
+            }
+
+    def fake_check_postgres_schema(*, url: str, connect_timeout_seconds: float):
+        return FakeSchemaResult()
+
+    monkeypatch.setattr(
+        "agent_gateway.runtime.execution.control_plane.check_postgres_schema",
+        fake_check_postgres_schema,
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=channels,
+        autonomy=FakeAutonomy(),
+        channel_runtime=FakeChannelRuntime(),
+        delivery_queue=DeliveryQueue(tmp_path / "delivery"),
+        postgres_client=FakePostgresClient(
+            PostgresHealth(
+                enabled=True,
+                ok=True,
+                url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+                latency_ms=1.0,
+            )
+        ),
+    )
+
+    status = control.runtime_status()
+    health = control.health_check()
+
+    assert status["postgres"]["schema"]["ok"] is False
+    schema_check = next(row for row in health["checks"] if row["name"] == "postgres.schema")
+    assert schema_check["status"] == "warning"
+    assert "missing_tables=1" in schema_check["message"]
+    assert "missing_columns=1" in schema_check["message"]
+    assert "type_mismatches=1" in schema_check["message"]
+    assert health["status"] == "degraded"
+
+
 def test_control_plane_generates_agent_template(tmp_path: Path) -> None:
     settings = _build_settings(tmp_path)
     control = GatewayControlPlane(
