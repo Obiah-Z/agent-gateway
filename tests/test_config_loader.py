@@ -35,6 +35,8 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "GATEWAY_DASHBOARD_REFRESH_INTERVAL_SECONDS=7",
                 "GATEWAY_EVENTS_RETENTION_DAYS=21",
                 "GATEWAY_INBOUND_MAX_CONCURRENT_LANES=3",
+                "GATEWAY_INBOUND_MAX_QUEUE_SIZE=11",
+                "GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE=5",
             ]
         ),
         encoding="utf-8",
@@ -58,6 +60,8 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().dashboard_refresh_interval_seconds == 7
     assert GatewaySettings.from_env().events_retention_days == 21
     assert GatewaySettings.from_env().inbound_max_concurrent_lanes == 3
+    assert GatewaySettings.from_env().inbound_max_queue_size == 11
+    assert GatewaySettings.from_env().inbound_max_lane_queue_size == 5
 
 
 def test_config_loader_reads_default_files(tmp_path: Path, monkeypatch) -> None:

@@ -10,7 +10,11 @@ from agent_gateway.runtime.domain.models import (
     OutboundMessage,
     RouteResolution,
 )
-from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime, PendingInbound
+from agent_gateway.runtime.execution.channel_runtime import (
+    ChannelRuntime,
+    InboundBackpressureError,
+    PendingInbound,
+)
 
 
 class FakeDispatcher:
@@ -133,6 +137,19 @@ class FlakyDispatcher(FakeDispatcher):
         self.delivered_errors.append(text)
         self.delivered_error_metadata.append(dict(metadata or {}))
         return "error-delivery-1"
+
+
+class BackpressureDispatcher(SlowDispatcher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.delivered_backpressure: list[str] = []
+        self.delivered_backpressure_metadata: list[dict] = []
+
+    async def deliver_text(self, channels: ChannelManager, target, text: str, *, metadata=None) -> str:
+        del channels, target
+        self.delivered_backpressure.append(text)
+        self.delivered_backpressure_metadata.append(dict(metadata or {}))
+        return "backpressure-delivery-1"
 
 
 def test_channel_runtime_restart_swaps_channels() -> None:
@@ -393,6 +410,103 @@ def test_channel_runtime_respects_global_lane_concurrency_limit() -> None:
     asyncio.run(_run())
 
     assert dispatcher.started == ["first", "second"]
+
+
+def test_channel_runtime_rejects_when_global_inbound_queue_is_full() -> None:
+    dispatcher = BackpressureDispatcher()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        max_queue_size=1,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime._queue.put(
+            PendingInbound(
+                message=InboundMessage(
+                    text="already queued",
+                    sender_id="user-1",
+                    channel="feishu",
+                    account_id="bot-a",
+                    peer_id="user-1",
+                )
+            )
+        )
+        event = Event()
+        try:
+            await runtime._enqueue_pending(
+                PendingInbound(
+                    message=InboundMessage(
+                        text="rejected",
+                        sender_id="user-2",
+                        channel="cli",
+                        account_id="cli-local",
+                        peer_id="user-2",
+                    ),
+                    completion_event=event,
+                )
+            )
+        except InboundBackpressureError as exc:
+            assert "global inbound queue is full" in str(exc)
+        assert event.is_set()
+        dispatcher.release.set()
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.delivered_backpressure == [
+        "当前网关入站消息积压较多，本条消息已被拒绝。请稍后重试。"
+    ]
+    assert dispatcher.delivered_backpressure_metadata[0]["kind"] == "backpressure"
+
+
+def test_channel_runtime_rejects_when_lane_queue_is_full() -> None:
+    dispatcher = BackpressureDispatcher()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        max_lane_queue_size=1,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        lane_queue = runtime._ensure_lane_queue("inbound:feishu:bot-a:user-1")
+        await lane_queue.put(
+            PendingInbound(
+                message=InboundMessage(
+                    text="already queued",
+                    sender_id="user-1",
+                    channel="feishu",
+                    account_id="bot-a",
+                    peer_id="user-1",
+                )
+            )
+        )
+        await runtime._queue.put(
+            PendingInbound(
+                message=InboundMessage(
+                    text="rejected",
+                    sender_id="user-1",
+                    channel="feishu",
+                    account_id="bot-a",
+                    peer_id="user-1",
+                )
+            )
+        )
+        while not dispatcher.delivered_backpressure:
+            await asyncio.sleep(0)
+        dispatcher.release.set()
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.delivered_backpressure == [
+        "当前网关入站消息积压较多，本条消息已被拒绝。请稍后重试。"
+    ]
+    assert dispatcher.dispatched == ["already queued"]
 
 
 def test_channel_runtime_flushes_cli_delivery_before_next_prompt() -> None:

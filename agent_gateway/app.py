@@ -262,6 +262,8 @@ async def serve(app: GatewayApplication) -> None:
         app.delivery_runtime,
         inbound_interceptors=[onboarding_service],
         max_concurrent_lanes=app.settings.inbound_max_concurrent_lanes,
+        max_queue_size=app.settings.inbound_max_queue_size,
+        max_lane_queue_size=app.settings.inbound_max_lane_queue_size,
     )
     app.control_plane.channel_runtime = channel_runtime
     server = GatewayServer(

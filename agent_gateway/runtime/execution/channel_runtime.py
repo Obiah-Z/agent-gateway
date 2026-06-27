@@ -58,6 +58,10 @@ class InboundInterceptor(Protocol):
         ...
 
 
+class InboundBackpressureError(RuntimeError):
+    """入站背压触发时抛出的拒绝异常。"""
+
+
 class ChannelRuntime:
     """协调多通道采集、顺序消费和错误回退。
 
@@ -74,6 +78,8 @@ class ChannelRuntime:
         inbound_interceptors: list[InboundInterceptor] | None = None,
         shutdown_timeout_seconds: float = 5.0,
         max_concurrent_lanes: int = 4,
+        max_queue_size: int = 200,
+        max_lane_queue_size: int = 20,
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
         self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
@@ -81,6 +87,8 @@ class ChannelRuntime:
         self.inbound_interceptors = list(inbound_interceptors or [])  # 入站前置拦截链。
         self.shutdown_timeout_seconds = shutdown_timeout_seconds  # stop/restart 等待线程和队列 drain 的上限。
         self.max_concurrent_lanes = max(1, int(max_concurrent_lanes))  # 全局入站 lane 并发上限。
+        self.max_queue_size = max(1, int(max_queue_size))  # 全局入口队列最大积压。
+        self.max_lane_queue_size = max(1, int(max_lane_queue_size))  # 单条 lane 最大积压。
         self._lane_semaphore = asyncio.Semaphore(self.max_concurrent_lanes)
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
@@ -151,7 +159,7 @@ class ChannelRuntime:
 
         if not self._running:
             raise RuntimeError("channel runtime is not running")
-        await self._queue.put(PendingInbound(message=inbound))
+        await self._enqueue_pending(PendingInbound(message=inbound))
 
     async def restart(self, channels: ChannelManager) -> None:
         """在控制面 reload 通道配置后热重启通道运行时。
@@ -226,7 +234,7 @@ class ChannelRuntime:
                 try:
                     # 从普通线程安全地投递到 asyncio 队列；`.result()` 确保投递完成。
                     asyncio.run_coroutine_threadsafe(
-                        self._queue.put(
+                        self._enqueue_pending(
                             PendingInbound(
                                 message=inbound,
                                 completion_event=completion_event,
@@ -234,6 +242,10 @@ class ChannelRuntime:
                         ),
                         self._loop,
                     ).result()
+                except InboundBackpressureError:
+                    if completion_event is not None:
+                        completion_event.set()
+                    continue
                 except Exception:
                     # 主循环已关闭或队列不可用时退出当前通道线程，避免后台异常刷屏。
                     return
@@ -261,8 +273,44 @@ class ChannelRuntime:
 
             lane_key = pending.preroute_lane_key
             lane_queue = self._ensure_lane_queue(lane_key)
-            await lane_queue.put(pending)
+            try:
+                self._ensure_lane_capacity(lane_key, lane_queue)
+            except InboundBackpressureError as exc:
+                await self._reject_pending(pending, exc)
+                self._queue.task_done()
+                continue
+            lane_queue.put_nowait(pending)
             self._queue.task_done()
+
+    async def _enqueue_pending(self, pending: PendingInbound) -> None:
+        """把消息放入全局入口队列，超过容量时触发背压拒绝。"""
+
+        if self._queue.qsize() >= self.max_queue_size:
+            await self._reject_pending(
+                pending,
+                InboundBackpressureError("global inbound queue is full"),
+            )
+            raise InboundBackpressureError("global inbound queue is full")
+        self._queue.put_nowait(pending)
+
+    def _ensure_lane_capacity(
+        self,
+        lane_key: str,
+        queue: asyncio.Queue[PendingInbound | None],
+    ) -> None:
+        """检查单 lane 积压，超过阈值时拒绝新消息。"""
+
+        if queue.qsize() >= self.max_lane_queue_size:
+            raise InboundBackpressureError(f"inbound lane is full: {lane_key}")
+
+    async def _reject_pending(self, pending: PendingInbound, exc: Exception) -> None:
+        """拒绝入站消息并尽量给用户返回明确反馈。"""
+
+        try:
+            await self._deliver_backpressure_reply(pending.message, exc)
+        finally:
+            if pending.completion_event is not None:
+                pending.completion_event.set()
 
     def _ensure_lane_queue(self, lane_key: str) -> asyncio.Queue[PendingInbound | None]:
         """获取或创建入站 lane 队列和对应 worker。"""
@@ -381,6 +429,40 @@ class ChannelRuntime:
             # 连错误提示都投递失败时只能记录日志，不能再次抛出，否则消费者会被终止。
             print(
                 "[channel_runtime] failed to enqueue error reply:"
+                f" channel={inbound.channel}"
+                f" account={inbound.account_id}"
+                f" peer={inbound.peer_id}"
+                f" error={delivery_exc}"
+            )
+            traceback.print_exc()
+
+    async def _deliver_backpressure_reply(self, inbound: InboundMessage, exc: Exception) -> None:
+        """把背压拒绝转换成用户可见提示。"""
+
+        try:
+            metadata = dict(inbound.metadata)
+            metadata.update(
+                {
+                    "kind": "backpressure",
+                    "sender_id": inbound.sender_id,
+                    "error_type": type(exc).__name__,
+                }
+            )
+            await self.dispatcher.deliver_text(
+                self.channels,
+                ProactiveTarget(
+                    channel=inbound.channel,
+                    account_id=inbound.account_id,
+                    peer_id=inbound.peer_id,
+                    agent_id=str(inbound.metadata.get("agent_id", "main")),
+                ),
+                "当前网关入站消息积压较多，本条消息已被拒绝。请稍后重试。",
+                metadata=metadata,
+            )
+            await self._flush_cli_delivery_if_needed(inbound)
+        except Exception as delivery_exc:
+            print(
+                "[channel_runtime] failed to enqueue backpressure reply:"
                 f" channel={inbound.channel}"
                 f" account={inbound.account_id}"
                 f" peer={inbound.peer_id}"

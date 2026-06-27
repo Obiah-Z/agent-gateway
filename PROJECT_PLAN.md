@@ -266,10 +266,13 @@ cd ~/Desktop/claw0/gateway
    - 已新增 `GATEWAY_INBOUND_MAX_CONCURRENT_LANES`，默认限制同时运行的入站 lane 数为 4。
    - 已通过 `asyncio.Semaphore` 在 lane worker 执行前施加全局并发上限。
    - per-agent 精准并发上限需要基于路由后的 Agent/session 信息实现，避免在路由前阶段做不准确限流。
-5. Phase 15.5：增加入站背压策略。待实现。
+5. Phase 15.5：增加入站背压策略。部分完成。
    - 配置最大队列长度。
    - 超过阈值时对低优先级任务延迟或拒绝。
    - 实时用户消息优先于 Cron/Heartbeat。
+   - 已新增 `GATEWAY_INBOUND_MAX_QUEUE_SIZE` 和 `GATEWAY_INBOUND_MAX_LANE_QUEUE_SIZE`。
+   - 全局入口队列或单 lane 队列超过阈值时，新消息会被拒绝，并尽量通过原通道返回“系统繁忙，请稍后重试”提示。
+   - 低优先级任务延迟、实时消息优先级调度仍待后续补齐。
 6. Phase 15.6：增加长任务降级策略。待实现。
    - 超过阈值后先回复“已进入后台处理”。
    - 后续结果通过可靠投递链路补发。
