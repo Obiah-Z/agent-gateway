@@ -420,7 +420,7 @@ delivery-worker
 | 子阶段 | 状态 | 主要内容 |
 | --- | --- | --- |
 | 20.4.1 状态边界与表设计 | 已完成 | 明确 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 的最小字段、主键、时间列、索引和保留策略；保留 JSONL 作为回退和审计。 |
-| 20.4.2 仓储接口草案 | 待实现 | 定义状态仓储抽象，先不替换业务写入，只约束 list/get/append/upsert/query 的统一接口。 |
+| 20.4.2 仓储接口草案 | 已完成 | 定义状态仓储抽象，先不替换业务写入，只约束 list/get/append/upsert/query/delete 的统一接口。 |
 | 20.4.3 Dashboard 只读接入 | 待实现 | 先让 Dashboard 的分页列表优先读 PostgreSQL，再回退 JSONL。 |
 | 20.4.4 双写与迁移脚手架 | 待实现 | 逐步把会话、任务、事件和记忆接入数据库主存储，保留 JSONL 双写和回放能力。 |
 
