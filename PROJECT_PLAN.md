@@ -71,7 +71,7 @@ cd ~/Desktop/claw0/gateway
 ./.venv/bin/python -m pytest tests -q
 ```
 
-最近验证基线：`202 passed`。
+最近验证基线：`229 passed`。
 
 ## 4. 当前能力基线
 
@@ -347,7 +347,7 @@ delivery-worker
 | --- | --- | --- | --- |
 | 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
 | 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
-| 20.3 后台任务队列 | 长任务从入站 lane 中剥离 | 将 Cron、Heartbeat、GitHub 分析、服务器巡检和长任务 Skill 包装为 task instance；支持入队、执行、重试、失败记录。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
+| 20.3 后台任务队列 | 进行中 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron 自动调度已进入任务链路，Heartbeat 暂保留原路径。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
 | 20.4 PostgreSQL 状态外置 | 提升长期查询和治理能力 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
 | 20.6 生产部署编排 | 形成可复现部署形态 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
@@ -396,6 +396,16 @@ delivery-worker
 | 20.2.2 飞书事件去重 | 已完成 | 飞书 Webhook 去重已接入 Redis `SET NX EX` 后端，并保留本地去重作为 fallback；长连接去重后续可按需要补齐。 |
 | 20.2.3 Cron 幂等 key | 已完成 | Scheduler 触发 Cron 前写入 Redis 幂等 key，避免多实例重复触发；Redis 不可用时回退当前单机行为。 |
 | 20.2.4 全局限流 | 已完成 | 新增 Redis `INCR + EXPIRE` 固定窗口限流工具，并先接入 Cron 自动调度；模型调用和通道发送限流留到后续专项阶段。 |
+
+#### Phase 20.3 后台任务队列子阶段
+
+| 子阶段 | 状态 | 主要内容 |
+| --- | --- | --- |
+| 20.3.1 任务模型与本地存储 | 已完成 | 新增 `TaskInstance`，支持 pending、running、retrying、done、failed、cancelled 状态；新增本地 JSON 文件任务存储。 |
+| 20.3.2 本地任务队列接口 | 已完成 | 增加 enqueue、reserve、ack、retry、fail、cancel 和 stats 抽象，先用本地 backend 实现。 |
+| 20.3.3 Worker 运行时 | 已完成 | 增加 `TaskWorkerRuntime`，支持 handler 注册、并发 worker loop、成功 ack、失败 fail、异常 retry 和 stats。 |
+| 20.3.4 Cron/Heartbeat 任务化 | 部分完成 | Cron 自动调度已改为创建 `cron` task instance，并由 `TaskWorkerRuntime` 调用原 Cron 执行逻辑；Heartbeat 暂未迁移。 |
+| 20.3.5 长任务 Skill 任务化 | 待实现 | 将 GitHub 分析、服务器巡检等长任务切到后台任务链路。 |
 
 ## 9. 推荐执行顺序
 

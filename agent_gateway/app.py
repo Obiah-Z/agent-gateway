@@ -43,6 +43,7 @@ from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.runtime.infra.redis_client import RedisClient
+from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 from agent_gateway.gateways.control.websocket_server import GatewayServer
@@ -77,6 +78,9 @@ class GatewayApplication:
     command_queue: CommandQueue  # 命名并发车道队列，控制同类任务串行执行。
     control_plane: GatewayControlPlane  # 控制面服务，提供配置、状态和运维操作。
     redis_client: RedisClient  # Redis 基础设施客户端，用于后续去重、锁和限流。
+    task_store: LocalTaskStore  # 后台任务本地状态存储。
+    task_queue: LocalTaskQueue  # 后台任务队列抽象。
+    task_worker: TaskWorkerRuntime  # 后台任务 worker 运行时。
     event_store: RuntimeEventStore  # 运行事件 JSONL 存储。
     metrics_store: MetricsStore  # 指标快照存储。
     metrics_runtime: MetricsRuntime  # 指标采集运行时。
@@ -160,6 +164,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         url=settings.redis_url,
         socket_timeout_seconds=settings.redis_socket_timeout_seconds,
     )
+    task_store = LocalTaskStore(settings.tasks_dir)
+    task_queue = LocalTaskQueue(task_store)
     dispatcher = GatewayDispatcher(
         agents,
         bindings,
@@ -175,7 +181,10 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         channel_manager,
         event_store=event_store,
         redis_client=redis_client,
+        task_queue=task_queue,
     )
+    task_worker = TaskWorkerRuntime(task_queue, worker_id="local-worker")
+    task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)
     delivery_runtime = DeliveryRuntime(
         delivery_queue,
         channel_manager,
@@ -225,6 +234,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         alert_store=alert_store,
         alerts_runtime=alerts_runtime,
         redis_client=redis_client,
+        task_worker=task_worker,
     )
 
     return GatewayApplication(
@@ -246,6 +256,9 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         command_queue=command_queue,
         control_plane=control_plane,
         redis_client=redis_client,
+        task_store=task_store,
+        task_queue=task_queue,
+        task_worker=task_worker,
         event_store=event_store,
         metrics_store=metrics_store,
         metrics_runtime=metrics_runtime,
@@ -337,6 +350,9 @@ async def serve(app: GatewayApplication) -> None:
         if role_plan.scheduler:
             await app.autonomy_runtime.start()
             started.append(app.autonomy_runtime)
+        if role_plan.worker:
+            await app.task_worker.start()
+            started.append(app.task_worker)
         if role_plan.observability:
             await app.metrics_runtime.start()
             started.append(app.metrics_runtime)

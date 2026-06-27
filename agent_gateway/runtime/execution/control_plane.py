@@ -73,6 +73,7 @@ class GatewayControlPlane:
     alert_store: AlertStore | None = None
     alerts_runtime: Any = None
     redis_client: Any = None
+    task_worker: Any = None
 
     def list_bindings(self) -> list[Binding]:
         """返回当前生效的路由绑定列表。"""
@@ -466,6 +467,11 @@ class GatewayControlPlane:
             if self.redis_client is not None
             else {"enabled": False, "ok": True, "url": "", "error": ""}
         )
+        tasks = (
+            {"configured": True, **self.task_worker.stats()}
+            if self.task_worker is not None
+            else {"configured": False}
+        )
         return {
             "agents": {
                 "count": len(agents),
@@ -491,6 +497,7 @@ class GatewayControlPlane:
             "inbound": inbound,
             "delivery": delivery,
             "redis": redis_status,
+            "tasks": tasks,
             "heartbeat": heartbeat,
             "cron": {
                 "count": len(cron_jobs),

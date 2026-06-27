@@ -136,6 +136,10 @@ class GatewaySettings:
         return self.data_dir / "alerts"
 
     @property
+    def tasks_dir(self) -> Path:
+        return self.data_dir / "tasks"
+
+    @property
     def agents_config_file(self) -> Path:
         return self.config_dir / "agents.json"
 
@@ -275,3 +279,4 @@ class GatewaySettings:
         self.events_dir.mkdir(parents=True, exist_ok=True)
         self.metrics_dir.mkdir(parents=True, exist_ok=True)
         self.alerts_dir.mkdir(parents=True, exist_ok=True)
+        self.tasks_dir.mkdir(parents=True, exist_ok=True)

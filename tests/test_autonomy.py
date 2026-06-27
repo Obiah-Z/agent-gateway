@@ -9,6 +9,7 @@ from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.domain.models import AgentReply, OutboundMessage, ProactiveTarget
 from agent_gateway.ai.news.models import NewsItem, NewsSourceConfig
 from agent_gateway.runtime.execution.autonomy import CronService, HeartbeatService
+from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
 
 
 class DummyChannel(Channel):
@@ -193,6 +194,62 @@ def test_cron_service_runs_system_event(tmp_path: Path) -> None:
     asyncio.run(cron._run_job(job, time.time()))
 
     assert channel.sent == ["[System Ping] Ping"]
+
+
+def test_cron_service_queues_system_event_for_task_worker(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "system-ping",
+                "name": "System Ping",
+                "enabled": True,
+                "schedule": {
+                    "kind": "every",
+                    "every_seconds": 60,
+                    "anchor": "2026-01-01T00:00:00+00:00",
+                },
+                "payload": {"kind": "system_event", "text": "Ping"},
+            }
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        task_queue=task_queue,
+    )
+    worker = TaskWorkerRuntime(task_queue)
+    worker.register_handler("cron", cron.run_task_instance)
+    cron.jobs[0].next_run_at = time.time() - 1
+
+    asyncio.run(cron.tick())
+    assert channel.sent == []
+    queued = task_queue.store.list(statuses=["pending"])
+    assert len(queued) == 1
+    assert queued[0].task_type == "cron"
+    assert queued[0].payload["job_id"] == "system-ping"
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert channel.sent == ["[System Ping] Ping"]
+    assert task_queue.store.get(queued[0].id).status == "done"
 
 
 def test_cron_service_uses_redis_idempotency_for_scheduled_tick(tmp_path: Path) -> None:

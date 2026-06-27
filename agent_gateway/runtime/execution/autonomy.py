@@ -30,6 +30,8 @@ from agent_gateway.ai.news.models import NewsItem
 from agent_gateway.ai.news.store import NewsDigestStore
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 from agent_gateway.runtime.observability.events import RuntimeEventStore, new_correlation_id
+from agent_gateway.runtime.tasks.models import TaskInstance
+from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 
 
 DEFAULT_CRON_DISABLE_THRESHOLD = 5
@@ -103,6 +105,7 @@ class HeartbeatService:
         default_target: ProactiveTarget,
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
+        task_queue: LocalTaskQueue | None = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
@@ -268,6 +271,7 @@ class CronService:
         default_target: ProactiveTarget,
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
+        task_queue: LocalTaskQueue | None = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
@@ -275,6 +279,7 @@ class CronService:
         self.default_target = default_target
         self.event_store = event_store
         self.redis_client = redis_client
+        self.task_queue = task_queue
         self.cron_file = settings.workspace_root / "CRON.json"
         self.run_log_dir = settings.workspace_root / "cron"
         self.run_log_dir.mkdir(parents=True, exist_ok=True)
@@ -505,7 +510,10 @@ class CronService:
                     },
                 )
                 continue
-            await self._run_job(job, now)
+            if self.task_queue is not None:
+                self._enqueue_job_task(job, now)
+            else:
+                await self._run_job(job, now)
             if job.delete_after_run and job.schedule_kind == "at":
                 remove_ids.append(job.id)
         if remove_ids:
@@ -634,6 +642,49 @@ class CronService:
                 "cron_status": status,
             },
         )
+
+    def _enqueue_job_task(self, job: CronJob, now: float) -> TaskInstance:
+        """把到期 Cron 封装成后台任务。"""
+
+        assert self.task_queue is not None
+        task = self.task_queue.enqueue(
+            task_type="cron",
+            source="scheduler",
+            agent_id=job.target.agent_id,
+            session_key=f"system:cron:{job.id}",
+            priority=int(job.payload.get("priority", 100) or 100),
+            idempotency_key=self._cron_idempotency_key(job),
+            payload={
+                "job_id": job.id,
+                "scheduled_at": now,
+            },
+            metadata={
+                "config_id": job.config_id,
+                "scope": job.scope,
+                "source_file": job.source_file,
+            },
+        )
+        job.last_run_at = now
+        job.next_run_at = self._compute_next(job, now)
+        self._record_cron_event(
+            "cron.queued",
+            job,
+            status="ok",
+            message=f"Cron job queued: {job.id}",
+            metadata={"task_id": task.id},
+        )
+        return task
+
+    async def run_task_instance(self, task: TaskInstance) -> str:
+        """执行由 task worker 预占的 Cron 任务。"""
+
+        job_id = str(task.payload.get("job_id", ""))
+        job = self._resolve_job(job_id)
+        if job is None:
+            raise RuntimeError(f"cron job not found: {job_id}")
+        scheduled_at = float(task.payload.get("scheduled_at", 0.0) or time.time())
+        await self._run_job(job, scheduled_at)
+        return f"cron job executed: {job.id}"
 
     async def _run_agent_news_digest(
         self,
@@ -904,6 +955,7 @@ class AutonomyRuntime:
         channels: ChannelManager,
         event_store: RuntimeEventStore | None = None,
         redis_client: Any = None,
+        task_queue: LocalTaskQueue | None = None,
     ) -> None:
         target = ProactiveTarget(
             channel=settings.proactive_channel,
@@ -925,6 +977,7 @@ class AutonomyRuntime:
             target,
             event_store=event_store,
             redis_client=redis_client,
+            task_queue=task_queue,
         )
 
     def set_channels(self, channels: ChannelManager) -> None:
