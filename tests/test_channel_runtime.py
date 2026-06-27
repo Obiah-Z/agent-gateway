@@ -138,6 +138,20 @@ def test_channel_runtime_restart_swaps_channels() -> None:
     assert runtime.delivery_runtime.channels is second
 
 
+def test_pending_inbound_exposes_preroute_lane_key() -> None:
+    pending = PendingInbound(
+        message=InboundMessage(
+            text="hi",
+            sender_id="user-1",
+            channel="feishu",
+            account_id="bot-a",
+            peer_id="chat-1",
+        )
+    )
+
+    assert pending.preroute_lane_key == "inbound:feishu:bot-a:chat-1"
+
+
 def test_channel_runtime_restart_drains_queued_messages_before_swap() -> None:
     first = ChannelManager()
     second = ChannelManager()

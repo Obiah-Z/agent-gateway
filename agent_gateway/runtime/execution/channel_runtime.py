@@ -24,6 +24,7 @@ from typing import Any, Protocol
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.gateways.messaging.telegram import TelegramChannel
 from agent_gateway.runtime.domain.models import InboundMessage, ProactiveTarget
+from agent_gateway.runtime.domain.router import build_preroute_lane_key
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 
@@ -38,6 +39,12 @@ class PendingInbound:
 
     message: InboundMessage  # 标准化后的入站消息。
     completion_event: threading.Event | None = None  # 通知采集线程“本条消息已处理完成”。
+
+    @property
+    def preroute_lane_key(self) -> str:
+        """返回路由前 lane key，供后续入站 lane dispatcher 使用。"""
+
+        return build_preroute_lane_key(self.message)
 
 
 class InboundInterceptor(Protocol):

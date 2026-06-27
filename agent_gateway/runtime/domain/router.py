@@ -10,7 +10,13 @@ from .agents import AgentManager
 from .ids import DEFAULT_AGENT_ID, normalize_agent_id
 from .models import Binding, InboundMessage, RouteResolution
 
-__all__ = ["BindingTable", "build_session_key", "resolve_route"]
+__all__ = [
+    "BindingTable",
+    "build_inbound_lane_key",
+    "build_preroute_lane_key",
+    "build_session_key",
+    "resolve_route",
+]
 
 
 class BindingTable:
@@ -116,6 +122,35 @@ def build_session_key(
     if dm_scope == "per-peer" and normalized_peer:
         return f"agent:{aid}:direct:{normalized_peer}"
     return f"agent:{aid}:main"
+
+
+def build_preroute_lane_key(inbound: InboundMessage) -> str:
+    """生成路由前入站 lane key。
+
+    ChannelRuntime 在正式路由前还不知道目标 Agent 和最终 session_key，因此只能使用
+    通道维度的稳定身份做临时分组。这个 key 用于后续 lane dispatcher 的粗分发阶段。
+    """
+
+    channel = (inbound.channel or "unknown").strip().lower()
+    account_id = (inbound.account_id or "default").strip().lower()
+    peer_id = (inbound.peer_id or inbound.sender_id or "anonymous").strip().lower()
+    return f"inbound:{channel}:{account_id}:{peer_id}"
+
+
+def build_inbound_lane_key(
+    inbound: InboundMessage,
+    route: RouteResolution | None = None,
+) -> str:
+    """生成入站处理 lane key。
+
+    已完成路由时优先使用 `agent_id + session_key`，保证同一 Agent 会话严格串行。
+    路由前或拦截器消息则退回到通道/account/peer 维度，避免不同来源互相阻塞。
+    """
+
+    if route is not None and route.agent_id and route.session_key:
+        agent_id = normalize_agent_id(route.agent_id)
+        return f"agent:{agent_id}:session:{route.session_key}"
+    return build_preroute_lane_key(inbound)
 
 
 def resolve_route(

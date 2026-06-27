@@ -248,10 +248,12 @@ cd ~/Desktop/claw0/gateway
    - CLI `completion_event` 在正常处理、失败处理和 restart drain 场景下都会释放。
    - `ingest_external()` 在 runtime 未运行时拒绝入队，避免消息进入无人消费的旧队列。
    - 新增回归测试覆盖：restart 前已入队消息不丢、CLI completion_event 可释放、旧通道线程会被关闭并 join。
-2. Phase 15.2：定义入站 lane key 规则。待实现。
+2. Phase 15.2：定义入站 lane key 规则。已完成。
    - 优先使用 `agent_id + session_key`。
    - 路由前可临时使用 `channel + account_id + peer_id`。
    - 后台任务、Cron、Heartbeat 与用户实时消息分开 lane。
+   - 已新增 `build_preroute_lane_key()` 和 `build_inbound_lane_key()`，并让 `PendingInbound` 暴露路由前 lane key。
+   - 已补充路由前 fallback、路由后 Agent/session 优先级和 PendingInbound lane key 测试。
 3. Phase 15.3：将 `ChannelRuntime` 从单消费者改为 lane dispatcher。待实现。
    - 全局入站队列只负责接收和粗分发。
    - 每个 lane 内部保持顺序处理。
