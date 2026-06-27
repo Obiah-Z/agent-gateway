@@ -14,10 +14,12 @@ from agent_gateway.runtime.domain.router import BindingTable
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
 from agent_gateway.gateways.control.websocket_server import GatewayServer
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
+from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
+from agent_gateway.runtime.state.adapter import LocalStateReadRepository
 from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
@@ -147,6 +149,41 @@ def test_gateway_server_exposes_control_plane_methods(tmp_path) -> None:
     assert profiles_result[0]["name"] == "primary"
     assert channels_result == []
     assert source_result == {"bindings": []}
+
+
+def test_gateway_server_sessions_use_state_repository(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    sessions = SessionStore(settings.sessions_dir)
+    sessions.append_message(
+        agent_id="main",
+        session_key="session-1",
+        role="user",
+        content="hello",
+    )
+    state_repository = LocalStateReadRepository(
+        sessions=sessions,
+        tasks=LocalTaskStore(tmp_path / "tasks"),
+        events=RuntimeEventStore(settings.data_dir / "events" / "runtime-events.jsonl"),
+        metrics=MetricsStore(settings.data_dir / "metrics" / "metrics.jsonl"),
+        alerts=AlertStore(settings.data_dir / "alerts" / "alerts.jsonl"),
+        memory=MemoryStore(settings.workspace_root),
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": AgentManager(), "bindings": BindingTable()})(),
+        sessions=SessionStore(settings.sessions_dir),
+        state_repository=state_repository,
+    )
+
+    result = asyncio.run(server._m_sessions({"agent_id": "main"}))
+
+    assert result["session-1"] == 1
 
 
 def test_gateway_server_exposes_event_methods(tmp_path) -> None:

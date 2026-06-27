@@ -10,6 +10,8 @@ from agent_gateway.runtime.domain.models import Binding, InboundMessage
 from agent_gateway.runtime.execution.autonomy import AutonomyRuntime
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
+from agent_gateway.runtime.state.adapter import LocalStateReadRepository
+from agent_gateway.runtime.state.repository import StateReadRepository
 from agent_gateway.runtime.state.store import SessionStore
 
 
@@ -24,6 +26,7 @@ class GatewayServer:
         sessions: SessionStore,
         autonomy: AutonomyRuntime | None = None,
         control_plane: GatewayControlPlane | None = None,
+        state_repository: StateReadRepository | None = None,
     ) -> None:
         """初始化实例。"""
         self.host = host
@@ -32,6 +35,7 @@ class GatewayServer:
         self.sessions = sessions
         self.autonomy = autonomy
         self.control_plane = control_plane
+        self.state_repository = state_repository
         self._server: Any = None
         self._running = False
         self._start_time = time.monotonic()
@@ -513,6 +517,14 @@ class GatewayServer:
 
     async def _m_sessions(self, params: dict[str, Any]) -> dict[str, int]:
         """处理控制面 会话列表 RPC 请求。"""
+        if self.state_repository is not None:
+            agent_id = str(params.get("agent_id", ""))
+            items = self.state_repository.list("sessions", filters={"agent_id": agent_id})
+            return {
+                str(row.get("session_key", "")): int(row.get("message_count", 0) or 0)
+                for row in items
+                if isinstance(row, dict)
+            }
         return self.sessions.list_sessions(params.get("agent_id", ""))
 
     async def _m_status(self, params: dict[str, Any]) -> dict[str, Any]:

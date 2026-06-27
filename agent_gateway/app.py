@@ -335,6 +335,7 @@ async def serve(app: GatewayApplication) -> None:
         sessions=app.sessions,
         autonomy=app.autonomy_runtime,
         control_plane=app.control_plane,
+        state_repository=app.control_plane.state_repository,
     )
     feishu_webhook = FeishuWebhookServer(
         host=app.settings.feishu_webhook_host,
