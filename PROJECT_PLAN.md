@@ -279,14 +279,19 @@ cd ~/Desktop/claw0/gateway
    - 已新增 `GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS`，默认 15 秒；设为 0 可关闭。
    - 单条入站消息超过阈值仍未完成时，会先通过可靠投递链路推送“继续处理中”提示。
    - 当前任务仍在原 lane 内继续执行并最终投递结果；真正释放 lane 的后台任务状态机留到 Phase 18 处理。
-7. Phase 15.7：增加运行指标。待实现。
+7. Phase 15.7：增加运行指标。已完成。
    - 全局入站队列长度。
    - 每个 lane 的队列长度。
    - 最老消息等待时间。
    - 当前运行 lane 数。
    - 每个 Agent 的并发占用。
-8. Phase 15.8：Dashboard 增加入站队列和 lane 视图。待实现。
-9. Phase 15.9：控制面增加 `runtime.lanes` 或扩展现有 runtime status，展示当前积压和并发状态。待实现。
+   - `ChannelRuntime.stats()` 已暴露全局队列、lane 队列、运行中任务、活跃 lane、最老等待时间和并发上限。
+   - per-agent 并发占用仍依赖后续路由后调度增强。
+8. Phase 15.8：Dashboard 增加入站队列和 lane 视图。已完成。
+   - Dashboard 新增“入站队列与车道”面板，展示全局队列、单 lane 上限、运行中任务、最老等待时间和 lane 列表。
+   - 运行态快照新增“入站队列”卡片。
+9. Phase 15.9：控制面增加 `runtime.lanes` 或扩展现有 runtime status，展示当前积压和并发状态。已完成。
+   - `runtime.status` 已新增 `inbound` 字段，Dashboard 可直接消费。
 10. Phase 15.10：补充测试。进行中。
    - restart 时已入队消息不会丢失。
    - restart 时旧通道线程不会继续向无人消费的旧队列投递消息。

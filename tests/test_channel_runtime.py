@@ -419,6 +419,63 @@ def test_channel_runtime_respects_global_lane_concurrency_limit() -> None:
     assert dispatcher.started == ["first", "second"]
 
 
+def test_channel_runtime_stats_report_queue_and_lane_pressure() -> None:
+    runtime = ChannelRuntime(
+        dispatcher=FakeDispatcher(),
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        max_concurrent_lanes=2,
+        max_queue_size=9,
+        max_lane_queue_size=3,
+    )
+
+    async def _run() -> dict:
+        await runtime._enqueue_pending(
+            PendingInbound(
+                message=InboundMessage(
+                    text="global queued",
+                    sender_id="global",
+                    channel="feishu",
+                    account_id="bot-a",
+                    peer_id="global",
+                )
+            )
+        )
+        lane_queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
+        runtime._lane_queues["inbound:feishu:bot-a:user-1"] = lane_queue
+        lane_pending = PendingInbound(
+            message=InboundMessage(
+                text="lane queued",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+            ),
+            enqueued_at=1.0,
+        )
+        await lane_queue.put(lane_pending)
+        runtime._lane_active["inbound:feishu:bot-a:user-1"] = 1
+        stats = runtime.stats()
+        await runtime._queue.get()
+        runtime._queue.task_done()
+        lane_queue.get_nowait()
+        lane_queue.task_done()
+        return stats
+
+    stats = asyncio.run(_run())
+
+    assert stats["global_queue_depth"] == 1
+    assert stats["global_queue_limit"] == 9
+    assert stats["lane_queue_limit"] == 3
+    assert stats["max_concurrent_lanes"] == 2
+    assert stats["active_lanes"] == 1
+    assert stats["running_tasks"] == 1
+    assert stats["queued_messages"] == 2
+    assert stats["lanes"][0]["key"] == "inbound:feishu:bot-a:user-1"
+    assert stats["lanes"][0]["queued"] == 1
+    assert stats["oldest_wait_seconds"] > 0
+
+
 def test_channel_runtime_rejects_when_global_inbound_queue_is_full() -> None:
     dispatcher = BackpressureDispatcher()
     runtime = ChannelRuntime(

@@ -139,6 +139,8 @@ const dom = {
   alertsHistory: $("#alerts-history"),
   healthSummary: $("#health-summary"),
   healthList: $("#health-list"),
+  inboundSummary: $("#inbound-summary"),
+  inboundList: $("#inbound-list"),
   runtimeUpdated: $("#runtime-updated"),
   runtimeList: $("#runtime-list"),
   tracesSummary: $("#traces-summary"),
@@ -630,6 +632,7 @@ async function refreshAll() {
     renderIssues(buildIssues(health, runtime, deliveryStats, metricsSummary));
     renderHealth(health);
     renderRuntime(runtime);
+    renderInbound(runtime.inbound || {});
     renderMetrics(metricsSummary, metricsTail);
     renderAlerts(alertsActive, alertsHistory);
     renderTraces(events);
@@ -800,6 +803,7 @@ function renderRuntime(runtime) {
   const features = runtime.features || {};
   const proactive = features.proactive_target || {};
   const paths = runtime.paths || {};
+  const inbound = runtime.inbound || {};
   const sections = [
     {
       icon: "AG",
@@ -814,6 +818,24 @@ function renderRuntime(runtime) {
       rows: [
         ["智能体 ID", (runtime.agents?.ids || []).join(", ") || "无"],
         ["路由绑定", `${runtime.bindings?.count ?? 0} 条`],
+      ],
+    },
+    {
+      icon: "IN",
+      title: "入站队列",
+      value: `${inbound.running_tasks ?? 0}/${inbound.max_concurrent_lanes ?? 0}`,
+      status: Number(inbound.queued_messages || 0) > 0 ? "warning" : "ok",
+      summary: "运行中 / 最大并发 lane",
+      chips: [
+        `全局队列 ${inbound.global_queue_depth ?? 0}/${inbound.global_queue_limit ?? 0}`,
+        `lane ${inbound.lane_count ?? 0}`,
+        `排队 ${inbound.queued_messages ?? 0}`,
+      ],
+      rows: [
+        ["运行状态", inbound.running ? "运行中" : "未运行"],
+        ["活跃 lane", `${inbound.active_lanes ?? 0}`],
+        ["运行任务", `${inbound.running_tasks ?? 0}`],
+        ["最老等待", formatSecondsLabel(inbound.oldest_wait_seconds)],
       ],
     },
     {
@@ -926,6 +948,67 @@ function renderRuntime(runtime) {
     dom.runtimeList.appendChild(card);
   }
   appendCollapseToggle(dom.runtimeList, "runtime", sections.length, () => renderRuntime(runtime));
+}
+
+function renderInbound(inbound) {
+  clearNode(dom.inboundList);
+  const configured = Boolean(inbound.configured);
+  const lanes = Array.isArray(inbound.lanes) ? inbound.lanes : [];
+  dom.inboundSummary.textContent = configured
+    ? `运行 ${inbound.running_tasks ?? 0}/${inbound.max_concurrent_lanes ?? 0} · 排队 ${inbound.queued_messages ?? 0}`
+    : "未配置";
+  if (!configured) {
+    dom.inboundList.className = "inbound-list empty";
+    dom.inboundList.textContent = "当前没有接入 ChannelRuntime，无法展示入站队列状态。";
+    return;
+  }
+
+  dom.inboundList.className = "inbound-list";
+  const overview = document.createElement("div");
+  overview.className = `inbound-overview inbound-${Number(inbound.queued_messages || 0) > 0 ? "warning" : "ok"}`;
+  const cards = [
+    ["全局入口队列", `${inbound.global_queue_depth ?? 0}/${inbound.global_queue_limit ?? 0}`, "等待进入 lane 分发的消息"],
+    ["单车道上限", `${inbound.lane_queue_limit ?? 0}`, "每个 peer/session lane 可积压的消息数"],
+    ["运行中任务", `${inbound.running_tasks ?? 0}/${inbound.max_concurrent_lanes ?? 0}`, "当前占用 / 全局并发上限"],
+    ["最老等待", formatSecondsLabel(inbound.oldest_wait_seconds), "队列中最早消息等待时间"],
+  ];
+  for (const [label, value, detail] of cards) {
+    const card = document.createElement("article");
+    card.className = "inbound-stat";
+    appendText(card, "span", label, "trend-label");
+    appendText(card, "strong", value, "trend-value");
+    appendText(card, "small", detail, "trend-detail");
+    overview.appendChild(card);
+  }
+  dom.inboundList.appendChild(overview);
+
+  if (!lanes.length) {
+    appendText(dom.inboundList, "div", "当前没有活跃或积压的入站 lane。", "empty");
+    return;
+  }
+
+  const laneWrap = document.createElement("div");
+  laneWrap.className = "inbound-lanes";
+  const visibleLanes = slicePanelItems(lanes, "inbound-lanes");
+  for (const lane of visibleLanes) {
+    const item = document.createElement("article");
+    const tone = Number(lane.queued || 0) > 0 ? "warning" : Number(lane.active || 0) > 0 ? "ok" : "muted";
+    item.className = `inbound-lane inbound-lane-${tone}`;
+    const head = document.createElement("div");
+    head.className = "inbound-lane-head";
+    appendText(head, "strong", lane.key || "unknown lane", "item-title");
+    head.appendChild(badge(tone));
+    item.appendChild(head);
+    const meta = [
+      `运行中 ${lane.active ?? 0}`,
+      `排队 ${lane.queued ?? 0}`,
+      `最老等待 ${formatSecondsLabel(lane.oldest_wait_seconds)}`,
+    ].join(" · ");
+    appendText(item, "div", meta, "item-meta");
+    laneWrap.appendChild(item);
+  }
+  dom.inboundList.appendChild(laneWrap);
+  appendCollapseToggle(dom.inboundList, "inbound-lanes", lanes.length, () => renderInbound(inbound));
 }
 
 function renderMetrics(summaryPayload, tailPayload) {

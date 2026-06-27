@@ -424,6 +424,7 @@ select:focus {
 #issue-panel,
 #overview-panel,
 #health-panel,
+#inbound-panel,
 #metrics-panel,
 #alerts-panel,
 #runtime-panel,
@@ -609,6 +610,7 @@ select:focus {
 
 .check-list,
 .runtime-list,
+.inbound-list,
 .cron-list,
 .event-list,
 .trace-list,
@@ -623,6 +625,7 @@ select:focus {
 
 .check-item,
 .runtime-item,
+.inbound-lane,
 .cron-item,
 .runtime-section,
 .event-item,
@@ -777,6 +780,66 @@ select:focus {
 .memory-item {
   display: grid;
   gap: 7px;
+}
+
+.inbound-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inbound-stat {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 13px;
+  background: var(--surface-soft);
+}
+
+.inbound-stat::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  content: "";
+  background: var(--primary);
+}
+
+.inbound-warning .inbound-stat::before {
+  background: var(--warn);
+}
+
+.inbound-lanes {
+  display: grid;
+  gap: 9px;
+}
+
+.inbound-lane {
+  display: grid;
+  gap: 6px;
+}
+
+.inbound-lane-warning {
+  border-color: rgba(184, 107, 0, 0.24);
+  background: var(--warn-soft);
+}
+
+.inbound-lane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.inbound-lane-head strong {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .memory-head {
@@ -1506,6 +1569,7 @@ tbody tr:hover {
   .topbar,
   .toolbar,
   .grid-two,
+  .inbound-overview,
   .trend-grid {
     grid-template-columns: 1fr;
   }
@@ -1518,6 +1582,7 @@ tbody tr:hover {
 @media (max-width: 640px) {
   .summary-grid,
   .issue-list,
+  .inbound-overview,
   .trend-highlight-list {
     grid-template-columns: 1fr;
   }

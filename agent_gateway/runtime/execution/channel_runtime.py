@@ -40,6 +40,7 @@ class PendingInbound:
 
     message: InboundMessage  # 标准化后的入站消息。
     completion_event: threading.Event | None = None  # 通知采集线程“本条消息已处理完成”。
+    enqueued_at: float = 0.0  # 入站队列入队时间，用于统计等待时长。
 
     @property
     def preroute_lane_key(self) -> str:
@@ -100,6 +101,7 @@ class ChannelRuntime:
         self._consumer_task: asyncio.Task[None] | None = None  # 统一入口队列分发任务。
         self._lane_queues: dict[str, asyncio.Queue[PendingInbound | None]] = {}
         self._lane_tasks: dict[str, asyncio.Task[None]] = {}
+        self._lane_active: dict[str, int] = {}
         self._running = False  # 防止重复 start/stop。
 
     async def start(self) -> None:
@@ -288,6 +290,8 @@ class ChannelRuntime:
     async def _enqueue_pending(self, pending: PendingInbound) -> None:
         """把消息放入全局入口队列，超过容量时触发背压拒绝。"""
 
+        if pending.enqueued_at <= 0:
+            pending.enqueued_at = time.time()
         if self._queue.qsize() >= self.max_queue_size:
             await self._reject_pending(
                 pending,
@@ -338,10 +342,15 @@ class ChannelRuntime:
                 queue.task_done()
                 break
             async with self._lane_semaphore:
-                await self._process_pending(pending)
+                self._lane_active[lane_key] = self._lane_active.get(lane_key, 0) + 1
+                try:
+                    await self._process_pending(pending)
+                finally:
+                    self._lane_active[lane_key] = max(0, self._lane_active.get(lane_key, 0) - 1)
             queue.task_done()
         self._lane_queues.pop(lane_key, None)
         self._lane_tasks.pop(lane_key, None)
+        self._lane_active.pop(lane_key, None)
 
     async def _process_pending(self, pending: PendingInbound) -> None:
         """处理一条 lane 内消息，并把异常转换成用户可见错误。"""
@@ -398,6 +407,44 @@ class ChannelRuntime:
             await queue.put(None)
         if tasks:
             await asyncio.gather(*tasks)
+
+    def stats(self) -> dict[str, Any]:
+        """返回入站队列和 lane 运行状态。"""
+
+        now = time.time()
+        lanes: list[dict[str, Any]] = []
+        oldest_wait_seconds = 0.0
+        queued_total = self._queue.qsize()
+        for lane_key, queue in self._lane_queues.items():
+            pending_items = [
+                item for item in list(queue._queue) if isinstance(item, PendingInbound)  # noqa: SLF001
+            ]
+            lane_oldest = min((item.enqueued_at for item in pending_items if item.enqueued_at), default=0.0)
+            lane_wait = max(0.0, now - lane_oldest) if lane_oldest else 0.0
+            oldest_wait_seconds = max(oldest_wait_seconds, lane_wait)
+            queued_total += len(pending_items)
+            lanes.append(
+                {
+                    "key": lane_key,
+                    "queued": len(pending_items),
+                    "active": self._lane_active.get(lane_key, 0),
+                    "oldest_wait_seconds": lane_wait,
+                }
+            )
+        lanes.sort(key=lambda row: (int(row["active"]) <= 0, -int(row["queued"]), row["key"]))
+        return {
+            "running": self._running,
+            "global_queue_depth": self._queue.qsize(),
+            "global_queue_limit": self.max_queue_size,
+            "lane_queue_limit": self.max_lane_queue_size,
+            "max_concurrent_lanes": self.max_concurrent_lanes,
+            "active_lanes": sum(1 for count in self._lane_active.values() if count > 0),
+            "running_tasks": sum(self._lane_active.values()),
+            "lane_count": len(self._lane_queues),
+            "queued_messages": queued_total,
+            "oldest_wait_seconds": oldest_wait_seconds,
+            "lanes": lanes[:50],
+        }
 
     async def _handle_inbound(self, inbound: InboundMessage) -> None:
         """处理单条入站消息：typing -> onboarding interceptor -> dispatch -> delivery。"""

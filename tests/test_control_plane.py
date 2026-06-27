@@ -62,6 +62,21 @@ class FakeChannelRuntime:
     async def restart(self, channels: ChannelManager) -> None:
         self.restarted_with = channels
 
+    def stats(self) -> dict[str, object]:
+        return {
+            "running": True,
+            "global_queue_depth": 0,
+            "global_queue_limit": 200,
+            "lane_queue_limit": 20,
+            "max_concurrent_lanes": 4,
+            "active_lanes": 0,
+            "running_tasks": 0,
+            "lane_count": 0,
+            "queued_messages": 0,
+            "oldest_wait_seconds": 0.0,
+            "lanes": [],
+        }
+
 
 def _build_tools() -> ToolRegistry:
     tools = ToolRegistry()
@@ -696,6 +711,7 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         profiles=profiles,
         channels=channels,
         autonomy=FakeAutonomy(),
+        channel_runtime=FakeChannelRuntime(),
         delivery_queue=DeliveryQueue(tmp_path / "delivery"),
     )
 
@@ -706,6 +722,8 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["profiles"]["available"] == 1
     assert status["channels"]["active"] == 1
     assert status["delivery"]["pending"] == 0
+    assert status["inbound"]["configured"] is True
+    assert status["inbound"]["max_concurrent_lanes"] == 4
     assert status["cron"]["count"] == 1
     assert health["ok"] is True
     assert health["status"] == "ok"

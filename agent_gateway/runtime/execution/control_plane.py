@@ -455,6 +455,11 @@ class GatewayControlPlane:
             if self.delivery_queue is not None
             else {"configured": False}
         )
+        inbound = (
+            {"configured": True, **self.channel_runtime.stats()}
+            if self.channel_runtime is not None
+            else {"configured": False}
+        )
         return {
             "agents": {
                 "count": len(agents),
@@ -477,6 +482,7 @@ class GatewayControlPlane:
                 ),
                 "items": profiles,
             },
+            "inbound": inbound,
             "delivery": delivery,
             "heartbeat": heartbeat,
             "cron": {
@@ -540,6 +546,16 @@ class GatewayControlPlane:
                 "warning",
                 f"{status['channels']['active']} active channel accounts",
                 "no active channel account",
+            ),
+            self._health_check(
+                "inbound.backlog",
+                int(status["inbound"].get("queued_messages", 0) or 0) < max(
+                    1,
+                    int(status["inbound"].get("max_concurrent_lanes", 1) or 1) * 2,
+                ),
+                "warning",
+                f"{status['inbound'].get('queued_messages', 0)} inbound messages queued",
+                f"{status['inbound'].get('queued_messages', 0)} inbound messages queued",
             ),
             self._health_check(
                 "paths.workspace",
