@@ -415,6 +415,15 @@ delivery-worker
 | 20.3.8 Heartbeat 任务化 | 已完成 | 将 Heartbeat 自动调度从 scheduler 直接执行迁移为 enqueue 后由 worker 执行，避免调度器承担实际任务执行。 |
 | 20.3.9 后台命令配置化 | 已完成 | 将 `/github-repo-analyzer`、`/space-advisor` 等后台命令从硬编码迁移到 `GATEWAY_BACKGROUND_INBOUND_COMMANDS` 环境变量，支持逗号分隔扩展。 |
 
+#### Phase 20.4 PostgreSQL 状态外置子阶段
+
+| 子阶段 | 状态 | 主要内容 |
+| --- | --- | --- |
+| 20.4.1 状态边界与表设计 | 已完成 | 明确 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 的最小字段、主键、时间列、索引和保留策略；保留 JSONL 作为回退和审计。 |
+| 20.4.2 仓储接口草案 | 待实现 | 定义状态仓储抽象，先不替换业务写入，只约束 list/get/append/upsert/query 的统一接口。 |
+| 20.4.3 Dashboard 只读接入 | 待实现 | 先让 Dashboard 的分页列表优先读 PostgreSQL，再回退 JSONL。 |
+| 20.4.4 双写与迁移脚手架 | 待实现 | 逐步把会话、任务、事件和记忆接入数据库主存储，保留 JSONL 双写和回放能力。 |
+
 ## 9. 推荐执行顺序
 
 建议接下来按以下顺序推进：
@@ -424,7 +433,7 @@ delivery-worker
 3. Phase 16：Agent 权限预览与配置治理。
 4. Phase 17：会话与记忆治理。
 5. Phase 18：多 Agent 协作与任务实例状态机。
-6. Phase 20.4：PostgreSQL 状态外置，为任务、事件、会话、记忆和配置审计提供可查询存储。
+6. Phase 20.4.1-20.4.2：先完成状态边界、表设计和仓储接口草案。
 7. Phase 19：生产部署形态。
 8. Phase 20.4-20.7：PostgreSQL 状态外置、可靠队列升级、统一观测和压测。
 

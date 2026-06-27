@@ -27,6 +27,7 @@ from agent_gateway.config_loader import (
 from agent_gateway.runtime.state.queue import DeliveryQueue, QueuedDelivery
 from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
 from agent_gateway.runtime.tasks.queue import LocalTaskQueue
+from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
@@ -75,6 +76,7 @@ class GatewayControlPlane:
     alert_store: AlertStore | None = None
     alerts_runtime: Any = None
     redis_client: Any = None
+    postgres_client: PostgresClient | None = None
     task_worker: Any = None
     task_queue: LocalTaskQueue | None = None
 
@@ -531,6 +533,11 @@ class GatewayControlPlane:
             if self.redis_client is not None
             else {"enabled": False, "ok": True, "url": "", "error": ""}
         )
+        postgres_status = (
+            self.postgres_client.health().to_dict()
+            if self.postgres_client is not None
+            else {"enabled": False, "ok": True, "url": "", "error": ""}
+        )
         tasks = (
             {"configured": True, **self.task_worker.stats()}
             if self.task_worker is not None
@@ -561,6 +568,7 @@ class GatewayControlPlane:
             "inbound": inbound,
             "delivery": delivery,
             "redis": redis_status,
+            "postgres": postgres_status,
             "tasks": tasks,
             "heartbeat": heartbeat,
             "cron": {
@@ -699,6 +707,18 @@ class GatewayControlPlane:
                     "warning",
                     f"redis reachable in {redis_status.get('latency_ms')} ms",
                     f"redis unavailable: {redis_status.get('error', '')}",
+                )
+            )
+
+        postgres_status = status["postgres"]
+        if postgres_status.get("enabled"):
+            checks.append(
+                self._health_check(
+                    "postgres.ping",
+                    bool(postgres_status.get("ok")),
+                    "warning",
+                    f"postgres reachable in {postgres_status.get('latency_ms')} ms",
+                    f"postgres unavailable: {postgres_status.get('error', '')}",
                 )
             )
 

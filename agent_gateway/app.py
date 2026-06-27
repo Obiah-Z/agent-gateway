@@ -43,6 +43,7 @@ from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.runtime.infra.redis_client import RedisClient
+from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
 from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
@@ -79,6 +80,7 @@ class GatewayApplication:
     command_queue: CommandQueue  # 命名并发车道队列，控制同类任务串行执行。
     control_plane: GatewayControlPlane  # 控制面服务，提供配置、状态和运维操作。
     redis_client: RedisClient  # Redis 基础设施客户端，用于后续去重、锁和限流。
+    postgres_client: PostgresClient  # PostgreSQL 基础设施客户端，用于状态外置健康检查与接入。
     task_store: LocalTaskStore  # 后台任务本地状态存储。
     task_queue: LocalTaskQueue  # 后台任务队列抽象。
     task_worker: TaskWorkerRuntime  # 后台任务 worker 运行时。
@@ -165,6 +167,11 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         url=settings.redis_url,
         socket_timeout_seconds=settings.redis_socket_timeout_seconds,
     )
+    postgres_client = PostgresClient(
+        enabled=settings.postgres_enabled,
+        url=settings.postgres_url,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
     task_store = LocalTaskStore(settings.tasks_dir)
     task_queue = LocalTaskQueue(task_store)
     dispatcher = GatewayDispatcher(
@@ -243,6 +250,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         alert_store=alert_store,
         alerts_runtime=alerts_runtime,
         redis_client=redis_client,
+        postgres_client=postgres_client,
         task_queue=task_queue,
         task_worker=task_worker,
     )
@@ -266,6 +274,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         command_queue=command_queue,
         control_plane=control_plane,
         redis_client=redis_client,
+        postgres_client=postgres_client,
         task_store=task_store,
         task_queue=task_queue,
         task_worker=task_worker,

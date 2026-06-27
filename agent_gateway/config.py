@@ -63,6 +63,9 @@ class GatewaySettings:
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_socket_timeout_seconds: float = 1.0
     redis_cron_rate_limit_per_minute: int = 0
+    postgres_enabled: bool = False
+    postgres_url: str = "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+    postgres_connect_timeout_seconds: float = 2.0
     host: str = "127.0.0.1"
     port: int = 8765
     workspace_root: Path = DEFAULT_WORKSPACE_ROOT
@@ -181,6 +184,15 @@ class GatewaySettings:
             redis_cron_rate_limit_per_minute=max(
                 0,
                 int(os.getenv("GATEWAY_REDIS_CRON_RATE_LIMIT_PER_MINUTE", "0")),
+            ),
+            postgres_enabled=env_bool("GATEWAY_POSTGRES_ENABLED", False),
+            postgres_url=os.getenv(
+                "GATEWAY_POSTGRES_URL",
+                "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+            ),
+            postgres_connect_timeout_seconds=max(
+                0.2,
+                float(os.getenv("GATEWAY_POSTGRES_CONNECT_TIMEOUT_SECONDS", "2.0")),
             ),
             host=os.getenv("GATEWAY_HOST", "127.0.0.1"),
             port=int(os.getenv("GATEWAY_PORT", "8765")),

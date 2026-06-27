@@ -17,6 +17,7 @@ from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
 from agent_gateway.runtime.infra.redis_client import RedisHealth
+from agent_gateway.runtime.infra.postgres_client import PostgresHealth
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
@@ -86,6 +87,14 @@ class FakeRedisClient:
         self._health = health
 
     def health(self) -> RedisHealth:
+        return self._health
+
+
+class FakePostgresClient:
+    def __init__(self, health: PostgresHealth) -> None:
+        self._health = health
+
+    def health(self) -> PostgresHealth:
         return self._health
 
 
@@ -770,6 +779,9 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         redis_client=FakeRedisClient(
             RedisHealth(enabled=False, ok=True, url="redis://127.0.0.1:6379/0")
         ),
+        postgres_client=FakePostgresClient(
+            PostgresHealth(enabled=False, ok=True, url="postgresql://postgres:postgres@127.0.0.1:5432/postgres")
+        ),
     )
 
     status = control.runtime_status()
@@ -781,6 +793,8 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["delivery"]["pending"] == 0
     assert status["redis"]["enabled"] is False
     assert status["redis"]["ok"] is True
+    assert status["postgres"]["enabled"] is False
+    assert status["postgres"]["ok"] is True
     assert status["inbound"]["configured"] is True
     assert status["inbound"]["max_concurrent_lanes"] == 4
     assert status["cron"]["count"] == 1
@@ -821,13 +835,24 @@ def test_control_plane_health_check_reports_redis_failure(tmp_path: Path) -> Non
                 error="connection refused",
             )
         ),
+        postgres_client=FakePostgresClient(
+            PostgresHealth(
+                enabled=True,
+                ok=False,
+                url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+                error="connection refused",
+            )
+        ),
     )
 
     health = control.health_check()
 
     redis_check = next(row for row in health["checks"] if row["name"] == "redis.ping")
+    postgres_check = next(row for row in health["checks"] if row["name"] == "postgres.ping")
     assert redis_check["status"] == "warning"
     assert "connection refused" in redis_check["message"]
+    assert postgres_check["status"] == "warning"
+    assert "connection refused" in postgres_check["message"]
     assert health["status"] == "degraded"
 
 
