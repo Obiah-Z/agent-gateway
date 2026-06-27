@@ -28,6 +28,11 @@ from agent_gateway.gateways.feishu.onboarding import (
     FeishuOnboardingService,
     FeishuOnboardingSessionStore,
 )
+from agent_gateway.gateways.feishu.state import FeishuCardState, FeishuCardStateStore
+from agent_gateway.gateways.messaging.base import ChannelAccount
+from agent_gateway.gateways.messaging.telegram import TelegramChannel
+from agent_gateway.ai.news.models import NewsItem, NewsSourceConfig
+from agent_gateway.ai.news.store import NewsDigestStore
 from agent_gateway.runtime.domain.ids import normalize_agent_id
 from agent_gateway.runtime.domain.models import ProactiveTarget
 from agent_gateway.runtime.domain.router import BindingTable
@@ -655,6 +660,82 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         marker,
         {"kind": "postgres_smoke", "marker": marker},
     )
+    telegram_account_id = "postgres-smoke"
+    telegram_channel = TelegramChannel(
+        ChannelAccount(
+            channel="telegram",
+            account_id=telegram_account_id,
+            label="PostgreSQL smoke",
+            token="postgres-smoke-token",
+        ),
+        settings.data_dir / "channel-state",
+        read_backend=app.state_repository.read,
+        write_backend=app.state_repository.write,
+    )
+    telegram_offset = int(now)
+    telegram_channel._save_offset(telegram_channel._offset_path, telegram_offset)  # type: ignore[attr-defined]
+    telegram_channel.close()
+
+    cron_run_at = datetime.fromtimestamp(now, tz=timezone.utc).isoformat()
+    app.autonomy_runtime.cron._write_run_log(  # type: ignore[attr-defined]
+        {
+            "job_id": "postgres-smoke",
+            "config_id": "postgres-smoke",
+            "agent_id": "main",
+            "scope": "system",
+            "run_at": cron_run_at,
+            "status": "ok",
+            "output_preview": marker,
+            "metadata": {"marker": marker},
+        }
+    )
+
+    news_source = NewsSourceConfig(
+        id="postgres-smoke",
+        type="postgres_smoke",
+        tags=("postgres_smoke",),
+    )
+    news_item = NewsItem.build(
+        source=news_source,
+        title=f"{marker}: news",
+        url=f"https://example.com/{marker}",
+        published_at=cron_run_at,
+        summary=marker,
+        metadata={"marker": marker},
+    )
+    news_store = NewsDigestStore(
+        settings.data_dir / "postgres-smoke-news",
+        read_backend=app.state_repository.read,
+        write_backend=app.state_repository.write,
+    )
+    news_store.append_collected([news_item])
+    news_store.mark_seen([news_item])
+
+    card_id = f"card-{marker}"
+    card_store = FeishuCardStateStore(
+        settings.data_dir / "channel-state" / "feishu" / "postgres-smoke",
+        read_backend=app.state_repository.read,
+        write_backend=app.state_repository.write,
+    )
+    card_store.save(
+        FeishuCardState(
+            card_id=card_id,
+            owner_channel="feishu",
+            owner_account_id="postgres-smoke",
+            peer_id="postgres-smoke-peer",
+            message_id=f"om_{marker}",
+            title=marker,
+            summary=marker,
+            template="blue",
+            card_link="",
+            blocks=[marker],
+            structured_blocks=[],
+            actions=[],
+            page_size=1,
+            page_index=0,
+            expanded=False,
+        )
+    )
 
     reader = PostgresReadRepository(
         url=settings.postgres_url,
@@ -669,6 +750,10 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         "metric": _postgres_smoke_has_marker(reader, "metrics", marker, "metadata"),
         "alert": bool(reader.get("errors", alert_id)),
         "delivery": bool(reader.get("delivery_entries", delivery_id)),
+        "telegram_offset": bool(reader.get("channel_offsets", f"telegram\x1f{telegram_account_id}")),
+        "cron_run": bool(reader.get("cron_runs", f"postgres-smoke:{cron_run_at}")),
+        "news_items": _postgres_smoke_has_marker(reader, "news_items", marker, "metadata"),
+        "feishu_card_state": bool(reader.get("feishu_card_states", card_id)),
     }
     local_checks = {
         "session_file": app.sessions.session_path("main", session_key).exists(),
@@ -678,6 +763,13 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         "metric_file": any(settings.metrics_dir.glob("metrics-*.jsonl")),
         "alert_file": any(settings.alerts_dir.glob("alerts-*.jsonl")),
         "delivery_file": (settings.delivery_queue_dir / f"{delivery_id}.json").exists(),
+        "telegram_offset_file": (settings.data_dir / "channel-state" / "telegram" / f"offset-{telegram_account_id}.txt").exists(),
+        "cron_run_file": (settings.workspace_root / "cron" / "cron-runs.jsonl").exists(),
+        "news_seen_file": (settings.data_dir / "postgres-smoke-news" / "seen-items.jsonl").exists(),
+        "news_collected_file": (settings.data_dir / "postgres-smoke-news" / "collected-items.jsonl").exists(),
+        "feishu_card_state_file": (
+            settings.data_dir / "channel-state" / "feishu" / "postgres-smoke" / "cards" / f"{card_id}.json"
+        ).exists(),
     }
     ok = all(checks.values()) and all(local_checks.values())
     app.delivery_queue.discard(delivery_id)

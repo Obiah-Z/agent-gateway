@@ -460,7 +460,7 @@ delivery-worker
 | 20.5.6 实库回放校验 | 已完成 | 已在本机 PostgreSQL 执行 `postgres-init`、`postgres-migrate-local --dry-run` 和实际回填；约 1.65 万条本地数据通过批量 upsert 在约 4.4 秒完成写入，抽样确认 agents、sessions、tasks、runtime_events、metrics、memory_entries 行数和读仓储查询正常。 |
 | 20.5.7 迁移文档 | 已完成 | README 已补充 PostgreSQL 配置、schema 初始化、dry-run、实际回填、重复执行语义、本地文件兜底和启用数据库优先读取的操作说明。 |
 | 20.5.8 可靠投递队列 PostgreSQL 主存储 | 已完成 | 新增 delivery_entries 表；DeliveryQueue 支持 PostgreSQL 读写 backend，enqueue/fail/move_to_failed/retry/ack/discard 优先写数据库并保留本地 JSON 文件兜底；本地 pending/failed 队列可通过迁移命令回填。 |
-| 20.5.9 PostgreSQL 主存储 smoke 验收 | 已完成 | 新增 `agent-gateway postgres-smoke`，不调用模型和外部通道，直接验证会话、任务、事件、记忆、指标、告警和投递队列能写入 PostgreSQL，并确认本地 JSON/JSONL fallback 文件仍会生成。 |
+| 20.5.9 PostgreSQL 主存储 smoke 验收 | 已完成 | 新增并增强 `agent-gateway postgres-smoke`，不调用模型和外部通道，直接验证会话、任务、事件、记忆、指标、告警、投递队列、Telegram offset、Cron 运行记录、新闻简报状态和飞书卡片状态能写入 PostgreSQL，并确认本地 JSON/JSONL fallback 文件仍会生成。 |
 | 20.5.10 飞书 Webhook 状态 PostgreSQL 化 | 已完成 | 新增 `feishu_dedup_entries` 和 `feishu_webhook_events`；Webhook 去重链路支持 Redis -> PostgreSQL -> 本地文件多级兜底，审计日志优先写 PostgreSQL 并保留本地 JSONL；迁移命令可回填旧 `seen-events.jsonl` 和 `events.jsonl`。 |
 | 20.5.11 飞书 onboarding 会话 PostgreSQL 化 | 已完成 | 新增 `feishu_onboarding_sessions`；扫码/绑定会话读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 `sessions.json` 作为兜底；迁移命令可回填旧 onboarding 会话文件。 |
 | 20.5.12 Telegram offset PostgreSQL 化 | 已完成 | 新增 `channel_offsets`；Telegram 轮询 offset 读取优先 PostgreSQL，写入优先 PostgreSQL 并继续写本地 offset 文件作为兜底；迁移命令可回填旧 `channel-state/telegram/offset-*.txt`。 |
