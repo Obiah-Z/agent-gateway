@@ -428,7 +428,7 @@ delivery-worker
 | 20.4.4.3 只读结果对齐 | 已完成 | 把 PostgreSQL 返回结构进一步对齐本地仓库，减少 control plane / Dashboard 适配成本。 |
 | 20.4.4.3.1 错误视图对齐 | 已完成 | PostgreSQL `errors` 输出对齐 `RuntimeEventStore.recent_errors` 的事件形态，避免控制面重复适配。 |
 | 20.4.4.3.2 记忆视图对齐 | 已完成 | PostgreSQL `memory_entries` 输出对齐 `MemoryStore.recent_entries` 的摘要形态，保持 Dashboard 视图一致。 |
-| 20.4.5 双写与迁移脚手架 | 待实现 | 逐步把会话、任务、事件和记忆接入数据库主存储，保留 JSONL 双写和回放能力。 |
+| 20.4.5 双写与迁移脚手架 | 已完成 | 为会话、任务、事件和记忆补齐迁移备份脚手架，主链路仍保留 JSONL，新增独立 migration 备份目录用于后续切换和回放验证。 |
 
 ## 9. 推荐执行顺序
 

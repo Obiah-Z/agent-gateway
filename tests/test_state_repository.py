@@ -90,6 +90,35 @@ def test_build_state_repository_switches_to_postgres_backend(tmp_path: Path) -> 
     assert isinstance(bundle.read, PostgresReadRepository)
 
 
+def test_build_state_repository_enables_migration_backup_sink(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    sessions = SessionStore(settings.sessions_dir)
+    tasks = LocalTaskStore(settings.tasks_dir)
+    events = RuntimeEventStore(settings.events_dir)
+    memory = MemoryStore(settings.workspace_root)
+
+    bundle = build_state_repository(
+        settings,
+        sessions=sessions,
+        tasks=tasks,
+        events=events,
+        metrics=MetricsStore(settings.metrics_dir),
+        alerts=AlertStore(settings.alerts_dir),
+        memory=memory,
+    )
+
+    assert bundle.backup is not None
+    assert sessions.backup_sink is bundle.backup
+    assert tasks.backup_sink is bundle.backup
+    assert events.backup_sink is bundle.backup
+    assert memory.backup_sink is bundle.backup
+
+
 def test_postgres_read_repository_uses_table_specific_keys_and_ordering() -> None:
     repo = PostgresReadRepository(
         url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",

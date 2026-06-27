@@ -24,12 +24,14 @@ class LocalTaskStore:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self.backup_sink = None
 
     def create(self, task: TaskInstance) -> TaskInstance:
         """写入新任务。"""
 
         task.updated_at = time.time()
-        self._write(task)
+        self.write_task_to_disk(task)
+        self._mirror(task)
         return task
 
     def get(self, task_id: str) -> TaskInstance | None:
@@ -65,7 +67,8 @@ class LocalTaskStore:
         task.status = "running"
         task.started_at = current
         task.updated_at = current
-        self._write(task)
+        self.write_task_to_disk(task)
+        self._mirror(task)
         return task
 
     def mark_done(
@@ -83,7 +86,8 @@ class LocalTaskStore:
         task.result_preview = result_preview[:500]
         task.finished_at = current
         task.updated_at = current
-        self._write(task)
+        self.write_task_to_disk(task)
+        self._mirror(task)
         return task
 
     def mark_failed(
@@ -103,7 +107,8 @@ class LocalTaskStore:
         task.retry_count += 1 if retryable else 0
         task.finished_at = 0.0 if retryable else current
         task.updated_at = current
-        self._write(task)
+        self.write_task_to_disk(task)
+        self._mirror(task)
         return task
 
     def cancel(self, task_id: str, *, now: float | None = None) -> TaskInstance:
@@ -114,7 +119,8 @@ class LocalTaskStore:
         task.status = "cancelled"
         task.finished_at = current
         task.updated_at = current
-        self._write(task)
+        self.write_task_to_disk(task)
+        self._mirror(task)
         return task
 
     def _require(self, task_id: str) -> TaskInstance:
@@ -124,6 +130,11 @@ class LocalTaskStore:
         return task
 
     def _write(self, task: TaskInstance) -> None:
+        self.write_task_to_disk(task)
+
+    def write_task_to_disk(self, task: TaskInstance) -> None:
+        """仅写入本地 JSON 文件，不触发备份镜像。"""
+
         final_path = self._task_path(task.id)
         tmp_path = self.root / f".tmp.{task.id}.json"
         payload = json.dumps(task.to_dict(), ensure_ascii=False, indent=2)
@@ -131,6 +142,20 @@ class LocalTaskStore:
             handle.write(payload)
             handle.flush()
         tmp_path.replace(final_path)
+
+    def _mirror(self, task: TaskInstance) -> None:
+        """把任务状态镜像到备份 sink。"""
+
+        sink = getattr(self, "backup_sink", None)
+        if sink is None:
+            return
+        method = getattr(sink, "write_task", None)
+        if method is None:
+            return
+        try:
+            method(task)
+        except Exception:
+            pass
 
     @staticmethod
     def _read(path: Path) -> TaskInstance | None:

@@ -8,6 +8,7 @@ from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
+from agent_gateway.runtime.state.migration import LocalMigrationSink, MigrationSink
 from agent_gateway.runtime.state.adapter import LocalStateReadRepository
 from agent_gateway.runtime.state.repository import StateReadRepository
 from agent_gateway.runtime.state.postgres import PostgresReadRepository
@@ -20,6 +21,7 @@ class StateRepositoryBundle:
     """统一状态仓储装配结果。"""
 
     read: StateReadRepository
+    backup: MigrationSink | None = None
 
 
 def build_state_repository(
@@ -38,13 +40,28 @@ def build_state_repository(
     只读仓储骨架，保持上层控制面和 Dashboard 不改调用方式。
     """
 
+    migration_sessions = SessionStore(settings.data_dir / "migration" / "sessions")
+    migration_tasks = LocalTaskStore(settings.data_dir / "migration" / "tasks")
+    migration_events = RuntimeEventStore(settings.data_dir / "migration" / "events")
+    migration_memory = MemoryStore(settings.data_dir / "migration" / "memory")
+    backup = LocalMigrationSink(
+        sessions=migration_sessions,
+        tasks=migration_tasks,
+        events=migration_events,
+        memory=migration_memory,
+    )
+    sessions.backup_sink = backup
+    tasks.backup_sink = backup
+    events.backup_sink = backup
+    memory.backup_sink = backup
     if settings.postgres_enabled:
         return StateRepositoryBundle(
             read=PostgresReadRepository(
                 url=settings.postgres_url,
                 enabled=True,
                 connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
-            )
+            ),
+            backup=backup,
         )
     return StateRepositoryBundle(
         read=LocalStateReadRepository(
@@ -54,5 +71,6 @@ def build_state_repository(
             metrics=metrics,
             alerts=alerts,
             memory=memory,
-        )
+        ),
+        backup=backup,
     )

@@ -108,6 +108,7 @@ class RuntimeEventStore:
         self.max_line_bytes = max(1024, int(max_line_bytes))
         self.retention_days = max(1, int(retention_days))
         self._lock = threading.Lock()
+        self.backup_sink = None
 
     def record(
         self,
@@ -146,8 +147,14 @@ class RuntimeEventStore:
             metadata=self._sanitize_metadata(metadata or {}),
         )
         row = event.to_dict()
-        self._append(row)
+        self.write_event_row(row)
+        self._mirror(row)
         return row
+
+    def write_event_row(self, row: dict[str, Any]) -> None:
+        """仅追加本地事件文件，不触发备份镜像。"""
+
+        self._append(dict(row))
 
     def tail(
         self,
@@ -239,6 +246,20 @@ class RuntimeEventStore:
         with self._lock, path.open("a", encoding="utf-8") as handle:
             handle.write(payload + "\n")
         self.cleanup()
+
+    def _mirror(self, row: dict[str, Any]) -> None:
+        """把事件镜像到备份 sink。"""
+
+        sink = getattr(self, "backup_sink", None)
+        if sink is None:
+            return
+        method = getattr(sink, "write_event", None)
+        if method is None:
+            return
+        try:
+            method(row)
+        except Exception:
+            pass
 
     def _read_tail(self, limit: int) -> list[dict[str, Any]]:
         """从最近文件中逆序读取尾部事件。"""

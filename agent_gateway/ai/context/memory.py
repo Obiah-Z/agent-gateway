@@ -32,9 +32,19 @@ class MemoryStore:
         self.memory_file = workspace_root / "MEMORY.md"
         self.daily_dir = workspace_root / "memory" / "daily"
         self.daily_dir.mkdir(parents=True, exist_ok=True)
+        self.migration_root = workspace_root / "_migration"
+        self.backup_sink = None
 
     def write_memory(self, content: str, category: str = "general") -> str:
         """把一条新记忆追加到当天的 daily memory 文件。"""
+
+        self.write_memory_to_disk(content, category=category)
+        self._mirror(content, category)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return f"Memory saved to {today}.jsonl ({category})"
+
+    def write_memory_to_disk(self, content: str, category: str = "general") -> None:
+        """仅写入本地 daily memory，不触发备份镜像。"""
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = self.daily_dir / f"{today}.jsonl"
@@ -45,7 +55,34 @@ class MemoryStore:
         }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        return f"Memory saved to {today}.jsonl ({category})"
+
+    def _mirror(self, content: str, category: str) -> None:
+        """把记忆镜像到备份 sink。"""
+
+        sink = getattr(self, "backup_sink", None)
+        if sink is None:
+            return
+        method = getattr(sink, "write_memory", None)
+        if method is None:
+            return
+        try:
+            method(content, category=category)
+        except Exception:
+            pass
+
+    def write_memory_migration(self, content: str, category: str = "general") -> None:
+        """把记忆写入迁移专用目录。"""
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        path = self.migration_root / "daily" / f"{today}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "category": category,
+            "content": content,
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def load_evergreen(self) -> str:
         """读取长期记忆文件 `MEMORY.md`。"""

@@ -21,6 +21,7 @@ class SessionStore:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_sink = None
 
     def session_path(self, agent_id: str, session_key: str) -> Path:
         """返回会话文件路径。
@@ -46,15 +47,14 @@ class SessionStore:
         需要增量写入的场景。
         """
 
-        if role == "user" and isinstance(content, str):
-            record = {"type": "user", "content": content, "ts": time.time()}
-        elif role == "assistant":
-            record = {"type": "assistant", "content": content, "ts": time.time()}
-        else:
-            record = {"role": role, "content": content, "ts": time.time()}
-        path = self.session_path(agent_id, session_key)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self.append_message_to_disk(agent_id, session_key, role, content)
+        self._mirror(
+            "write_session_message",
+            agent_id,
+            session_key,
+            role,
+            content,
+        )
 
     def rewrite_messages(
         self,
@@ -66,6 +66,41 @@ class SessionStore:
 
         先写临时文件再 replace，避免重写过程中中断导致原会话损坏。
         """
+
+        self.rewrite_messages_to_disk(agent_id, session_key, messages)
+        self._mirror(
+            "rewrite_session_messages",
+            agent_id,
+            session_key,
+            messages,
+        )
+
+    def append_message_to_disk(
+        self,
+        agent_id: str,
+        session_key: str,
+        role: str,
+        content: Any,
+    ) -> None:
+        """仅写入本地 JSONL，不触发双写镜像。"""
+
+        if role == "user" and isinstance(content, str):
+            record = {"type": "user", "content": content, "ts": time.time()}
+        elif role == "assistant":
+            record = {"type": "assistant", "content": content, "ts": time.time()}
+        else:
+            record = {"role": role, "content": content, "ts": time.time()}
+        path = self.session_path(agent_id, session_key)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def rewrite_messages_to_disk(
+        self,
+        agent_id: str,
+        session_key: str,
+        messages: list[ConversationMessage],
+    ) -> None:
+        """仅重写本地 JSONL，不触发双写镜像。"""
 
         path = self.session_path(agent_id, session_key)
         tmp_path = path.with_suffix(".jsonl.tmp")
@@ -238,6 +273,20 @@ class SessionStore:
             records.append({"role": role, "content": content, "ts": now()})
 
         return records
+
+    def _mirror(self, method_name: str, *args: Any) -> None:
+        """把主写入镜像到备份 sink，失败不影响主链路。"""
+
+        sink = getattr(self, "backup_sink", None)
+        if sink is None:
+            return
+        method = getattr(sink, method_name, None)
+        if method is None:
+            return
+        try:
+            method(*args)
+        except Exception:
+            pass
 
     @staticmethod
     def _normalize_assistant_blocks(content: Any) -> list[dict[str, Any]]:
