@@ -46,6 +46,17 @@ class StateRepository(Protocol):
         """执行受控查询。"""
 
 
+@runtime_checkable
+class StateReadRepository(Protocol):
+    """只读状态仓储抽象。"""
+
+    def list(self, table: StateTableName, *, limit: int = 50, cursor: str = "", filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """按条件列出记录。"""
+
+    def get(self, table: StateTableName, key: str) -> dict[str, Any] | None:
+        """按主键读取单条记录。"""
+
+
 STATE_TABLES: tuple[StateTableName, ...] = (
     "sessions",
     "tasks",

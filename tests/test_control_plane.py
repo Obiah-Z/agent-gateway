@@ -14,8 +14,12 @@ from agent_gateway.runtime.domain.router import BindingTable
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
 from agent_gateway.runtime.observability.metrics import MetricsStore
 from agent_gateway.runtime.observability.alerts import AlertStore
+from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
+from agent_gateway.runtime.state.adapter import LocalStateReadRepository
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
+from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.runtime.infra.redis_client import RedisHealth
 from agent_gateway.runtime.infra.postgres_client import PostgresHealth
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
@@ -330,6 +334,61 @@ def test_control_plane_lists_and_saves_runtime_state(tmp_path: Path) -> None:
     assert '"name": "primary"' in settings.profiles_config_file.read_text(encoding="utf-8")
     assert '"account_id": "cli-local"' in settings.channels_config_file.read_text(encoding="utf-8")
     assert control.get_source("agents")["agents"][0]["id"] == "main"
+
+
+def test_control_plane_uses_state_repository_for_read_views(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    metrics = MetricsStore(settings.metrics_dir, retention_days=2000)
+    alerts = AlertStore(settings.alerts_dir, retention_days=2000)
+    event_store = RuntimeEventStore(settings.events_dir, retention_days=2000)
+    event_store.record(
+        "tool.failed",
+        status="error",
+        component="tool",
+        message="boom",
+        correlation_id="corr-1",
+        agent_id="main",
+        metadata={"delivery_id": "delivery-1"},
+    )
+    memory_store = MemoryStore(settings.workspace_root)
+    memory_store.write_memory("remember me", category="test")
+    task_store = LocalTaskStore(tmp_path / "tasks")
+    task_queue = LocalTaskQueue(task_store)
+    task = task_queue.enqueue(
+        task_type="cron",
+        source="cron",
+        agent_id="main",
+        payload={"job_id": "health-check"},
+    )
+    repo = LocalStateReadRepository(
+        sessions=SessionStore(settings.sessions_dir),
+        tasks=task_store,
+        events=event_store,
+        metrics=metrics,
+        alerts=alerts,
+        memory=memory_store,
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repo,
+    )
+
+    events = control.tail_events(limit=5)
+    errors = control.recent_errors(limit=5)
+    memories = control.recent_memories(limit=5)
+    tasks = control.get_task(task.id)
+
+    assert events["configured"] is True
+    assert events["count"] == 1
+    assert errors["configured"] is True
+    assert errors["count"] == 1
+    assert memories["configured"] is True
+    assert memories["count"] >= 1
+    assert tasks["id"] == task.id
 
 
 def test_control_plane_exposes_metrics_views(tmp_path: Path) -> None:

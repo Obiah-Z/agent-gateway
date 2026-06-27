@@ -32,6 +32,8 @@ from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
+from agent_gateway.runtime.state.adapter import LocalStateReadRepository
+from agent_gateway.runtime.state.repository import StateReadRepository
 from agent_gateway.runtime.domain.ids import normalize_agent_id
 from agent_gateway.runtime.domain.models import AgentConfig, Binding
 from agent_gateway.runtime.domain.router import BindingTable
@@ -77,6 +79,7 @@ class GatewayControlPlane:
     alerts_runtime: Any = None
     redis_client: Any = None
     postgres_client: PostgresClient | None = None
+    state_repository: StateReadRepository | None = None
     task_worker: Any = None
     task_queue: LocalTaskQueue | None = None
 
@@ -187,19 +190,35 @@ class GatewayControlPlane:
     ) -> dict[str, Any]:
         """按条件回看最近运行事件。"""
 
-        if self.event_store is None:
+        if self.event_store is None and self.state_repository is None:
             return {"items": [], "count": 0, "configured": False}
-        items = self.event_store.tail(
-            limit=limit,
-            event_type=event_type,
-            component=component,
-            status=status,
-            correlation_id=correlation_id,
-            agent_id=agent_id,
-            channel=channel,
-            job_id=job_id,
-            delivery_id=delivery_id,
-        )
+        if self.event_store is not None:
+            items = self.event_store.tail(
+                limit=limit,
+                event_type=event_type,
+                component=component,
+                status=status,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                channel=channel,
+                job_id=job_id,
+                delivery_id=delivery_id,
+            )
+        else:
+            items = self.state_repository.list(
+                "runtime_events",
+                limit=limit,
+                filters={
+                    "event_type": event_type,
+                    "component": component,
+                    "status": status,
+                    "correlation_id": correlation_id,
+                    "agent_id": agent_id,
+                    "channel": channel,
+                    "job_id": job_id,
+                    "delivery_id": delivery_id,
+                },
+            )
         return {
             "items": items,
             "count": len(items),
@@ -216,13 +235,23 @@ class GatewayControlPlane:
     ) -> dict[str, Any]:
         """筛出最近错误事件。"""
 
-        if self.event_store is None:
+        if self.event_store is None and self.state_repository is None:
             return {"items": [], "count": 0, "configured": False}
-        items = self.event_store.recent_errors(
-            limit=limit,
-            component=component,
-            correlation_id=correlation_id,
-        )
+        if self.event_store is not None:
+            items = self.event_store.recent_errors(
+                limit=limit,
+                component=component,
+                correlation_id=correlation_id,
+            )
+        else:
+            items = self.state_repository.list(
+                "errors",
+                limit=limit,
+                filters={
+                    "component": component,
+                    "correlation_id": correlation_id,
+                },
+            )
         return {
             "items": items,
             "count": len(items),
@@ -233,8 +262,11 @@ class GatewayControlPlane:
     def recent_memories(self, *, limit: int = 20) -> dict[str, Any]:
         """查看最近写入的记忆条目。"""
 
-        store = MemoryStore(self.settings.workspace_root)
-        items = store.recent_entries(limit=limit)
+        if self.state_repository is not None:
+            items = self.state_repository.list("memory_entries", limit=limit)
+        else:
+            store = MemoryStore(self.settings.workspace_root)
+            items = store.recent_entries(limit=limit)
         return {
             "items": items,
             "count": len(items),
@@ -439,15 +471,28 @@ class GatewayControlPlane:
     ) -> dict[str, Any]:
         """列出后台任务实例。"""
 
-        queue = self._require_task_queue()
         statuses = self._normalize_task_statuses(status)
         safe_limit = max(1, min(int(limit), 200))
-        tasks = queue.store.list(statuses=statuses, limit=safe_limit)
+        if self.state_repository is not None:
+            tasks = self.state_repository.list(
+                "tasks",
+                limit=safe_limit,
+                filters={"statuses": statuses},
+            )
+        else:
+            queue = self._require_task_queue()
+            tasks = [task.to_dict() for task in queue.store.list(statuses=statuses, limit=safe_limit)]
         return {
             "status": status.strip().lower() if status else "all",
             "count": len(tasks),
             "items": [
                 self._task_to_dict(task, include_payload=include_payload)
+                if not isinstance(task, dict)
+                else (
+                    TaskInstance.from_dict(task).to_dict()
+                    if include_payload
+                    else self._task_to_dict(TaskInstance.from_dict(task), include_payload=False)
+                )
                 for task in tasks
             ],
             "limit": safe_limit,
@@ -458,6 +503,12 @@ class GatewayControlPlane:
 
         if not task_id:
             raise ValueError("task_id is required")
+        if self.state_repository is not None:
+            task = self.state_repository.get("tasks", task_id)
+            if task is None:
+                raise KeyError(f"task not found: {task_id}")
+            task_instance = TaskInstance.from_dict(task)
+            return task if include_payload else self._task_to_dict(task_instance, include_payload=False)
         task = self._require_task_queue().store.get(task_id)
         if task is None:
             raise KeyError(f"task not found: {task_id}")
