@@ -70,6 +70,10 @@ class PostgresReadRepository(StateReadRepository):
         filters = filters or {}
         if table == "sessions":
             return self._list_sessions(limit=limit, filters=filters)
+        if table == "errors":
+            return self._list_errors(limit=limit, filters=filters)
+        if table == "memory_entries":
+            return self._list_memory_entries(limit=limit, filters=filters)
         sql, params = self._build_list_query(table, limit=limit, filters=filters)
         return self.query(table, sql=sql, params=params)
 
@@ -155,7 +159,7 @@ class PostgresReadRepository(StateReadRepository):
         if table == "tasks" and filters.get("statuses"):
             clauses.append("status = ANY(%(statuses)s)")
             params["statuses"] = list(filters["statuses"])
-        if table in {"runtime_events", "errors"}:
+        if table == "runtime_events":
             for key in ("event_type", "component", "status", "correlation_id", "agent_id", "channel", "job_id", "delivery_id"):
                 value = str(filters.get(key, ""))
                 if value:
@@ -212,6 +216,67 @@ class PostgresReadRepository(StateReadRepository):
                 }
             )
         return result[: max(1, min(int(limit), 500))]
+
+    def _list_errors(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回与 RuntimeEventStore.recent_errors 一致的事件形态。"""
+
+        table_name = self._table_name("runtime_events")
+        safe_limit = max(1, min(int(limit), 200))
+        sql = (
+            "SELECT row_to_json(t) AS row "
+            f"FROM {table_name} t WHERE status = ANY(%(statuses)s)"
+        )
+        clauses: list[str] = []
+        params: dict[str, Any] = {
+            "limit": safe_limit,
+            "statuses": ["error", "failed", "rejected", "critical"],
+        }
+        for key in ("component", "correlation_id"):
+            value = str(filters.get(key, ""))
+            if value:
+                clauses.append(f"{key} = %({key})s")
+                params[key] = value
+        if clauses:
+            sql += " AND " + " AND ".join(clauses)
+        sql += " ORDER BY timestamp DESC LIMIT %(limit)s"
+        rows = self.query("runtime_events", sql=sql, params=params)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.get("row", row)
+            if isinstance(payload, dict):
+                result.append(payload)
+        return result[:safe_limit]
+
+    def _list_memory_entries(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回与 MemoryStore.recent_entries 一致的摘要形态。"""
+
+        table_name = self._table_name("memory_entries")
+        safe_limit = max(1, min(int(limit), 200))
+        sql = f"SELECT row_to_json(t) AS row FROM {table_name} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": safe_limit}
+        agent_id = str(filters.get("agent_id", ""))
+        if agent_id:
+            clauses.append("agent_id = %(agent_id)s")
+            params["agent_id"] = agent_id
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC LIMIT %(limit)s"
+        rows = self.query("memory_entries", sql=sql, params=params)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.get("row", row)
+            if not isinstance(payload, dict):
+                continue
+            result.append(
+                {
+                    "ts": str(payload.get("created_at", "")),
+                    "category": str(payload.get("category", "")),
+                    "content": str(payload.get("content", "")),
+                    "file": str(payload.get("source_file", "")),
+                }
+            )
+        return result[:safe_limit]
 
     @staticmethod
     def _table_name(table: str) -> str:

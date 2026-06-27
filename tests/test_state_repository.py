@@ -117,3 +117,13 @@ def test_postgres_read_repository_sessions_match_local_summary_shape() -> None:
     rows = repo._list_sessions(limit=5, filters={"agent_id": "main"})
 
     assert rows == []
+
+
+def test_postgres_read_repository_error_and_memory_shapes_align() -> None:
+    repo = PostgresReadRepository(
+        url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+        enabled=False,
+    )
+
+    assert repo._list_errors(limit=5, filters={"component": "delivery"}) == []
+    assert repo._list_memory_entries(limit=5, filters={"agent_id": "main"}) == []
