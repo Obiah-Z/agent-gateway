@@ -348,7 +348,7 @@ delivery-worker
 | 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
 | 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
 | 20.3 后台任务队列 | 已完成 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron/Heartbeat 自动调度已进入任务链路；明确命令式长任务可配置化转入后台执行；控制面和 Dashboard 已支持任务查看、取消和重试。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成，并可通过控制面和 Dashboard 追踪和干预。 |
-| 20.4 PostgreSQL 状态外置 | 提升长期查询和治理能力 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
+| 20.4 PostgreSQL 状态外置 | 已完成 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
 | 20.6 生产部署编排 | 形成可复现部署形态 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
 | 20.7 统一观测与压测 | 用数据验证性能提升 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
@@ -421,11 +421,11 @@ delivery-worker
 | --- | --- | --- |
 | 20.4.1 状态边界与表设计 | 已完成 | 明确 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 的最小字段、主键、时间列、索引和保留策略；保留 JSONL 作为回退和审计。 |
 | 20.4.2 仓储接口草案 | 已完成 | 定义状态仓储抽象，先不替换业务写入，只约束 list/get/append/upsert/query/delete 的统一接口。 |
-| 20.4.3 只读仓储统一入口 | 进行中 | 先把 Dashboard / 控制面读取统一接到 `StateReadRepository`，本地 JSONL / 内存存储先作为默认后端；后续切换 PostgreSQL 时不改上层调用。 |
-| 20.4.4 PostgreSQL 只读后端 | 进行中 | 为 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 提供 PostgreSQL 只读实现，Dashboard 按配置切换。 |
+| 20.4.3 只读仓储统一入口 | 已完成 | 先把 Dashboard / 控制面读取统一接到 `StateReadRepository`，本地 JSONL / 内存存储先作为默认后端；后续切换 PostgreSQL 时不改上层调用。 |
+| 20.4.4 PostgreSQL 只读后端 | 已完成 | 为 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 提供 PostgreSQL 只读实现，Dashboard 按配置切换。 |
 | 20.4.4.1 仓储查询映射 | 已完成 | 补齐各表主键、排序列、过滤字段和只读查询骨架，确保 read path 的 SQL 形态稳定。 |
 | 20.4.4.2 后端切换开关 | 已完成 | `GATEWAY_POSTGRES_ENABLED` 开关可切到 PostgreSQL 只读仓库，默认仍返回本地仓库。 |
-| 20.4.4.3 只读结果对齐 | 进行中 | 把 PostgreSQL 返回结构进一步对齐本地仓库，减少 control plane / Dashboard 适配成本。 |
+| 20.4.4.3 只读结果对齐 | 已完成 | 把 PostgreSQL 返回结构进一步对齐本地仓库，减少 control plane / Dashboard 适配成本。 |
 | 20.4.4.3.1 错误视图对齐 | 已完成 | PostgreSQL `errors` 输出对齐 `RuntimeEventStore.recent_errors` 的事件形态，避免控制面重复适配。 |
 | 20.4.4.3.2 记忆视图对齐 | 已完成 | PostgreSQL `memory_entries` 输出对齐 `MemoryStore.recent_entries` 的摘要形态，保持 Dashboard 视图一致。 |
 | 20.4.5 双写与迁移脚手架 | 待实现 | 逐步把会话、任务、事件和记忆接入数据库主存储，保留 JSONL 双写和回放能力。 |

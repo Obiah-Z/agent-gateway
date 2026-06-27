@@ -74,6 +74,8 @@ class PostgresReadRepository(StateReadRepository):
             return self._list_errors(limit=limit, filters=filters)
         if table == "memory_entries":
             return self._list_memory_entries(limit=limit, filters=filters)
+        if table == "tasks":
+            return self._list_tasks(limit=limit, filters=filters)
         sql, params = self._build_list_query(table, limit=limit, filters=filters)
         return self.query(table, sql=sql, params=params)
 
@@ -276,6 +278,33 @@ class PostgresReadRepository(StateReadRepository):
                     "file": str(payload.get("source_file", "")),
                 }
             )
+        return result[:safe_limit]
+
+    def _list_tasks(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回与 LocalTaskStore.list 一致的任务结构。"""
+
+        table_name = self._table_name("tasks")
+        safe_limit = max(1, min(int(limit), 200))
+        sql = f"SELECT row_to_json(t) AS row FROM {table_name} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": safe_limit}
+        statuses = filters.get("statuses")
+        if statuses:
+            clauses.append("status = ANY(%(statuses)s)")
+            params["statuses"] = list(statuses)
+        agent_id = str(filters.get("agent_id", ""))
+        if agent_id:
+            clauses.append("agent_id = %(agent_id)s")
+            params["agent_id"] = agent_id
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY updated_at DESC LIMIT %(limit)s"
+        rows = self.query("tasks", sql=sql, params=params)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.get("row", row)
+            if isinstance(payload, dict):
+                result.append(payload)
         return result[:safe_limit]
 
     @staticmethod

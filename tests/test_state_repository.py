@@ -127,3 +127,4 @@ def test_postgres_read_repository_error_and_memory_shapes_align() -> None:
 
     assert repo._list_errors(limit=5, filters={"component": "delivery"}) == []
     assert repo._list_memory_entries(limit=5, filters={"agent_id": "main"}) == []
+    assert repo._list_tasks(limit=5, filters={"statuses": ["pending"]}) == []
