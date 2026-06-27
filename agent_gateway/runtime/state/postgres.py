@@ -72,7 +72,8 @@ class PostgresReadRepository(StateReadRepository):
         return self.query(table, sql=sql, params=params)
 
     def get(self, table: str, key: str) -> dict[str, Any] | None:
-        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name(table)} t WHERE id = %(id)s LIMIT 1"
+        primary_key = self._primary_key(table)
+        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name(table)} t WHERE {primary_key} = %(id)s LIMIT 1"
         rows = self.query(table, sql=sql, params={"id": key})
         if not rows:
             return None
@@ -165,9 +166,12 @@ class PostgresReadRepository(StateReadRepository):
         if table == "memory_entries" and filters.get("agent_id"):
             clauses.append("agent_id = %(agent_id)s")
             params["agent_id"] = str(filters["agent_id"])
+        if table == "config_audits" and filters.get("entity_type"):
+            clauses.append("entity_type = %(entity_type)s")
+            params["entity_type"] = str(filters["entity_type"])
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY 1 DESC LIMIT %(limit)s"
+        sql += f" ORDER BY {self._order_column(table)} DESC LIMIT %(limit)s"
         return sql, params
 
     @staticmethod
@@ -184,6 +188,36 @@ class PostgresReadRepository(StateReadRepository):
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
         return table
+
+    @staticmethod
+    def _primary_key(table: str) -> str:
+        mapping = {
+            "sessions": "id",
+            "tasks": "id",
+            "runtime_events": "event_id",
+            "errors": "id",
+            "metrics": "id",
+            "memory_entries": "id",
+            "config_audits": "id",
+        }
+        if table not in mapping:
+            raise ValueError(f"unsupported table: {table}")
+        return mapping[table]
+
+    @staticmethod
+    def _order_column(table: str) -> str:
+        mapping = {
+            "sessions": "updated_at",
+            "tasks": "updated_at",
+            "runtime_events": "timestamp",
+            "errors": "timestamp",
+            "metrics": "timestamp",
+            "memory_entries": "created_at",
+            "config_audits": "created_at",
+        }
+        if table not in mapping:
+            raise ValueError(f"unsupported table: {table}")
+        return mapping[table]
 
 
 POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (

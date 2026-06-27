@@ -88,3 +88,21 @@ def test_build_state_repository_switches_to_postgres_backend(tmp_path: Path) -> 
     )
 
     assert isinstance(bundle.read, PostgresReadRepository)
+
+
+def test_postgres_read_repository_uses_table_specific_keys_and_ordering() -> None:
+    repo = PostgresReadRepository(
+        url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+        enabled=False,
+    )
+
+    _, params = repo._build_list_query(
+        "runtime_events",
+        limit=10,
+        filters={"component": "delivery", "correlation_id": "corr-1"},
+    )
+
+    assert repo._primary_key("runtime_events") == "event_id"
+    assert repo._order_column("memory_entries") == "created_at"
+    assert params["component"] == "delivery"
+    assert params["correlation_id"] == "corr-1"

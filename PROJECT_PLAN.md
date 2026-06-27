@@ -422,7 +422,10 @@ delivery-worker
 | 20.4.1 状态边界与表设计 | 已完成 | 明确 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 的最小字段、主键、时间列、索引和保留策略；保留 JSONL 作为回退和审计。 |
 | 20.4.2 仓储接口草案 | 已完成 | 定义状态仓储抽象，先不替换业务写入，只约束 list/get/append/upsert/query/delete 的统一接口。 |
 | 20.4.3 只读仓储统一入口 | 进行中 | 先把 Dashboard / 控制面读取统一接到 `StateReadRepository`，本地 JSONL / 内存存储先作为默认后端；后续切换 PostgreSQL 时不改上层调用。 |
-| 20.4.4 PostgreSQL 只读后端 | 待实现 | 为 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 提供 PostgreSQL 只读实现，Dashboard 按配置切换。 |
+| 20.4.4 PostgreSQL 只读后端 | 进行中 | 为 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 提供 PostgreSQL 只读实现，Dashboard 按配置切换。 |
+| 20.4.4.1 仓储查询映射 | 已完成 | 补齐各表主键、排序列、过滤字段和只读查询骨架，确保 read path 的 SQL 形态稳定。 |
+| 20.4.4.2 后端切换开关 | 已完成 | `GATEWAY_POSTGRES_ENABLED` 开关可切到 PostgreSQL 只读仓库，默认仍返回本地仓库。 |
+| 20.4.4.3 只读结果对齐 | 待实现 | 把 PostgreSQL 返回结构进一步对齐本地仓库，减少 control plane / Dashboard 适配成本。 |
 | 20.4.5 双写与迁移脚手架 | 待实现 | 逐步把会话、任务、事件和记忆接入数据库主存储，保留 JSONL 双写和回放能力。 |
 
 ## 9. 推荐执行顺序
