@@ -106,3 +106,14 @@ def test_postgres_read_repository_uses_table_specific_keys_and_ordering() -> Non
     assert repo._order_column("memory_entries") == "created_at"
     assert params["component"] == "delivery"
     assert params["correlation_id"] == "corr-1"
+
+
+def test_postgres_read_repository_sessions_match_local_summary_shape() -> None:
+    repo = PostgresReadRepository(
+        url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+        enabled=False,
+    )
+
+    rows = repo._list_sessions(limit=5, filters={"agent_id": "main"})
+
+    assert rows == []

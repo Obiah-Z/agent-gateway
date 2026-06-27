@@ -425,7 +425,7 @@ delivery-worker
 | 20.4.4 PostgreSQL 只读后端 | 进行中 | 为 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 提供 PostgreSQL 只读实现，Dashboard 按配置切换。 |
 | 20.4.4.1 仓储查询映射 | 已完成 | 补齐各表主键、排序列、过滤字段和只读查询骨架，确保 read path 的 SQL 形态稳定。 |
 | 20.4.4.2 后端切换开关 | 已完成 | `GATEWAY_POSTGRES_ENABLED` 开关可切到 PostgreSQL 只读仓库，默认仍返回本地仓库。 |
-| 20.4.4.3 只读结果对齐 | 待实现 | 把 PostgreSQL 返回结构进一步对齐本地仓库，减少 control plane / Dashboard 适配成本。 |
+| 20.4.4.3 只读结果对齐 | 进行中 | 把 PostgreSQL 返回结构进一步对齐本地仓库，减少 control plane / Dashboard 适配成本。 |
 | 20.4.5 双写与迁移脚手架 | 待实现 | 逐步把会话、任务、事件和记忆接入数据库主存储，保留 JSONL 双写和回放能力。 |
 
 ## 9. 推荐执行顺序

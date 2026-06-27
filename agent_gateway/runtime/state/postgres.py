@@ -68,6 +68,8 @@ class PostgresReadRepository(StateReadRepository):
     ) -> list[dict[str, Any]]:
         del cursor
         filters = filters or {}
+        if table == "sessions":
+            return self._list_sessions(limit=limit, filters=filters)
         sql, params = self._build_list_query(table, limit=limit, filters=filters)
         return self.query(table, sql=sql, params=params)
 
@@ -173,6 +175,43 @@ class PostgresReadRepository(StateReadRepository):
             sql += " WHERE " + " AND ".join(clauses)
         sql += f" ORDER BY {self._order_column(table)} DESC LIMIT %(limit)s"
         return sql, params
+
+    def _list_sessions(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回与本地 SessionStore 一致的会话摘要。"""
+
+        agent_id = str(filters.get("agent_id", ""))
+        table_name = self._table_name("sessions")
+        sql = (
+            "SELECT json_build_object("
+            "'session_key', session_key, "
+            "'message_count', COALESCE(message_count, 0)"
+            ") AS row "
+            f"FROM {table_name}"
+        )
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        if agent_id:
+            clauses.append("agent_id = %(agent_id)s")
+            params["agent_id"] = agent_id
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY updated_at DESC LIMIT %(limit)s"
+        rows = self.query("sessions", sql=sql, params=params)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.get("row", row)
+            if not isinstance(payload, dict):
+                continue
+            session_key = str(payload.get("session_key", ""))
+            if not session_key:
+                continue
+            result.append(
+                {
+                    "session_key": session_key,
+                    "message_count": int(payload.get("message_count", 0) or 0),
+                }
+            )
+        return result[: max(1, min(int(limit), 500))]
 
     @staticmethod
     def _table_name(table: str) -> str:
