@@ -15,6 +15,7 @@ from agent_gateway.runtime.execution.channel_runtime import (
     InboundBackpressureError,
     PendingInbound,
 )
+from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore
 
 
 class FakeDispatcher:
@@ -157,6 +158,23 @@ class BackpressureDispatcher(SlowDispatcher):
         self.delivered_backpressure.append(text)
         self.delivered_backpressure_metadata.append(payload)
         return "backpressure-delivery-1"
+
+
+class BackgroundTaskDispatcher(FakeDispatcher):
+    def __init__(self) -> None:
+        self.delivered_texts: list[str] = []
+        self.delivered_metadata: list[dict] = []
+        self.dispatch_calls = 0
+
+    async def dispatch_inbound(self, inbound: InboundMessage, *, forced_agent_id: str = ""):
+        self.dispatch_calls += 1
+        return await super().dispatch_inbound(inbound, forced_agent_id=forced_agent_id)
+
+    async def deliver_text(self, channels: ChannelManager, target, text: str, *, metadata=None) -> str:
+        del channels, target
+        self.delivered_texts.append(text)
+        self.delivered_metadata.append(dict(metadata or {}))
+        return "background-accepted-delivery-1"
 
 
 def test_channel_runtime_restart_swaps_channels() -> None:
@@ -605,6 +623,46 @@ def test_channel_runtime_sends_long_task_notice_once_before_final_reply() -> Non
     ]
     assert dispatcher.delivered_notice_metadata[0]["kind"] == "long_task_notice"
     assert dispatcher.dispatched == ["slow"]
+
+
+def test_channel_runtime_enqueues_explicit_long_task_command(tmp_path) -> None:
+    dispatcher = BackgroundTaskDispatcher()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        task_queue=task_queue,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="/github-repo-analyzer https://github.com/openai/openai-python",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+                metadata={"receive_id_type": "open_id"},
+            )
+        )
+        while not dispatcher.delivered_texts:
+            await asyncio.sleep(0)
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    queued = task_queue.store.list(statuses=["pending"])
+    assert len(queued) == 1
+    assert queued[0].task_type == "agent_inbound"
+    assert queued[0].source == "feishu"
+    assert queued[0].payload["text"].startswith("/github-repo-analyzer ")
+    assert queued[0].payload["metadata"]["receive_id_type"] == "open_id"
+    assert queued[0].metadata["command"] == "/github-repo-analyzer"
+    assert dispatcher.dispatch_calls == 0
+    assert dispatcher.delivered_metadata[0]["kind"] == "background_task_accepted"
+    assert "任务 ID" in dispatcher.delivered_texts[0]
 
 
 def test_channel_runtime_does_not_send_long_task_notice_for_fast_task() -> None:

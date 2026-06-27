@@ -44,6 +44,7 @@ from agent_gateway.runtime.execution.resilience import ProfileManager, Resilienc
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
+from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 from agent_gateway.gateways.control.websocket_server import GatewayServer
@@ -185,12 +186,19 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     task_worker = TaskWorkerRuntime(task_queue, worker_id="local-worker")
     task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)
+    task_worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(dispatcher, channel_manager, delivery_runtime=None),
+    )
     delivery_runtime = DeliveryRuntime(
         delivery_queue,
         channel_manager,
         on_success=autonomy_runtime.cron.on_delivery_success,
         event_store=event_store,
     )
+    agent_inbound_handler = task_worker.handlers.get("agent_inbound")
+    if isinstance(agent_inbound_handler, AgentInboundTaskHandler):
+        agent_inbound_handler.delivery_runtime = delivery_runtime
     metrics_runtime = MetricsRuntime(
         metrics_store=metrics_store,
         delivery_queue=delivery_queue,
@@ -295,6 +303,7 @@ async def serve(app: GatewayApplication) -> None:
         max_queue_size=app.settings.inbound_max_queue_size,
         max_lane_queue_size=app.settings.inbound_max_lane_queue_size,
         long_task_notice_seconds=app.settings.inbound_long_task_notice_seconds,
+        task_queue=app.task_queue,
     )
     app.control_plane.channel_runtime = channel_runtime
     server = GatewayServer(

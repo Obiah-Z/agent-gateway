@@ -28,6 +28,11 @@ from agent_gateway.runtime.domain.models import InboundMessage, ProactiveTarget
 from agent_gateway.runtime.domain.router import build_preroute_lane_key
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
+from agent_gateway.runtime.tasks.handlers import inbound_to_task_payload
+from agent_gateway.runtime.tasks.queue import LocalTaskQueue
+
+
+BACKGROUND_INBOUND_COMMANDS = ("/github-repo-analyzer", "/space-advisor")
 
 
 @dataclass(slots=True)
@@ -83,6 +88,7 @@ class ChannelRuntime:
         max_queue_size: int = 200,
         max_lane_queue_size: int = 20,
         long_task_notice_seconds: float = 15.0,
+        task_queue: LocalTaskQueue | None = None,
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
         self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
@@ -93,6 +99,7 @@ class ChannelRuntime:
         self.max_queue_size = max(1, int(max_queue_size))  # 全局入口队列最大积压。
         self.max_lane_queue_size = max(1, int(max_lane_queue_size))  # 单条 lane 最大积压。
         self.long_task_notice_seconds = max(0.0, float(long_task_notice_seconds))
+        self.task_queue = task_queue  # 明确命令式长任务会先入队，再由 worker 后台执行。
         self._lane_semaphore = asyncio.Semaphore(self.max_concurrent_lanes)
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
@@ -462,11 +469,58 @@ class ChannelRuntime:
             if await interceptor.try_consume_activation(inbound):
                 await self._flush_cli_delivery_if_needed(inbound)
                 return
+        if await self._maybe_enqueue_background_inbound(inbound):
+            await self._flush_cli_delivery_if_needed(inbound)
+            return
         # dispatcher 内部会完成路由解析、Agent Loop 执行和回复对象构造。
         result = await self.dispatcher.dispatch_inbound(inbound)
         # 普通回复仍先入可靠投递队列，再由 DeliveryRuntime 发送。
         await self.dispatcher.deliver_reply(self.channels, result)
         await self._flush_cli_delivery_if_needed(inbound)
+
+    async def _maybe_enqueue_background_inbound(self, inbound: InboundMessage) -> bool:
+        """把明确的长任务命令转入后台任务队列。"""
+
+        if self.task_queue is None or not self._is_background_inbound_command(inbound.text):
+            return False
+        task = await asyncio.to_thread(
+            self.task_queue.enqueue,
+            task_type="agent_inbound",
+            source=inbound.channel or "inbound",
+            agent_id=str(inbound.metadata.get("agent_id", "")),
+            session_key=build_preroute_lane_key(inbound),
+            priority=120,
+            payload=inbound_to_task_payload(inbound),
+            metadata={
+                "channel": inbound.channel,
+                "account_id": inbound.account_id,
+                "peer_id": inbound.peer_id,
+                "sender_id": inbound.sender_id,
+                "command": self._background_command_name(inbound.text),
+            },
+        )
+        await self._deliver_background_task_accepted(inbound, task.id)
+        return True
+
+    @staticmethod
+    def _is_background_inbound_command(text: str) -> bool:
+        """判断用户消息是否是明确的后台长任务命令。"""
+
+        normalized = text.lstrip()
+        return any(
+            normalized == command or normalized.startswith(f"{command} ")
+            for command in BACKGROUND_INBOUND_COMMANDS
+        )
+
+    @staticmethod
+    def _background_command_name(text: str) -> str:
+        """提取后台命令名，便于任务元数据和排障展示。"""
+
+        normalized = text.lstrip()
+        for command in BACKGROUND_INBOUND_COMMANDS:
+            if normalized == command or normalized.startswith(f"{command} "):
+                return command
+        return ""
 
     async def _deliver_error_reply(self, inbound: InboundMessage, exc: Exception) -> None:
         """把处理异常转换成一条出站错误提示，避免用户无反馈。"""
@@ -565,6 +619,43 @@ class ChannelRuntime:
         except Exception as delivery_exc:
             print(
                 "[channel_runtime] failed to enqueue long task notice:"
+                f" channel={inbound.channel}"
+                f" account={inbound.account_id}"
+                f" peer={inbound.peer_id}"
+                f" error={delivery_exc}"
+            )
+            traceback.print_exc()
+
+    async def _deliver_background_task_accepted(
+        self,
+        inbound: InboundMessage,
+        task_id: str,
+    ) -> None:
+        """告知用户长任务已进入后台队列。"""
+
+        try:
+            metadata = dict(inbound.metadata)
+            metadata.update(
+                {
+                    "kind": "background_task_accepted",
+                    "sender_id": inbound.sender_id,
+                    "task_id": task_id,
+                }
+            )
+            await self.dispatcher.deliver_text(
+                self.channels,
+                ProactiveTarget(
+                    channel=inbound.channel,
+                    account_id=inbound.account_id,
+                    peer_id=inbound.peer_id,
+                    agent_id=str(inbound.metadata.get("agent_id", "main")),
+                ),
+                f"已接收后台任务，任务 ID：{task_id}。执行完成后会继续推送结果。",
+                metadata=metadata,
+            )
+        except Exception as delivery_exc:
+            print(
+                "[channel_runtime] failed to enqueue background task accepted reply:"
                 f" channel={inbound.channel}"
                 f" account={inbound.account_id}"
                 f" peer={inbound.peer_id}"

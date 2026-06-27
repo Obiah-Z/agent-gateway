@@ -71,7 +71,7 @@ cd ~/Desktop/claw0/gateway
 ./.venv/bin/python -m pytest tests -q
 ```
 
-最近验证基线：`229 passed`。
+最近验证基线：`231 passed`。
 
 ## 4. 当前能力基线
 
@@ -347,7 +347,7 @@ delivery-worker
 | --- | --- | --- | --- |
 | 20.1 架构边界梳理 | 已完成 | 新增 `GATEWAY_RUNTIME_ROLES`，支持 `all`、`api`、`worker`、`scheduler`、`delivery`、`dashboard`、`control`、`observability` 运行角色；`serve()` 按角色启动控制面、入站、调度器、投递器、Dashboard 和观测后台。 | 默认 `all` 单机模式不变；代码和文档已说明哪些模块未来可独立运行。 |
 | 20.2 Redis 最小接入 | 已完成 | 已完成 Redis 配置、客户端封装、健康检查、飞书 Webhook 事件去重、Cron 自动调度幂等 key 和 Cron 跨实例限流。 | 多实例启动时不会重复处理同一飞书事件或重复触发同一 Cron。 |
-| 20.3 后台任务队列 | 进行中 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron 自动调度已进入任务链路，Heartbeat 暂保留原路径。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
+| 20.3 后台任务队列 | 进行中 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron 自动调度已进入任务链路，明确命令式长任务可转入后台执行。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成。 |
 | 20.4 PostgreSQL 状态外置 | 提升长期查询和治理能力 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 可靠投递队列升级 | 支持多 worker 投递和死信处理 | 将本地 delivery queue 抽象为接口，新增 Redis Streams 或 RabbitMQ backend；支持 ack、retry、dead-letter、idempotency key。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
 | 20.6 生产部署编排 | 形成可复现部署形态 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
@@ -380,7 +380,7 @@ delivery-worker
 - `dashboard` 角色启动 Dashboard，并自动包含控制面和观测后台。
 - `control` 角色只启动 WebSocket JSON-RPC 控制面。
 - `observability` 角色启动 metrics 和 alerts 后台采集。
-- `worker` 角色已保留为架构角色，但真正独立消费后台任务需要等待 Phase 20.3 的任务队列接入。
+- `worker` 角色已接入本地任务队列，可消费 Cron task 和明确命令式长任务；后续可替换为 Redis/RabbitMQ/PostgreSQL backend。
 - Redis 已增加 `GATEWAY_REDIS_ENABLED`、`GATEWAY_REDIS_URL`、`GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS` 配置。
 - Redis 当前只接入基础设施层和健康检查；默认关闭，不影响本地单机运行。
 - Redis 开启但不可用时，`health.check` 会返回 `redis.ping` warning，不会直接阻塞网关启动。
@@ -405,7 +405,7 @@ delivery-worker
 | 20.3.2 本地任务队列接口 | 已完成 | 增加 enqueue、reserve、ack、retry、fail、cancel 和 stats 抽象，先用本地 backend 实现。 |
 | 20.3.3 Worker 运行时 | 已完成 | 增加 `TaskWorkerRuntime`，支持 handler 注册、并发 worker loop、成功 ack、失败 fail、异常 retry 和 stats。 |
 | 20.3.4 Cron/Heartbeat 任务化 | 部分完成 | Cron 自动调度已改为创建 `cron` task instance，并由 `TaskWorkerRuntime` 调用原 Cron 执行逻辑；Heartbeat 暂未迁移。 |
-| 20.3.5 长任务 Skill 任务化 | 待实现 | 将 GitHub 分析、服务器巡检等长任务切到后台任务链路。 |
+| 20.3.5 长任务 Skill 任务化 | 部分完成 | 明确命令式长任务 `/github-repo-analyzer`、`/space-advisor` 已先入 `agent_inbound` task，再由 `TaskWorkerRuntime` 走原 dispatcher 链路后台执行并投递结果；更通用的 tool-call 级后台化留到后续阶段。 |
 
 ## 9. 推荐执行顺序
 
