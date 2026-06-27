@@ -10,6 +10,7 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
 from agent_gateway.runtime.state.adapter import LocalStateReadRepository
 from agent_gateway.runtime.state.repository import StateReadRepository
+from agent_gateway.runtime.state.postgres import PostgresReadRepository
 from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.runtime.tasks.store import LocalTaskStore
 
@@ -33,11 +34,18 @@ def build_state_repository(
 ) -> StateRepositoryBundle:
     """根据当前配置装配状态仓储。
 
-    目前先返回本地只读仓储，后续 PostgreSQL backend 接入后在这里切换实现，
-    保持上层控制面和 Dashboard 不改调用方式。
+    目前默认返回本地只读仓储；当 PostgreSQL 开关开启时，切换为 PostgreSQL
+    只读仓储骨架，保持上层控制面和 Dashboard 不改调用方式。
     """
 
-    del settings
+    if settings.postgres_enabled:
+        return StateRepositoryBundle(
+            read=PostgresReadRepository(
+                url=settings.postgres_url,
+                enabled=True,
+                connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+            )
+        )
     return StateRepositoryBundle(
         read=LocalStateReadRepository(
             sessions=sessions,

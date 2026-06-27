@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import shutil
+import subprocess
 from typing import Any, Protocol
+
+from agent_gateway.runtime.state.repository import StateReadRepository
 
 
 @dataclass(slots=True)
@@ -39,6 +44,146 @@ class PostgresStateStore(Protocol):
 
     def query(self, table: str, *, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """执行受控查询。"""
+
+
+@dataclass(slots=True)
+class PostgresReadRepository(StateReadRepository):
+    """基于 `psql` 的 PostgreSQL 只读仓储。
+
+    当前阶段先把读路径和 SQL 形态固定下来，不引入额外 Python 驱动；
+    这样后续只需要把执行层替换为 psycopg 即可。
+    """
+
+    url: str
+    enabled: bool = False
+    connect_timeout_seconds: float = 2.0
+
+    def list(
+        self,
+        table: str,
+        *,
+        limit: int = 50,
+        cursor: str = "",
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        del cursor
+        filters = filters or {}
+        sql, params = self._build_list_query(table, limit=limit, filters=filters)
+        return self.query(table, sql=sql, params=params)
+
+    def get(self, table: str, key: str) -> dict[str, Any] | None:
+        sql = f"SELECT row_to_json(t) AS row FROM {self._table_name(table)} t WHERE id = %(id)s LIMIT 1"
+        rows = self.query(table, sql=sql, params={"id": key})
+        if not rows:
+            return None
+        row = rows[0]
+        payload = row.get("row", row)
+        return payload if isinstance(payload, dict) else None
+
+    def append(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("PostgresReadRepository is read-only")
+
+    def upsert(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("PostgresReadRepository is read-only")
+
+    def delete(self, table: str, key: str) -> bool:
+        raise NotImplementedError("PostgresReadRepository is read-only")
+
+    def query(
+        self,
+        table: str,
+        *,
+        sql: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        if shutil.which("psql") is None:
+            raise RuntimeError("psql is not installed")
+        command = [
+            "psql",
+            self.url,
+            "-X",
+            "-q",
+            "-t",
+            "-A",
+            "-F",
+            "\t",
+            "-c",
+            sql,
+        ]
+        if params:
+            command.extend(["--set", f"params={json.dumps(params, ensure_ascii=False)}"])
+        completed = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=self.connect_timeout_seconds,
+        )
+        rows: list[dict[str, Any]] = []
+        for line in completed.stdout.splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                rows.append(payload)
+        return rows
+
+    def _build_list_query(
+        self,
+        table: str,
+        *,
+        limit: int,
+        filters: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        table_name = self._table_name(table)
+        safe_limit = max(1, min(int(limit), 500))
+        sql = f"SELECT row_to_json(t) AS row FROM {table_name} t"
+        clauses: list[str] = []
+        params: dict[str, Any] = {"limit": safe_limit}
+        if table == "sessions" and filters.get("agent_id"):
+            clauses.append("agent_id = %(agent_id)s")
+            params["agent_id"] = str(filters["agent_id"])
+        if table == "tasks" and filters.get("statuses"):
+            clauses.append("status = ANY(%(statuses)s)")
+            params["statuses"] = list(filters["statuses"])
+        if table in {"runtime_events", "errors"}:
+            for key in ("event_type", "component", "status", "correlation_id", "agent_id", "channel", "job_id", "delivery_id"):
+                value = str(filters.get(key, ""))
+                if value:
+                    column = "type" if key == "event_type" else key
+                    clauses.append(f"{column} = %({key})s")
+                    params[key] = value
+        if table == "metrics" and filters.get("kind"):
+            clauses.append("kind = %(kind)s")
+            params["kind"] = str(filters["kind"])
+        if table == "memory_entries" and filters.get("agent_id"):
+            clauses.append("agent_id = %(agent_id)s")
+            params["agent_id"] = str(filters["agent_id"])
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY 1 DESC LIMIT %(limit)s"
+        return sql, params
+
+    @staticmethod
+    def _table_name(table: str) -> str:
+        allowed = {
+            "sessions",
+            "tasks",
+            "runtime_events",
+            "errors",
+            "metrics",
+            "memory_entries",
+            "config_audits",
+        }
+        if table not in allowed:
+            raise ValueError(f"unsupported table: {table}")
+        return table
 
 
 POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
