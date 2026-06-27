@@ -87,6 +87,21 @@ class SlowDispatcher(FakeDispatcher):
         return await super().dispatch_inbound(inbound, forced_agent_id=forced_agent_id)
 
 
+class LaneAwareDispatcher(FakeDispatcher):
+    def __init__(self) -> None:
+        self.started: list[str] = []
+        self.finished: list[str] = []
+        self.release_by_peer: dict[str, asyncio.Event] = {}
+
+    async def dispatch_inbound(self, inbound: InboundMessage, *, forced_agent_id: str = ""):
+        self.started.append(inbound.peer_id)
+        release = self.release_by_peer.get(inbound.peer_id)
+        if release is not None:
+            await release.wait()
+        self.finished.append(inbound.peer_id)
+        return await super().dispatch_inbound(inbound, forced_agent_id=forced_agent_id)
+
+
 class ConsumingInterceptor:
     def __init__(self) -> None:
         self.calls = 0
@@ -247,6 +262,92 @@ def test_channel_runtime_restart_closes_and_joins_old_channel_threads() -> None:
     asyncio.run(_run())
 
     assert runtime.channels is second
+
+
+def test_channel_runtime_processes_different_preroute_lanes_concurrently() -> None:
+    dispatcher = LaneAwareDispatcher()
+    slow_release = asyncio.Event()
+    dispatcher.release_by_peer["slow"] = slow_release
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="slow",
+                sender_id="slow",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="slow",
+            )
+        )
+        await runtime.ingest_external(
+            InboundMessage(
+                text="fast",
+                sender_id="fast",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="fast",
+            )
+        )
+        while "fast" not in dispatcher.finished:
+            await asyncio.sleep(0)
+        assert "slow" in dispatcher.started
+        assert "slow" not in dispatcher.finished
+        slow_release.set()
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.finished == ["fast", "slow"]
+
+
+def test_channel_runtime_keeps_same_preroute_lane_serial() -> None:
+    dispatcher = LaneAwareDispatcher()
+    first_release = asyncio.Event()
+    dispatcher.release_by_peer["same"] = first_release
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="first",
+                sender_id="same",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="same",
+            )
+        )
+        await runtime.ingest_external(
+            InboundMessage(
+                text="second",
+                sender_id="same",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="same",
+            )
+        )
+        while dispatcher.started != ["same"]:
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert dispatcher.finished == []
+        dispatcher.release_by_peer.pop("same").set()
+        while dispatcher.finished != ["same", "same"]:
+            await asyncio.sleep(0)
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.started == ["same", "same"]
 
 
 def test_channel_runtime_flushes_cli_delivery_before_next_prompt() -> None:

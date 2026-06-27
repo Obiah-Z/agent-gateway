@@ -254,10 +254,12 @@ cd ~/Desktop/claw0/gateway
    - 后台任务、Cron、Heartbeat 与用户实时消息分开 lane。
    - 已新增 `build_preroute_lane_key()` 和 `build_inbound_lane_key()`，并让 `PendingInbound` 暴露路由前 lane key。
    - 已补充路由前 fallback、路由后 Agent/session 优先级和 PendingInbound lane key 测试。
-3. Phase 15.3：将 `ChannelRuntime` 从单消费者改为 lane dispatcher。待实现。
+3. Phase 15.3：将 `ChannelRuntime` 从单消费者改为 lane dispatcher。已完成。
    - 全局入站队列只负责接收和粗分发。
    - 每个 lane 内部保持顺序处理。
    - 不同 lane 可以并发执行。
+   - 当前按 `PendingInbound.preroute_lane_key` 建立入站 lane worker。
+   - 已补充测试覆盖：不同 peer 可并发处理，慢 lane 不阻塞其他 lane；同一 peer/lane 保持串行。
 4. Phase 15.4：增加全局并发上限和 per-agent 并发上限。待实现。
    - 例如 `main=2`、`research=1`、`ops=1`。
    - 防止并发过高打爆模型 API 或工具执行资源。

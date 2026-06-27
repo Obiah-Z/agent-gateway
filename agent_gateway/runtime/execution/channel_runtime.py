@@ -83,7 +83,9 @@ class ChannelRuntime:
         self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
         self._stop_event = threading.Event()  # 跨线程停止信号。
         self._threads: list[threading.Thread] = []  # 每个通道对应一个后台采集线程。
-        self._consumer_task: asyncio.Task[None] | None = None  # 统一入站队列消费者。
+        self._consumer_task: asyncio.Task[None] | None = None  # 统一入口队列分发任务。
+        self._lane_queues: dict[str, asyncio.Queue[PendingInbound | None]] = {}
+        self._lane_tasks: dict[str, asyncio.Task[None]] = {}
         self._running = False  # 防止重复 start/stop。
 
     async def start(self) -> None:
@@ -178,10 +180,11 @@ class ChannelRuntime:
             thread.join(timeout=remaining)
 
     async def _drain_queue(self, timeout: float) -> None:
-        """等待入站队列清空，超时后释放 CLI 等待者并继续 shutdown。"""
+        """等待全局队列和 lane 队列清空，超时后释放 CLI 等待者。"""
 
         try:
             await asyncio.wait_for(self._queue.join(), timeout=max(0.0, timeout))
+            await asyncio.wait_for(self._drain_lane_queues(), timeout=max(0.0, timeout))
         except asyncio.TimeoutError:
             self._release_pending_completion_events()
 
@@ -191,6 +194,10 @@ class ChannelRuntime:
         for item in list(self._queue._queue):  # noqa: SLF001 - shutdown 兜底只能检查底层 deque。
             if isinstance(item, PendingInbound) and item.completion_event is not None:
                 item.completion_event.set()
+        for queue in self._lane_queues.values():
+            for item in list(queue._queue):  # noqa: SLF001 - shutdown 兜底只能检查底层 deque。
+                if isinstance(item, PendingInbound) and item.completion_event is not None:
+                    item.completion_event.set()
 
     def _worker_loop(self, channel_name: str, account_id: str, channel: Any) -> None:
         """在独立线程里轮询具体通道，避免阻塞主事件循环。"""
@@ -234,10 +241,10 @@ class ChannelRuntime:
                             break
 
     async def _consume(self) -> None:
-        """消费统一入站队列，并保证异常会转成用户可见的错误回复。
+        """消费统一入站队列，并按 lane key 分发到 lane worker。
 
-        这个消费者是单任务串行执行的，目的是让同一进程里的会话写入、路由决策和投递
-        入队保持确定顺序。异常会被吞掉并回送错误提示，避免一条坏消息终止整个消费者。
+        全局队列只负责统一接收和粗分发；每个 lane 内部由独立 worker 串行处理，避免
+        同一 peer/session 的消息乱序，同时允许不同 lane 并发执行。
         """
 
         while True:
@@ -245,28 +252,79 @@ class ChannelRuntime:
             if pending is None:
                 # None 是 stop() 放入的退出哨兵，不代表真实消息。
                 self._queue.task_done()
+                await self._drain_lane_queues()
+                await self._stop_lane_workers()
                 break
 
-            inbound = pending.message
-            try:
-                await self._handle_inbound(inbound)
-            except Exception as exc:
-                # print + traceback 是最低限度兜底；结构化事件由下游 dispatcher/runner 记录。
-                print(
-                    "[channel_runtime] inbound processing failed:"
-                    f" channel={inbound.channel}"
-                    f" account={inbound.account_id}"
-                    f" sender={inbound.sender_id}"
-                    f" peer={inbound.peer_id}"
-                    f" error={exc}"
-                )
-                traceback.print_exc()
-                await self._deliver_error_reply(inbound, exc)
-            finally:
-                if pending.completion_event is not None:
-                    # 无论成功还是失败，都必须释放 CLI 输入线程。
-                    pending.completion_event.set()
-                self._queue.task_done()
+            lane_key = pending.preroute_lane_key
+            lane_queue = self._ensure_lane_queue(lane_key)
+            await lane_queue.put(pending)
+            self._queue.task_done()
+
+    def _ensure_lane_queue(self, lane_key: str) -> asyncio.Queue[PendingInbound | None]:
+        """获取或创建入站 lane 队列和对应 worker。"""
+
+        queue = self._lane_queues.get(lane_key)
+        if queue is None:
+            queue = asyncio.Queue()
+            self._lane_queues[lane_key] = queue
+            self._lane_tasks[lane_key] = asyncio.create_task(self._lane_worker(lane_key, queue))
+        return queue
+
+    async def _lane_worker(
+        self,
+        lane_key: str,
+        queue: asyncio.Queue[PendingInbound | None],
+    ) -> None:
+        """串行处理单个入站 lane 内的消息。"""
+
+        while True:
+            pending = await queue.get()
+            if pending is None:
+                queue.task_done()
+                break
+            await self._process_pending(pending)
+            queue.task_done()
+        self._lane_queues.pop(lane_key, None)
+        self._lane_tasks.pop(lane_key, None)
+
+    async def _process_pending(self, pending: PendingInbound) -> None:
+        """处理一条 lane 内消息，并把异常转换成用户可见错误。"""
+
+        inbound = pending.message
+        try:
+            await self._handle_inbound(inbound)
+        except Exception as exc:
+            # print + traceback 是最低限度兜底；结构化事件由下游 dispatcher/runner 记录。
+            print(
+                "[channel_runtime] inbound processing failed:"
+                f" channel={inbound.channel}"
+                f" account={inbound.account_id}"
+                f" sender={inbound.sender_id}"
+                f" peer={inbound.peer_id}"
+                f" error={exc}"
+            )
+            traceback.print_exc()
+            await self._deliver_error_reply(inbound, exc)
+        finally:
+            if pending.completion_event is not None:
+                # 无论成功还是失败，都必须释放 CLI 输入线程。
+                pending.completion_event.set()
+
+    async def _drain_lane_queues(self) -> None:
+        """等待所有入站 lane 队列完成当前积压。"""
+
+        for queue in list(self._lane_queues.values()):
+            await queue.join()
+
+    async def _stop_lane_workers(self) -> None:
+        """停止所有空闲 lane worker。"""
+
+        tasks = list(self._lane_tasks.values())
+        for queue in list(self._lane_queues.values()):
+            await queue.put(None)
+        if tasks:
+            await asyncio.gather(*tasks)
 
     async def _handle_inbound(self, inbound: InboundMessage) -> None:
         """处理单条入站消息：typing -> onboarding interceptor -> dispatch -> delivery。"""
