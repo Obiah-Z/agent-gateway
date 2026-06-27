@@ -141,7 +141,7 @@ agent-gateway cron-trigger <job_id> --no-flush
 
 ## PostgreSQL 状态存储与迁移
 
-系统已经支持把配置和运行状态迁移到 PostgreSQL，并在开启后优先从数据库读取；本地 JSON/JSONL 文件仍保留为审计、回放和兜底来源。
+系统已经支持把配置和运行状态迁移到 PostgreSQL，并默认优先从数据库读取；本地 JSON/JSONL 文件仍保留为审计、回放和兜底来源。
 
 当前已覆盖的数据包括：
 
@@ -162,16 +162,17 @@ agent-gateway cron-trigger <job_id> --no-flush
 `.env` 中的默认 PostgreSQL 配置如下：
 
 ```env
-GATEWAY_POSTGRES_ENABLED=false
+GATEWAY_POSTGRES_ENABLED=true
 GATEWAY_POSTGRES_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres
 GATEWAY_POSTGRES_CONNECT_TIMEOUT_SECONDS=2.0
 ```
 
 说明：
 
-- `GATEWAY_POSTGRES_ENABLED=false` 时，运行时默认仍读取本地文件。
+- `GATEWAY_POSTGRES_ENABLED=true` 时，运行时默认优先读取和写入 PostgreSQL。
+- 如需临时降级，可把 `GATEWAY_POSTGRES_ENABLED=false`，运行时会回到本地文件读写。
 - `postgres-migrate-local` 命令会显式写入 PostgreSQL，不依赖 `GATEWAY_POSTGRES_ENABLED`。
-- 完成建表和回填验证后，可把 `GATEWAY_POSTGRES_ENABLED=true`，让运行时优先读取 PostgreSQL。
+- 新环境应先完成建表、schema 检查和回填验证，再启动服务。
 
 ### 2. 初始化表结构
 
@@ -220,7 +221,7 @@ agent-gateway postgres-migrate-local
 GATEWAY_POSTGRES_ENABLED=true
 ```
 
-开启后，控制面和 Dashboard 的会话、任务、投递队列、事件、错误、指标、记忆以及配置读取会优先访问 PostgreSQL；控制面配置保存会先写 PostgreSQL，再写本地 JSON 作为 fallback/audit；记忆召回会优先使用 `memory_entries`，新闻简报去重会优先使用 `news_items`，飞书卡片交互状态会优先使用 `feishu_card_states`，当数据库无数据或读取失败时，仍回退到本地 JSON/JSONL。
+数据库优先模式下，控制面和 Dashboard 的会话、任务、投递队列、事件、错误、指标、记忆以及配置读取会优先访问 PostgreSQL；控制面配置保存会先写 PostgreSQL，再写本地 JSON 作为 fallback/audit；记忆召回会优先使用 `memory_entries`，新闻简报去重会优先使用 `news_items`，飞书卡片交互状态会优先使用 `feishu_card_states`，当数据库无数据或读取失败时，仍回退到本地 JSON/JSONL。
 
 控制面 `runtime.status` 会在 PostgreSQL 启用且连通时返回 `postgres.schema`，`health.check` 会额外生成 `postgres.schema` 检查项；如果表结构和当前代码声明不一致，会以 warning 形式提示 schema drift。
 

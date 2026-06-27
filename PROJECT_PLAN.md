@@ -470,6 +470,7 @@ delivery-worker
 | 20.5.16 状态迁移审计与 smoke 收口 | 已完成 | 新增 `doc/PostgreSQL状态迁移审计.md`，明确数据库主存储、文件 fallback/audit、Prompt/Skill/配置资产的边界；`postgres-smoke` 增补 agents、bindings、profiles、channels 配置表写入和读回校验。 |
 | 20.5.17 schema drift 预检命令 | 已完成 | 新增 `agent-gateway postgres-check-schema`，基于 `information_schema.columns` 检查实库表、列和基础类型是否与当前代码声明一致，提前暴露旧库 schema 漂移问题。 |
 | 20.5.18 控制面 schema 健康检查 | 已完成 | `runtime.status` 在 PostgreSQL 启用且连通时返回 `postgres.schema`，`health.check` 增加 `postgres.schema` 检查项，schema drift 会以 warning 形式暴露到控制面和 Dashboard。 |
+| 20.5.19 默认主存储切换 | 已完成 | `.env.example` 已把 `GATEWAY_POSTGRES_ENABLED=true` 作为默认示例，本机 `.env` 已切到 PostgreSQL 主存储；应用构建验证读仓储、写仓储、SessionStore 和 TaskStore 均使用 PostgreSQL 后端，本地文件继续作为 fallback/audit。 |
 
 ## 9. 推荐执行顺序
 
