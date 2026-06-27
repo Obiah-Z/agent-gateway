@@ -64,6 +64,7 @@ class GatewaySettings:
     context_safe_limit: int = 180_000
     max_overflow_compaction: int = 3
     fallback_models: tuple[str, ...] = ()
+    inbound_max_concurrent_lanes: int = 4
     heartbeat_interval_seconds: float = 1800.0
     heartbeat_active_start: int = 9
     heartbeat_active_end: int = 22
@@ -176,6 +177,10 @@ class GatewaySettings:
             context_safe_limit=int(os.getenv("GATEWAY_CONTEXT_SAFE_LIMIT", "180000")),
             max_overflow_compaction=int(os.getenv("GATEWAY_MAX_OVERFLOW_COMPACTION", "3")),
             fallback_models=fallback_models,
+            inbound_max_concurrent_lanes=max(
+                1,
+                int(os.getenv("GATEWAY_INBOUND_MAX_CONCURRENT_LANES", "4")),
+            ),
             heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")),
             heartbeat_active_start=int(os.getenv("HEARTBEAT_ACTIVE_START", "9")),
             heartbeat_active_end=int(os.getenv("HEARTBEAT_ACTIVE_END", "22")),

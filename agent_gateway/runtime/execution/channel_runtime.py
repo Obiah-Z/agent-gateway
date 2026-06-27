@@ -73,12 +73,15 @@ class ChannelRuntime:
         delivery_runtime: DeliveryRuntime | None = None,
         inbound_interceptors: list[InboundInterceptor] | None = None,
         shutdown_timeout_seconds: float = 5.0,
+        max_concurrent_lanes: int = 4,
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
         self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
         self.delivery_runtime = delivery_runtime  # 出站投递运行时，CLI 场景需要同步 flush。
         self.inbound_interceptors = list(inbound_interceptors or [])  # 入站前置拦截链。
         self.shutdown_timeout_seconds = shutdown_timeout_seconds  # stop/restart 等待线程和队列 drain 的上限。
+        self.max_concurrent_lanes = max(1, int(max_concurrent_lanes))  # 全局入站 lane 并发上限。
+        self._lane_semaphore = asyncio.Semaphore(self.max_concurrent_lanes)
         self._queue: asyncio.Queue[PendingInbound | None] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None  # 主 asyncio 事件循环，供采集线程回投消息。
         self._stop_event = threading.Event()  # 跨线程停止信号。
@@ -283,7 +286,8 @@ class ChannelRuntime:
             if pending is None:
                 queue.task_done()
                 break
-            await self._process_pending(pending)
+            async with self._lane_semaphore:
+                await self._process_pending(pending)
             queue.task_done()
         self._lane_queues.pop(lane_key, None)
         self._lane_tasks.pop(lane_key, None)

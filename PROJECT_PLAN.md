@@ -260,9 +260,12 @@ cd ~/Desktop/claw0/gateway
    - 不同 lane 可以并发执行。
    - 当前按 `PendingInbound.preroute_lane_key` 建立入站 lane worker。
    - 已补充测试覆盖：不同 peer 可并发处理，慢 lane 不阻塞其他 lane；同一 peer/lane 保持串行。
-4. Phase 15.4：增加全局并发上限和 per-agent 并发上限。待实现。
+4. Phase 15.4：增加全局并发上限和 per-agent 并发上限。部分完成。
    - 例如 `main=2`、`research=1`、`ops=1`。
    - 防止并发过高打爆模型 API 或工具执行资源。
+   - 已新增 `GATEWAY_INBOUND_MAX_CONCURRENT_LANES`，默认限制同时运行的入站 lane 数为 4。
+   - 已通过 `asyncio.Semaphore` 在 lane worker 执行前施加全局并发上限。
+   - per-agent 精准并发上限需要基于路由后的 Agent/session 信息实现，避免在路由前阶段做不准确限流。
 5. Phase 15.5：增加入站背压策略。待实现。
    - 配置最大队列长度。
    - 超过阈值时对低优先级任务延迟或拒绝。

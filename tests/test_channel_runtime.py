@@ -350,6 +350,51 @@ def test_channel_runtime_keeps_same_preroute_lane_serial() -> None:
     assert dispatcher.started == ["same", "same"]
 
 
+def test_channel_runtime_respects_global_lane_concurrency_limit() -> None:
+    dispatcher = LaneAwareDispatcher()
+    first_release = asyncio.Event()
+    dispatcher.release_by_peer["first"] = first_release
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        max_concurrent_lanes=1,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="first",
+                sender_id="first",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="first",
+            )
+        )
+        await runtime.ingest_external(
+            InboundMessage(
+                text="second",
+                sender_id="second",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="second",
+            )
+        )
+        while dispatcher.started != ["first"]:
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert dispatcher.finished == []
+        first_release.set()
+        while dispatcher.finished != ["first", "second"]:
+            await asyncio.sleep(0)
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert dispatcher.started == ["first", "second"]
+
+
 def test_channel_runtime_flushes_cli_delivery_before_next_prompt() -> None:
     runtime = ChannelRuntime(
         dispatcher=FakeDispatcher(),
