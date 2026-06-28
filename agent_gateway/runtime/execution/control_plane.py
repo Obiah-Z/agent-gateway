@@ -863,6 +863,66 @@ class GatewayControlPlane:
             "warning": "该计划不会自动释放任何 Lane；执行 release 前应确认对应 worker 已停止或 Redis TTL 已过期。",
         }
 
+    def execute_session_lane_recovery(
+        self,
+        *,
+        limit: int = 50,
+        execute: bool = False,
+    ) -> dict[str, Any]:
+        """受控执行 stale session lane 批量恢复。
+
+        默认仍是 dry-run。只有显式传入 `execute=True` 时，才会逐条调用
+        `release_session_lane()`，并复用其 stale、owner_token 和 writer 配置校验。
+        """
+
+        plan = self.plan_session_lane_recovery(limit=limit)
+        actions = list(plan.get("actions", []) or [])
+        if not execute:
+            return {
+                "configured": bool(plan.get("configured")),
+                "dry_run": True,
+                "executed": False,
+                "released_count": 0,
+                "failed_count": 0,
+                "results": [],
+                "plan": plan,
+                "message": "未传入 execute=true，仅返回批量恢复预检计划。",
+            }
+        results: list[dict[str, Any]] = []
+        released_count = 0
+        failed_count = 0
+        for action in actions:
+            params = dict(action.get("params") or {})
+            result = self.release_session_lane(
+                session_key=str(params.get("session_key", "")),
+                owner_token=str(params.get("owner_token", "")),
+                force=bool(params.get("force", False)),
+                reason=str(params.get("reason", "stale lane recovery")),
+            )
+            row = {
+                "session_key": params.get("session_key", ""),
+                "worker_id": action.get("worker_id", ""),
+                "task_id": action.get("task_id", ""),
+                "owner_token": params.get("owner_token", ""),
+                "released": bool(result.get("released")),
+                "reason": result.get("reason", ""),
+                "result": result,
+            }
+            if row["released"]:
+                released_count += 1
+            else:
+                failed_count += 1
+            results.append(row)
+        return {
+            "configured": bool(plan.get("configured")),
+            "dry_run": False,
+            "executed": True,
+            "released_count": released_count,
+            "failed_count": failed_count,
+            "results": results,
+            "plan": plan,
+        }
+
     def release_session_lane(
         self,
         *,
@@ -1321,6 +1381,7 @@ class GatewayControlPlane:
         recovery = self.session_lane_recovery_suggestions(limit=50)
         recovery_rows = list(recovery.get("items", []) or [])
         recovery_plan = self.plan_session_lane_recovery(limit=50)
+        recovery_execute_preview = self.execute_session_lane_recovery(limit=50, execute=False)
         return {
             "configured": bool(lanes.get("configured")),
             "count": len(rows),
@@ -1337,6 +1398,12 @@ class GatewayControlPlane:
                 "action_count": recovery_plan.get("action_count", 0),
                 "skipped_count": recovery_plan.get("skipped_count", 0),
                 "actions": list(recovery_plan.get("actions", []) or [])[:6],
+            },
+            "recovery_execution": {
+                "dry_run": bool(recovery_execute_preview.get("dry_run")),
+                "executed": bool(recovery_execute_preview.get("executed")),
+                "released_count": recovery_execute_preview.get("released_count", 0),
+                "failed_count": recovery_execute_preview.get("failed_count", 0),
             },
         }
 

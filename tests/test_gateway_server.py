@@ -982,6 +982,48 @@ def test_gateway_server_exposes_session_lane_recovery_plan(tmp_path) -> None:
     assert result["actions"][0]["method"] == "tasks.lanes.release"
 
 
+def test_gateway_server_executes_session_lane_recovery_only_when_confirmed(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    agents = AgentManager()
+    bindings = BindingTable()
+    channels = ChannelManager()
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([]),
+        channels=channels,
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    dry_run = asyncio.run(server._m_tasks_lanes_recovery_execute({"limit": 10}))
+    executed = asyncio.run(
+        server._m_tasks_lanes_recovery_execute({"limit": 10, "execute": True})
+    )
+
+    assert dry_run["executed"] is False
+    assert dry_run["released_count"] == 0
+    assert executed["executed"] is True
+    assert executed["released_count"] == 1
+    assert repository.releases[0]["owner_token"] == "worker-a:task-a"
+
+
 def test_gateway_server_releases_session_lane(tmp_path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",

@@ -919,6 +919,7 @@ function renderRuntime(runtime) {
     : [];
   const laneRecoveryPlan = persistedLanes.recovery_plan || {};
   const laneRecoveryActions = Array.isArray(laneRecoveryPlan.actions) ? laneRecoveryPlan.actions : [];
+  const laneRecoveryExecution = persistedLanes.recovery_execution || {};
   const taskBroker = tasks.broker || tasks.queue?.broker || {};
   const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
   const visibleBrokerQueues = brokerQueues.slice(0, 6);
@@ -981,6 +982,7 @@ function renderRuntime(runtime) {
         `Lane历史 ${persistedLanes.history_count ?? 0}`,
         `恢复建议 ${persistedLanes.recovery_suggestion_count ?? 0}`,
         `预检动作 ${laneRecoveryPlan.action_count ?? 0}`,
+        `批量释放 ${laneRecoveryExecution.executed ? "已执行" : "未执行"}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
@@ -1054,6 +1056,12 @@ function renderRuntime(runtime) {
           laneRecoveryActions
             .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}:${row.method || "--"}`)
             .join(" | ") || "无",
+        ],
+        [
+          "批量释放",
+          laneRecoveryExecution.executed
+            ? `已释放 ${laneRecoveryExecution.released_count ?? 0} / 失败 ${laneRecoveryExecution.failed_count ?? 0}`
+            : "未执行，需通过控制面显式传入 execute=true",
         ],
       ],
     },

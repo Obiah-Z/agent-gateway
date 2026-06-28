@@ -1094,6 +1094,7 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     )
     assert status["tasks"]["persisted_lanes"]["recovery_plan"]["dry_run"] is True
     assert status["tasks"]["persisted_lanes"]["recovery_plan"]["action_count"] == 1
+    assert status["tasks"]["persisted_lanes"]["recovery_execution"]["executed"] is False
     assert status["cron"]["count"] == 1
     assert health["ok"] is False
     assert health["status"] == "degraded"
@@ -1287,6 +1288,56 @@ def test_control_plane_recovery_plan_skips_missing_owner_token(tmp_path: Path) -
     assert result["action_count"] == 0
     assert result["skipped_count"] == 1
     assert result["skipped"][0]["reason"] == "missing owner_token"
+
+
+def test_control_plane_recovery_execute_defaults_to_dry_run(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+
+    result = control.execute_session_lane_recovery(limit=10)
+
+    assert result["dry_run"] is True
+    assert result["executed"] is False
+    assert result["released_count"] == 0
+    assert result["plan"]["action_count"] == 1
+    assert repository.releases == []
+
+
+def test_control_plane_recovery_execute_releases_stale_lanes(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+
+    result = control.execute_session_lane_recovery(limit=10, execute=True)
+
+    assert result["dry_run"] is False
+    assert result["executed"] is True
+    assert result["released_count"] == 1
+    assert result["failed_count"] == 0
+    assert result["results"][0]["released"] is True
+    assert repository.releases[0]["owner_token"] == "worker-a:task-a"
+    assert repository.releases[0]["reason"] == "stale lane recovery"
 
 
 def test_control_plane_releases_only_stale_session_lane_by_default(tmp_path: Path) -> None:

@@ -915,13 +915,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.23 Lane history 查询与 Dashboard 展示 | 已完成 | 控制面新增 `list_session_lane_history()`，WebSocket JSON-RPC 新增 `tasks.lanes.history`，`runtime.status.tasks.persisted_lanes` 增加 `history_count/history_items`，Dashboard 后台任务卡片展示最近 Lane owner 历史。 | 运维面板和控制面可以直接查看最近 acquired/renewed/released 历史，不需要手动查询 PostgreSQL 或翻事件文件。 |
 | 20.9.24 Stale lane 恢复建议 | 已完成 | 控制面新增 `session_lane_recovery_suggestions()`，WebSocket JSON-RPC 新增 `tasks.lanes.recovery`，`runtime.status.tasks.persisted_lanes` 和 Dashboard 展示最近 stale lane 的恢复建议、owner token 和可传给 `tasks.lanes.release` 的释放参数。 | stale lane 不再只显示告警，还能直接给出下一步人工处理建议；默认不自动释放，避免误影响活跃 worker。 |
 | 20.9.25 Stale lane 批量恢复预检 | 已完成 | 控制面新增 `plan_session_lane_recovery()`，WebSocket JSON-RPC 新增 `tasks.lanes.recovery.plan`，Dashboard 展示 dry-run 候选数、可执行动作数、跳过数和最近 release 预检动作。 | 可以在批量处理 stale lane 前得到不写库、不释放 Redis 的安全预检计划；缺少 session_key 或 owner_token 的项会被跳过并说明原因。 |
+| 20.9.26 Stale lane 受控批量释放 | 已完成 | 控制面新增 `execute_session_lane_recovery()`，WebSocket JSON-RPC 新增 `tasks.lanes.recovery.execute`，默认仍 dry-run；只有显式 `execute=true` 才按预检动作逐条调用 `tasks.lanes.release`，Dashboard 展示批量释放执行预览。 | 运维可以在确认 worker 已退出后批量释放 stale PostgreSQL lane owner；每条释放仍复用 stale、owner_token 和 writer 配置校验，避免绕过安全边界。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议和批量恢复 dry-run 预检；后续可继续做更完整的自动恢复策略。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检和显式确认后的受控批量释放；后续可继续做更完整的自动恢复策略。
 
 阶段完成标准：
 
