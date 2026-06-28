@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import shutil
 import subprocess
@@ -8,6 +9,24 @@ import time
 from typing import Any, Protocol
 
 from agent_gateway.runtime.state.repository import StateReadRepository
+
+
+POSTGRES_TIME_COLUMNS = {
+    "created_at",
+    "collected_at",
+    "enqueued_at",
+    "expires_at",
+    "finished_at",
+    "last_good_at",
+    "last_message_at",
+    "next_retry_at",
+    "received_at",
+    "run_at",
+    "seen_at",
+    "started_at",
+    "timestamp",
+    "updated_at",
+}
 
 
 def _sql_literal(value: Any) -> str:
@@ -39,6 +58,36 @@ def _json_sql_literal(value: Any) -> str:
     """把 Python 值转换为可作为 JSON 参数使用的 SQL 字面量。"""
 
     return "'" + json.dumps(value, ensure_ascii=False).replace("'", "''") + "'::json"
+
+
+def _format_epoch_seconds(value: Any) -> str | None:
+    """把 PostgreSQL 中的 epoch 秒格式化成中文展示时间。"""
+
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return None
+    if timestamp <= 0:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone().strftime(
+        "%Y年%m月%d日 %H时%M分"
+    )
+
+
+def _with_formatted_time_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """给数据库读出的时间字段补充 `*_time` 展示字段。"""
+
+    enriched = dict(row)
+    for key, value in list(row.items()):
+        if isinstance(value, dict):
+            enriched[key] = _with_formatted_time_fields(value)
+            continue
+        if key not in POSTGRES_TIME_COLUMNS:
+            continue
+        formatted = _format_epoch_seconds(value)
+        if formatted:
+            enriched[f"{key}_time"] = formatted
+    return enriched
 
 
 @dataclass(slots=True)
@@ -428,7 +477,7 @@ class PostgresReadRepository(StateReadRepository):
             except json.JSONDecodeError:
                 continue
             if isinstance(payload, dict):
-                rows.append(payload)
+                rows.append(_with_formatted_time_fields(payload))
         return rows
 
     def _build_list_query(
@@ -677,6 +726,7 @@ class PostgresReadRepository(StateReadRepository):
             result.append(
                 {
                     "ts": str(payload.get("created_at", "")),
+                    "ts_time": str(payload.get("created_at_time", "")),
                     "category": str(payload.get("category", "")),
                     "content": str(payload.get("content", "")),
                     "file": str(payload.get("source_file", "")),

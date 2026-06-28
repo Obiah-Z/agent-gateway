@@ -427,6 +427,33 @@ def test_postgres_read_repository_error_and_memory_shapes_align() -> None:
     assert repo._list_tasks(limit=5, filters={"statuses": ["pending"]}) == []
 
 
+def test_postgres_memory_entries_expose_formatted_time(monkeypatch) -> None:
+    repo = PostgresReadRepository(
+        url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+        enabled=False,
+    )
+
+    monkeypatch.setattr(
+        repo,
+        "query",
+        lambda table, *, sql, params=None: [
+            {
+                "row": {
+                    "created_at": 1782615325.1191509,
+                    "created_at_time": "2026年06月28日 10时55分",
+                    "category": "note",
+                    "content": "hello",
+                    "source_file": "daily.jsonl",
+                }
+            }
+        ],
+    )
+
+    rows = repo._list_memory_entries(limit=5, filters={})
+
+    assert rows[0]["ts_time"] == "2026年06月28日 10时55分"
+
+
 def test_postgres_write_repository_is_available_as_scaffold() -> None:
     repo = PostgresWriteRepository(
         url="postgresql://postgres:postgres@127.0.0.1:5432/postgres",

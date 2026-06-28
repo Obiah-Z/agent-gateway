@@ -245,7 +245,38 @@ const DETAIL_LABELS = {
   component: "模块",
   metadata: "技术元数据",
   error: "错误详情",
+  timestamp: "发生时间",
+  created_at: "创建时间",
+  updated_at: "更新时间",
+  started_at: "开始时间",
+  finished_at: "完成时间",
+  enqueued_at: "入队时间",
+  next_retry_at: "下次重试时间",
+  run_at: "运行时间",
+  received_at: "接收时间",
+  expires_at: "过期时间",
 };
+
+const TIME_FIELD_NAMES = new Set([
+  "timestamp",
+  "created_at",
+  "updated_at",
+  "started_at",
+  "finished_at",
+  "enqueued_at",
+  "next_retry_at",
+  "last_message_at",
+  "last_triggered_at",
+  "last_recovered_at",
+  "last_evaluated_at",
+  "last_notified_at",
+  "last_good_at",
+  "run_at",
+  "received_at",
+  "seen_at",
+  "collected_at",
+  "expires_at",
+]);
 
 function defaultWsUrl() {
   const saved = window.localStorage.getItem("gateway.dashboard.wsUrl");
@@ -336,6 +367,20 @@ function formatTimestamp(value) {
     return "--";
   }
   return formatDateParts(date);
+}
+
+function formatDisplayValue(label, value) {
+  if (value === undefined || value === null || value === "") {
+    return "--";
+  }
+  const key = String(label || "");
+  if (TIME_FIELD_NAMES.has(key)) {
+    return formatTimestamp(value);
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
 }
 
 function parseDateValue(value) {
@@ -949,7 +994,7 @@ function renderRuntime(runtime) {
       const row = document.createElement("div");
       row.className = "kv-row";
       appendText(row, "span", label);
-      appendText(row, "code", value || "--");
+      appendText(row, "code", formatDisplayValue(label, value));
       details.appendChild(row);
     }
     card.appendChild(details);
@@ -1213,7 +1258,7 @@ function renderAlerts(activePayload, historyPayload) {
         const row = document.createElement("div");
         row.className = "kv-row";
         appendText(row, "span", label);
-        appendText(row, "code", value || "--");
+        appendText(row, "code", formatDisplayValue(label, value));
         details.appendChild(row);
       }
       card.appendChild(details);
@@ -1296,7 +1341,7 @@ function buildTrendCard({ title, summary, points, metricLabel, detailRows, tone 
     const row = document.createElement("div");
     row.className = "kv-row";
     appendText(row, "span", label);
-    appendText(row, "code", value || "--");
+    appendText(row, "code", formatDisplayValue(label, value));
     rows.appendChild(row);
   }
   card.appendChild(rows);
@@ -1859,7 +1904,7 @@ function renderEventList({
       const row = document.createElement("div");
       row.className = "kv-row";
       appendText(row, "span", DETAIL_LABELS[label] || label);
-      appendText(row, "code", value || "--");
+      appendText(row, "code", formatDisplayValue(label, value));
       details.appendChild(row);
     }
     item.appendChild(details);

@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+import time
 
 from agent_gateway.runtime.observability.metrics import MetricsStore
 
@@ -59,3 +60,25 @@ def test_metrics_store_sanitizes_nested_values(tmp_path: Path) -> None:
 
     assert isinstance(row["metadata"]["custom"], str)
     assert isinstance(row["metadata"]["nested"]["value"], str)
+
+
+def test_metrics_store_falls_back_when_read_backend_returns_flat_metric(tmp_path: Path) -> None:
+    class FakeReadBackend:
+        def list(self, table: str, limit: int = 50, cursor: str = "", filters=None):
+            return [
+                {
+                    "id": "metric-1",
+                    "timestamp": 2.0,
+                    "kind": "snapshot",
+                    "name": "runtime",
+                    "value": 0,
+                    "metadata": {"collector": "metrics-runtime"},
+                }
+            ]
+
+    store = MetricsStore(tmp_path / "metrics")
+    fallback = store.record(profiles={"available": 1, "count": 1}, timestamp=time.time())
+    store.read_backend = FakeReadBackend()
+
+    assert store.latest() == fallback
+    assert store.tail(limit=5) == [fallback]

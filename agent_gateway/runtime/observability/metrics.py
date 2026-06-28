@@ -104,7 +104,9 @@ class MetricsStore:
         if self.read_backend is not None:
             try:
                 rows = self.read_backend.list("metrics", limit=1)
-                return rows[-1] if rows else None
+                latest = rows[-1] if rows else None
+                if self._is_snapshot_row(latest):
+                    return latest
             except Exception:
                 pass
         rows = self.tail(limit=1)
@@ -117,7 +119,7 @@ class MetricsStore:
         if self.read_backend is not None:
             try:
                 rows = self.read_backend.list("metrics", limit=safe_limit)
-                if rows:
+                if rows and all(self._is_snapshot_row(row) for row in rows):
                     return rows[:safe_limit]
             except Exception:
                 pass
@@ -219,6 +221,20 @@ class MetricsStore:
         """构造指定日期的指标文件路径。"""
 
         return self.root_dir / f"metrics-{metric_date.isoformat()}.jsonl"
+
+    @staticmethod
+    def _is_snapshot_row(row: dict[str, Any] | None) -> bool:
+        """判断读取结果是否为完整指标快照。
+
+        PostgreSQL 的 `metrics` 表当前存储的是可聚合的扁平指标行，不包含
+        `delivery`、`profiles` 等告警规则需要的完整快照字段。遇到这类行时应回退
+        JSONL 快照，避免把缺失字段误判为 0。
+        """
+
+        if not isinstance(row, dict):
+            return False
+        snapshot_sections = ("runtime", "delivery", "lanes", "cron", "events", "profiles")
+        return any(isinstance(row.get(section), dict) for section in snapshot_sections)
 
     @staticmethod
     def _sanitize_mapping(payload: dict[str, Any]) -> dict[str, Any]:

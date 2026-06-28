@@ -1,5 +1,6 @@
 from agent_gateway.runtime.state.postgres import (
     POSTGRES_STATE_TABLES,
+    PostgresReadRepository,
     PostgresWriteRepository,
     build_postgres_schema_sql,
     check_postgres_schema,
@@ -96,6 +97,24 @@ def test_initialize_postgres_schema_runs_generated_sql(monkeypatch) -> None:
 
     assert calls == [("postgresql://local/db", sql, 1.5)]
     assert 'CREATE TABLE IF NOT EXISTS "agents"' in sql
+
+
+def test_postgres_read_repository_formats_time_fields(monkeypatch) -> None:
+    class Completed:
+        stdout = (
+            '{"row": {"event_id": "e1", "timestamp": 1782615325.1191509, '
+            '"metadata": {"updated_at": 1782615324.1962163}}}'
+        )
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/psql")
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Completed())
+    repo = PostgresReadRepository(url="postgresql://local/db", enabled=True)
+
+    rows = repo.query("runtime_events", sql="SELECT 1")
+
+    assert rows[0]["row"]["timestamp_time"].startswith("2026年06月28日 ")
+    assert rows[0]["row"]["timestamp_time"].endswith("分")
+    assert rows[0]["row"]["metadata"]["updated_at_time"].startswith("2026年06月28日 ")
 
 
 def test_check_postgres_schema_reports_drift(monkeypatch) -> None:
