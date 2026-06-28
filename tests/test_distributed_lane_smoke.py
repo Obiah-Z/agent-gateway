@@ -2,6 +2,7 @@ from scripts.smoke_distributed_lane import (
     assert_broker_unavailable_result,
     assert_postgres_lane_result,
     assert_primary_unavailable_result,
+    assert_readiness_result,
     assert_smoke_result,
     assert_ttl_takeover_result,
     assert_worker_crash_result,
@@ -54,6 +55,62 @@ def test_distributed_lane_smoke_defaults_to_isolated_topology() -> None:
     assert args.rabbitmq_queue_prefix == "agent_gateway.inbound.smoke.partition"
     assert args.lane_namespace == "gateway:smoke:lane"
     assert args.rabbitmq_prefetch == 1
+
+
+def test_readiness_smoke_asserts_successful_result() -> None:
+    result = {
+        "status": "ok",
+        "redis_ok": True,
+        "postgres_ok": True,
+        "rabbitmq_ok": True,
+        "readiness": {
+            "ready": True,
+            "status": "ready",
+            "failed": 0,
+            "checks": [
+                {"name": "inbound_task_queue", "ok": True},
+                {"name": "redis.lane_ownership", "ok": True},
+            ],
+        },
+    }
+
+    assert assert_readiness_result(result) == []
+
+
+def test_readiness_smoke_reports_failed_invariants() -> None:
+    result = {
+        "status": "failed",
+        "redis_ok": False,
+        "postgres_ok": False,
+        "rabbitmq_ok": False,
+        "redis_health": {"enabled": True, "ok": False},
+        "postgres_health": {"enabled": True, "ok": False},
+        "rabbitmq_stats": {"enabled": True, "error": "connection refused"},
+        "readiness": {
+            "ready": False,
+            "status": "not_ready",
+            "failed": 1,
+            "checks": [
+                {"name": "inbound_broker.rabbitmq", "ok": False},
+            ],
+        },
+    }
+
+    failures = assert_readiness_result(result)
+
+    assert any("unexpected status" in item for item in failures)
+    assert any("readiness is not ready" in item for item in failures)
+    assert any("readiness failed checks" in item for item in failures)
+    assert any("failed readiness checks" in item for item in failures)
+    assert any("redis health failed" in item for item in failures)
+    assert any("postgres health failed" in item for item in failures)
+    assert any("rabbitmq health failed" in item for item in failures)
+
+
+def test_readiness_smoke_parses_scenario() -> None:
+    args = parse_args(["--scenario", "readiness"])
+
+    assert args.scenario == "readiness"
 
 
 def test_ttl_takeover_smoke_asserts_successful_result() -> None:

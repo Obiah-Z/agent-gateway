@@ -22,6 +22,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agent_gateway.runtime.infra.redis_client import RedisClient
+from agent_gateway.runtime.infra.postgres_client import PostgresClient
+from agent_gateway.runtime.infra.rabbitmq import RabbitMQInboundTaskBroker
+from agent_gateway.config import GatewaySettings
+from agent_gateway.gateways.messaging.base import ChannelAccount
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.domain.agents import AgentManager
+from agent_gateway.runtime.domain.models import AgentConfig, Binding
+from agent_gateway.runtime.domain.router import BindingTable
+from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
+from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
+from agent_gateway.runtime.observability.events import RuntimeEventStore
+from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.runtime.state.postgres import (
     PostgresReadRepository,
     PostgresWriteRepository,
@@ -53,6 +65,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "broker-unavailable",
             "primary-unavailable",
             "postgres-lane",
+            "readiness",
         ),
         default="inbound",
         help="smoke scenario to run",
@@ -149,6 +162,63 @@ class SinglePayloadBroker:
             "dead_letter_messages": 0,
             "acked": self.acked,
             "nacked": self.nacked,
+        }
+
+
+class SmokeAutonomy:
+    """Minimal autonomy facade used by readiness smoke."""
+
+    class _Heartbeat:
+        def status(self) -> dict:
+            return {"enabled": False, "reason": "smoke readiness"}
+
+    class _Cron:
+        def list_jobs(self) -> list[dict]:
+            return []
+
+    def __init__(self) -> None:
+        self.heartbeat = self._Heartbeat()
+        self.cron = self._Cron()
+
+
+class SmokeChannelRuntime:
+    """Minimal inbound runtime stats used by readiness smoke."""
+
+    def stats(self) -> dict:
+        return {
+            "running": True,
+            "global_queue_depth": 0,
+            "global_queue_limit": 200,
+            "lane_queue_limit": 20,
+            "max_concurrent_lanes": 4,
+            "active_lanes": 0,
+            "running_tasks": 0,
+            "lane_count": 0,
+            "queued_messages": 0,
+            "oldest_wait_seconds": 0.0,
+            "lanes": [],
+        }
+
+
+class SmokeTaskWorker:
+    """Minimal task worker stats used by readiness smoke."""
+
+    def __init__(self, *, broker: dict) -> None:
+        self.broker = broker
+
+    def stats(self) -> dict:
+        return {
+            "running": True,
+            "worker_id": "smoke-readiness-worker",
+            "concurrency": 2,
+            "registered_task_types": ["agent_inbound"],
+            "queue": {"pending": 0, "running": 0, "retrying": 0, "failed": 0},
+            "broker": self.broker,
+            "session_locks": {
+                "blocked_session_count": 0,
+                "skip_count": 0,
+                "last_blocked_sessions": [],
+            },
         }
 
 
@@ -365,6 +435,34 @@ def assert_smoke_result(result: dict) -> list[str]:
     return failures
 
 
+def assert_readiness_result(result: dict) -> list[str]:
+    """Validate distributed lane readiness smoke result."""
+
+    failures: list[str] = []
+    if result.get("status") != "ok":
+        failures.append(f"unexpected status: {result.get('status')}")
+    readiness = dict(result.get("readiness", {}) or {})
+    if readiness.get("ready") is not True:
+        failures.append(f"readiness is not ready: {readiness.get('status')}")
+    if int(readiness.get("failed", 0) or 0) != 0:
+        failures.append(f"readiness failed checks: {readiness.get('failed')}")
+    failed_checks = [
+        str(row.get("name", ""))
+        for row in list(readiness.get("checks", []) or [])
+        if not bool(row.get("ok"))
+    ]
+    if failed_checks:
+        failures.append(f"failed readiness checks: {', '.join(failed_checks)}")
+    if result.get("redis_ok") is not True:
+        failures.append(f"redis health failed: {result.get('redis_health')}")
+    if result.get("postgres_ok") is not True:
+        failures.append(f"postgres health failed: {result.get('postgres_health')}")
+    rabbitmq_stats = dict(result.get("rabbitmq_stats", {}) or {})
+    if result.get("rabbitmq_ok") is not True:
+        failures.append(f"rabbitmq health failed: {rabbitmq_stats}")
+    return failures
+
+
 async def run_smoke(args: argparse.Namespace) -> tuple[dict, Path, Path]:
     samples, wall_seconds, context = await run_inbound_rabbitmq(
         requests=max(1, args.requests),
@@ -404,6 +502,141 @@ async def run_smoke(args: argparse.Namespace) -> tuple[dict, Path, Path]:
     basename = args.basename or f"smoke-distributed-lane-{int(time.time())}"
     json_path, md_path = write_reports(result, args.report_dir, basename)
     return result, json_path, md_path
+
+
+async def run_readiness_smoke(args: argparse.Namespace) -> dict:
+    """Run a full distributed lane readiness gate against local middleware."""
+
+    settings = GatewaySettings(
+        redis_enabled=True,
+        redis_url=args.redis_url,
+        redis_socket_timeout_seconds=max(0.05, args.redis_socket_timeout_seconds),
+        postgres_enabled=True,
+        postgres_url=args.postgres_url,
+        postgres_connect_timeout_seconds=max(0.2, args.postgres_connect_timeout_seconds),
+        inbound_task_queue_enabled=True,
+        inbound_broker="rabbitmq",
+        inbound_rabbitmq_partitions=max(1, args.rabbitmq_partitions),
+        inbound_rabbitmq_prefetch=max(1, args.rabbitmq_prefetch),
+        delivery_broker="rabbitmq",
+        config_dir=args.work_dir / "readiness-config",
+        data_dir=args.work_dir / "readiness-data",
+        workspace_root=args.work_dir / "readiness-workspace",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+    )
+    settings.ensure_directories()
+    initialize_postgres_schema(
+        url=settings.postgres_url,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
+    redis = RedisClient(
+        enabled=True,
+        url=settings.redis_url,
+        socket_timeout_seconds=settings.redis_socket_timeout_seconds,
+    )
+    postgres = PostgresClient(
+        enabled=True,
+        url=settings.postgres_url,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
+    redis_health = redis.health().to_dict()
+    postgres_health = postgres.health().to_dict()
+    inbound_broker = RabbitMQInboundTaskBroker(
+        enabled=True,
+        url=args.rabbitmq_url,
+        exchange=args.rabbitmq_exchange,
+        queue_prefix=args.rabbitmq_queue_prefix,
+        dead_letter_exchange=args.rabbitmq_dead_letter_exchange,
+        dead_letter_queue=args.rabbitmq_dead_letter_queue,
+        partitions=max(1, args.rabbitmq_partitions),
+        prefetch=max(1, args.rabbitmq_prefetch),
+        connect_timeout_seconds=max(0.2, args.rabbitmq_connect_timeout_seconds),
+    )
+    rabbitmq_stats = inbound_broker.stats()
+    rabbitmq_ok = bool(rabbitmq_stats.get("enabled")) and not rabbitmq_stats.get("error")
+    reader = PostgresReadRepository(
+        url=settings.postgres_url,
+        enabled=True,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
+    writer = PostgresWriteRepository(
+        url=settings.postgres_url,
+        enabled=True,
+        connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
+    )
+    session_key = f"smoke-readiness:{int(time.time() * 1000)}"
+    now = time.time()
+    writer.upsert(
+        "session_lanes",
+        {
+            "session_key": session_key,
+            "lane_key": f"{args.lane_namespace}:{session_key}",
+            "worker_id": "smoke-readiness-worker",
+            "task_id": "smoke-readiness-task",
+            "owner_token": "smoke-readiness-worker:smoke-readiness-task",
+            "state": "owned",
+            "ttl_seconds": max(1, args.lane_ttl_seconds),
+            "acquired_at": now,
+            "renewed_at": now,
+            "updated_at": now,
+            "metadata": {"smoke": "readiness"},
+        },
+    )
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="SmokeMain", model="smoke-model"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="smoke")]),
+        channels=channels,
+        autonomy=SmokeAutonomy(),
+        channel_runtime=SmokeChannelRuntime(),
+        delivery_queue=DeliveryQueue(settings.delivery_queue_dir),
+        redis_client=redis,
+        postgres_client=postgres,
+        state_repository=reader,
+        state_write_repository=writer,
+        task_worker=SmokeTaskWorker(
+            broker={
+                **rabbitmq_stats,
+                "messages": int(rabbitmq_stats.get("messages", 0) or 0),
+                "dead_letter_messages": int(rabbitmq_stats.get("dead_letter_messages", 0) or 0),
+            }
+        ),
+        task_queue=LocalTaskQueue(LocalTaskStore(settings.tasks_dir)),
+        event_store=RuntimeEventStore(settings.events_dir),
+    )
+    try:
+        report = control.lane_doctor(limit=20)
+        result = {
+            "status": "ok" if report.get("readiness", {}).get("ready") else "failed",
+            "readiness": report.get("readiness", {}),
+            "summary": report.get("summary", {}),
+            "redis_ok": bool(redis_health.get("ok")),
+            "postgres_ok": bool(postgres_health.get("ok")),
+            "rabbitmq_ok": rabbitmq_ok,
+            "redis_health": redis_health,
+            "postgres_health": postgres_health,
+            "rabbitmq_stats": rabbitmq_stats,
+            "session_key": session_key,
+        }
+        result["failures"] = assert_readiness_result(result)
+        if result["failures"]:
+            result["status"] = "failed"
+        return result
+    finally:
+        try:
+            writer.delete("session_lanes", session_key)
+        except Exception:
+            pass
+        inbound_broker.close()
 
 
 async def run_ttl_takeover_smoke(args: argparse.Namespace) -> dict:
@@ -807,6 +1040,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
+        if args.scenario == "readiness":
+            readiness_result = asyncio.run(run_readiness_smoke(args))
+            print(json.dumps(readiness_result, ensure_ascii=False))
+            return 0 if not readiness_result.get("failures") else 1
         if args.scenario == "postgres-lane":
             postgres_result = asyncio.run(run_postgres_lane_smoke(args))
             print(json.dumps(postgres_result, ensure_ascii=False))
