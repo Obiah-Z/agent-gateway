@@ -3,6 +3,7 @@ from scripts.smoke_distributed_lane import (
     assert_primary_unavailable_result,
     assert_smoke_result,
     assert_ttl_takeover_result,
+    assert_worker_crash_result,
     parse_args,
 )
 
@@ -189,3 +190,65 @@ def test_primary_unavailable_smoke_parses_scenario() -> None:
     args = parse_args(["--scenario", "primary-unavailable"])
 
     assert args.scenario == "primary-unavailable"
+
+
+def test_worker_crash_smoke_asserts_successful_result() -> None:
+    result = {
+        "status": "ok",
+        "old_owner_acquired": True,
+        "blocked_before_ttl": True,
+        "handled_after_ttl": True,
+        "task_status_after_blocked": "pending",
+        "task_status_after_takeover": "done",
+        "handler_calls": 1,
+        "old_worker_id": "smoke-worker-crashed",
+        "new_worker_id": "smoke-worker-takeover",
+        "before_ttl_owner": {
+            "owned": True,
+            "worker_id": "smoke-worker-crashed",
+        },
+        "during_handler_owner": {
+            "owned": True,
+            "worker_id": "smoke-worker-takeover",
+        },
+        "after_completion_owner": {"owned": False},
+    }
+
+    assert assert_worker_crash_result(result) == []
+
+
+def test_worker_crash_smoke_reports_failed_invariants() -> None:
+    result = {
+        "status": "failed",
+        "old_owner_acquired": False,
+        "blocked_before_ttl": False,
+        "handled_after_ttl": False,
+        "task_status_after_blocked": "running",
+        "task_status_after_takeover": "pending",
+        "handler_calls": 2,
+        "old_worker_id": "smoke-worker-crashed",
+        "new_worker_id": "smoke-worker-takeover",
+        "before_ttl_owner": {"owned": True, "worker_id": "other"},
+        "during_handler_owner": {"owned": True, "worker_id": "other"},
+        "after_completion_owner": {"owned": True},
+    }
+
+    failures = assert_worker_crash_result(result)
+
+    assert any("unexpected status" in item for item in failures)
+    assert any("old worker did not acquire lane" in item for item in failures)
+    assert any("new worker was not blocked" in item for item in failures)
+    assert any("new worker did not handle task" in item for item in failures)
+    assert any("task status changed before TTL" in item for item in failures)
+    assert any("task was not completed" in item for item in failures)
+    assert any("handler call count mismatch" in item for item in failures)
+    assert any("old lane owner metadata mismatch" in item for item in failures)
+    assert any("new lane owner metadata mismatch" in item for item in failures)
+    assert any("lane was not released" in item for item in failures)
+
+
+def test_worker_crash_smoke_parses_scenario() -> None:
+    args = parse_args(["--scenario", "worker-crash", "--lane-ttl-seconds", "1"])
+
+    assert args.scenario == "worker-crash"
+    assert args.lane_ttl_seconds == 1

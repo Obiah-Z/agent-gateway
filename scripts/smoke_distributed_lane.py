@@ -41,7 +41,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run distributed lane smoke checks.")
     parser.add_argument(
         "--scenario",
-        choices=("inbound", "ttl-takeover", "broker-unavailable", "primary-unavailable"),
+        choices=(
+            "inbound",
+            "ttl-takeover",
+            "worker-crash",
+            "broker-unavailable",
+            "primary-unavailable",
+        ),
         default="inbound",
         help="smoke scenario to run",
     )
@@ -241,6 +247,48 @@ def assert_ttl_takeover_result(result: dict) -> list[str]:
     return failures
 
 
+def assert_worker_crash_result(result: dict) -> list[str]:
+    """Validate worker-crash lane takeover smoke result."""
+
+    failures: list[str] = []
+    if result.get("status") != "ok":
+        failures.append(f"unexpected status: {result.get('status')}")
+    if result.get("old_owner_acquired") is not True:
+        failures.append("old worker did not acquire lane")
+    if result.get("blocked_before_ttl") is not True:
+        failures.append("new worker was not blocked before TTL expiry")
+    if result.get("handled_after_ttl") is not True:
+        failures.append("new worker did not handle task after TTL expiry")
+    if result.get("task_status_after_blocked") != "pending":
+        failures.append(
+            "task status changed before TTL expiry: "
+            f"{result.get('task_status_after_blocked')}"
+        )
+    if result.get("task_status_after_takeover") != "done":
+        failures.append(
+            "task was not completed after takeover: "
+            f"{result.get('task_status_after_takeover')}"
+        )
+    if result.get("handler_calls") != 1:
+        failures.append(f"handler call count mismatch: {result.get('handler_calls')}")
+    before = dict(result.get("before_ttl_owner", {}) or {})
+    if before.get("worker_id") != result.get("old_worker_id"):
+        failures.append(
+            "old lane owner metadata mismatch before TTL: "
+            f"worker_id={before.get('worker_id')}"
+        )
+    during = dict(result.get("during_handler_owner", {}) or {})
+    if during.get("worker_id") != result.get("new_worker_id"):
+        failures.append(
+            "new lane owner metadata mismatch during handler: "
+            f"worker_id={during.get('worker_id')}"
+        )
+    after = dict(result.get("after_completion_owner", {}) or {})
+    if after.get("owned") is True:
+        failures.append(f"lane was not released after completion: {after}")
+    return failures
+
+
 def assert_smoke_result(result: dict) -> list[str]:
     """Return a list of smoke failures; empty list means pass."""
 
@@ -382,6 +430,116 @@ async def run_ttl_takeover_smoke(args: argparse.Namespace) -> dict:
     return result
 
 
+async def run_worker_crash_smoke(args: argparse.Namespace) -> dict:
+    """Exercise abandoned lane takeover through TaskWorkerRuntime execution."""
+
+    redis = RedisClient(
+        enabled=True,
+        url=args.redis_url,
+        socket_timeout_seconds=max(0.05, args.redis_socket_timeout_seconds),
+    )
+    coordinator = RedisLaneCoordinator(redis, namespace=args.lane_namespace)
+    task_dir = args.work_dir / f"worker-crash-{int(time.time())}"
+    store = LocalTaskStore(task_dir)
+    queue = LocalTaskQueue(store)
+    session_key = f"{args.takeover_session_key}-worker-crash"
+    old_worker_id = "smoke-worker-crashed"
+    new_worker_id = "smoke-worker-takeover"
+    old_owner = LaneOwnerToken(worker_id=old_worker_id, task_id="smoke-task-crashed")
+    old_ownership = await asyncio.to_thread(
+        coordinator.acquire,
+        session_key,
+        owner=old_owner,
+        ttl_seconds=max(1, args.lane_ttl_seconds),
+    )
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="smoke",
+        session_key=session_key,
+        payload={"text": "worker crash takeover"},
+        metadata={"smoke": "worker-crash"},
+    )
+    before_ttl_owner = coordinator.inspect(session_key).to_dict()
+    handler_calls = 0
+    during_handler_owner: dict[str, object] = {}
+
+    class SmokeLaneHandler:
+        """Minimal production-shaped handler with lane inspection hooks."""
+
+        def __init__(self) -> None:
+            self.worker_id = new_worker_id
+
+        def is_session_locked(self, item) -> bool:
+            del item
+            return coordinator.is_owned(session_key)
+
+        def inspect_session_lane(self, item) -> dict[str, object]:
+            del item
+            return coordinator.inspect(session_key).to_dict()
+
+        async def __call__(self, item) -> str:
+            nonlocal handler_calls, during_handler_owner
+            owner = LaneOwnerToken(worker_id=self.worker_id, task_id=item.id)
+            ownership = coordinator.acquire(
+                item.session_key,
+                owner=owner,
+                ttl_seconds=max(1, args.lane_ttl_seconds),
+            )
+            if ownership is None:
+                raise RuntimeError("lane still owned during takeover handler")
+            try:
+                handler_calls += 1
+                during_handler_owner = coordinator.inspect(item.session_key).to_dict()
+                await asyncio.sleep(max(0.0, args.agent_delay_ms) / 1000.0)
+                return f"handled:{item.id}"
+            finally:
+                coordinator.release(ownership)
+
+    worker = TaskWorkerRuntime(queue, worker_id=new_worker_id)
+    worker.register_handler("agent_inbound", SmokeLaneHandler())
+    blocked_before_ttl = not await worker.run_once()
+    after_blocked = store.get(task.id)
+    wait_seconds = (
+        max(0.05, float(args.takeover_wait_seconds))
+        if args.takeover_wait_seconds
+        else max(1, args.lane_ttl_seconds) + 0.25
+    )
+    await asyncio.sleep(wait_seconds)
+    handled_after_ttl = await worker.run_once()
+    after_takeover = store.get(task.id)
+    after_completion_owner = coordinator.inspect(session_key).to_dict()
+    if old_ownership is not None:
+        try:
+            coordinator.release(old_ownership)
+        except Exception:
+            pass
+    result = {
+        "status": "ok",
+        "scenario": "worker-crash",
+        "task_id": task.id,
+        "session_key": session_key,
+        "lane_namespace": args.lane_namespace,
+        "lane_ttl_seconds": max(1, args.lane_ttl_seconds),
+        "wait_seconds": wait_seconds,
+        "old_worker_id": old_worker_id,
+        "new_worker_id": new_worker_id,
+        "old_owner_acquired": old_ownership is not None,
+        "blocked_before_ttl": blocked_before_ttl,
+        "handled_after_ttl": handled_after_ttl,
+        "task_status_after_blocked": getattr(after_blocked, "status", ""),
+        "task_status_after_takeover": getattr(after_takeover, "status", ""),
+        "handler_calls": handler_calls,
+        "before_ttl_owner": before_ttl_owner,
+        "during_handler_owner": during_handler_owner,
+        "after_completion_owner": after_completion_owner,
+        "queue_stats": queue.stats(),
+        "redis_health": redis.health().to_dict(),
+    }
+    result["failures"] = assert_worker_crash_result(result)
+    result["status"] = "ok" if not result["failures"] else "failed"
+    return result
+
+
 async def run_broker_unavailable_smoke(args: argparse.Namespace) -> dict:
     broker = FailingInboundBroker()
     task_dir = args.work_dir / f"broker-unavailable-{int(time.time())}"
@@ -480,7 +638,7 @@ async def run_primary_unavailable_smoke(args: argparse.Namespace) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.scenario in {"inbound", "ttl-takeover"}:
+    if args.scenario in {"inbound", "ttl-takeover", "worker-crash"}:
         redis = RedisClient(
             enabled=True,
             url=args.redis_url,
@@ -505,6 +663,10 @@ def main(argv: list[str] | None = None) -> int:
             broker_result = asyncio.run(run_broker_unavailable_smoke(args))
             print(json.dumps(broker_result, ensure_ascii=False))
             return 0 if not broker_result.get("failures") else 1
+        if args.scenario == "worker-crash":
+            crash_result = asyncio.run(run_worker_crash_smoke(args))
+            print(json.dumps(crash_result, ensure_ascii=False))
+            return 0 if not crash_result.get("failures") else 1
         if args.scenario == "ttl-takeover":
             takeover_result = asyncio.run(run_ttl_takeover_smoke(args))
             print(json.dumps(takeover_result, ensure_ascii=False))
