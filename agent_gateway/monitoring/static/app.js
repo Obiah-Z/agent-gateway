@@ -917,6 +917,8 @@ function renderRuntime(runtime) {
   const laneRecoveryItems = Array.isArray(persistedLanes.recovery_suggestions)
     ? persistedLanes.recovery_suggestions
     : [];
+  const laneRecoveryPlan = persistedLanes.recovery_plan || {};
+  const laneRecoveryActions = Array.isArray(laneRecoveryPlan.actions) ? laneRecoveryPlan.actions : [];
   const taskBroker = tasks.broker || tasks.queue?.broker || {};
   const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
   const visibleBrokerQueues = brokerQueues.slice(0, 6);
@@ -978,6 +980,7 @@ function renderRuntime(runtime) {
         `过期Lane ${persistedLanes.stale_count ?? 0}`,
         `Lane历史 ${persistedLanes.history_count ?? 0}`,
         `恢复建议 ${persistedLanes.recovery_suggestion_count ?? 0}`,
+        `预检动作 ${laneRecoveryPlan.action_count ?? 0}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
@@ -1038,6 +1041,18 @@ function renderRuntime(runtime) {
           "Lane 恢复建议",
           laneRecoveryItems
             .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}:${row.action || "--"}`)
+            .join(" | ") || "无",
+        ],
+        [
+          "恢复预检",
+          laneRecoveryPlan.dry_run
+            ? `候选 ${laneRecoveryPlan.candidate_count ?? 0} / 可执行 ${laneRecoveryPlan.action_count ?? 0} / 跳过 ${laneRecoveryPlan.skipped_count ?? 0}`
+            : "未生成",
+        ],
+        [
+          "预检动作",
+          laneRecoveryActions
+            .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}:${row.method || "--"}`)
             .join(" | ") || "无",
         ],
       ],

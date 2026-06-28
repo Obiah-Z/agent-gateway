@@ -801,6 +801,68 @@ class GatewayControlPlane:
             "limit": safe_limit,
         }
 
+    def plan_session_lane_recovery(self, *, limit: int = 50) -> dict[str, Any]:
+        """生成 stale session lane 批量恢复预检计划。
+
+        该计划始终是 dry-run，只汇总可人工执行的 release 参数和跳过原因，不修改
+        PostgreSQL 或 Redis 状态。后续批量执行必须先通过这个预检结果做人工确认。
+        """
+
+        safe_limit = max(1, min(int(limit), 200))
+        suggestions = self.session_lane_recovery_suggestions(limit=safe_limit)
+        items = list(suggestions.get("items", []) or [])
+        actions: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for item in items:
+            release_params = dict(item.get("release_params") or {})
+            session_key = str(release_params.get("session_key") or item.get("session_key") or "")
+            owner_token = str(release_params.get("owner_token") or item.get("owner_token") or "")
+            if not session_key:
+                skipped.append(
+                    {
+                        "reason": "missing session_key",
+                        "item": item,
+                    }
+                )
+                continue
+            if not owner_token:
+                skipped.append(
+                    {
+                        "reason": "missing owner_token",
+                        "session_key": session_key,
+                        "item": item,
+                    }
+                )
+                continue
+            actions.append(
+                {
+                    "session_key": session_key,
+                    "worker_id": str(item.get("worker_id", "")),
+                    "task_id": str(item.get("task_id", "")),
+                    "owner_token": owner_token,
+                    "expired_seconds": item.get("expired_seconds", 0.0),
+                    "method": "tasks.lanes.release",
+                    "params": {
+                        "session_key": session_key,
+                        "owner_token": owner_token,
+                        "force": False,
+                        "reason": "stale lane recovery",
+                    },
+                    "message": "确认 worker 已退出后，可按该参数释放持久 Lane owner 状态。",
+                }
+            )
+        return {
+            "configured": bool(suggestions.get("configured")),
+            "dry_run": True,
+            "candidate_count": len(items),
+            "action_count": len(actions),
+            "skipped_count": len(skipped),
+            "actions": actions[:safe_limit],
+            "skipped": skipped[:safe_limit],
+            "limit": safe_limit,
+            "warning": "该计划不会自动释放任何 Lane；执行 release 前应确认对应 worker 已停止或 Redis TTL 已过期。",
+        }
+
     def release_session_lane(
         self,
         *,
@@ -1258,6 +1320,7 @@ class GatewayControlPlane:
         history_rows = list(history.get("items", []) or [])
         recovery = self.session_lane_recovery_suggestions(limit=50)
         recovery_rows = list(recovery.get("items", []) or [])
+        recovery_plan = self.plan_session_lane_recovery(limit=50)
         return {
             "configured": bool(lanes.get("configured")),
             "count": len(rows),
@@ -1268,6 +1331,13 @@ class GatewayControlPlane:
             "history_items": history_rows[:6],
             "recovery_suggestion_count": len(recovery_rows),
             "recovery_suggestions": recovery_rows[:6],
+            "recovery_plan": {
+                "dry_run": bool(recovery_plan.get("dry_run")),
+                "candidate_count": recovery_plan.get("candidate_count", 0),
+                "action_count": recovery_plan.get("action_count", 0),
+                "skipped_count": recovery_plan.get("skipped_count", 0),
+                "actions": list(recovery_plan.get("actions", []) or [])[:6],
+            },
         }
 
     @staticmethod

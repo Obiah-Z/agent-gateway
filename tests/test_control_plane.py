@@ -1092,6 +1092,8 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         status["tasks"]["persisted_lanes"]["recovery_suggestions"][0]["action"]
         == "release_session_lane"
     )
+    assert status["tasks"]["persisted_lanes"]["recovery_plan"]["dry_run"] is True
+    assert status["tasks"]["persisted_lanes"]["recovery_plan"]["action_count"] == 1
     assert status["cron"]["count"] == 1
     assert health["ok"] is False
     assert health["status"] == "degraded"
@@ -1228,6 +1230,63 @@ def test_control_plane_skips_recovery_for_fresh_session_lanes(tmp_path: Path) ->
     assert result["configured"] is True
     assert result["count"] == 0
     assert result["items"] == []
+
+
+def test_control_plane_plans_stale_session_lane_recovery_without_releasing(
+    tmp_path: Path,
+) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+
+    result = control.plan_session_lane_recovery(limit=10)
+
+    assert result["configured"] is True
+    assert result["dry_run"] is True
+    assert result["candidate_count"] == 1
+    assert result["action_count"] == 1
+    assert result["skipped_count"] == 0
+    assert result["actions"][0]["method"] == "tasks.lanes.release"
+    assert result["actions"][0]["params"] == {
+        "session_key": "agent:feishu:user-1",
+        "owner_token": "worker-a:task-a",
+        "force": False,
+        "reason": "stale lane recovery",
+    }
+    assert repository.releases == []
+
+
+def test_control_plane_recovery_plan_skips_missing_owner_token(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["owner_token"] = ""
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+    )
+
+    result = control.plan_session_lane_recovery(limit=10)
+
+    assert result["candidate_count"] == 1
+    assert result["action_count"] == 0
+    assert result["skipped_count"] == 1
+    assert result["skipped"][0]["reason"] == "missing owner_token"
 
 
 def test_control_plane_releases_only_stale_session_lane_by_default(tmp_path: Path) -> None:
