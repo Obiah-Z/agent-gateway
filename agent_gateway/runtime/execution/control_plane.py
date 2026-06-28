@@ -1034,6 +1034,19 @@ class GatewayControlPlane:
                     )
                 )
 
+        persisted_lanes = status.get("tasks", {}).get("persisted_lanes", {})
+        if persisted_lanes.get("configured"):
+            stale_count = int(persisted_lanes.get("stale_count", 0) or 0)
+            checks.append(
+                self._health_check(
+                    "tasks.session_lanes.stale",
+                    stale_count == 0,
+                    "warning",
+                    "no stale session lanes",
+                    f"{stale_count} stale session lanes require review",
+                )
+            )
+
         cron = status["cron"]
         cron_errors = int(cron.get("errored", 0) or 0)
         checks.append(
@@ -1093,10 +1106,13 @@ class GatewayControlPlane:
 
         lanes = self.list_session_lanes(state="owned", limit=50)
         rows = list(lanes.get("items", []) or [])
+        stale_rows = [row for row in rows if self._is_session_lane_stale(row)]
         return {
             "configured": bool(lanes.get("configured")),
             "count": len(rows),
             "items": rows[:6],
+            "stale_count": len(stale_rows),
+            "stale_items": stale_rows[:6],
         }
 
     @staticmethod

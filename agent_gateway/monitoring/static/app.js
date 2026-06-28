@@ -907,6 +907,7 @@ function renderRuntime(runtime) {
   const sessionLocks = tasks.session_locks || {};
   const persistedLanes = tasks.persisted_lanes || {};
   const persistedLaneItems = Array.isArray(persistedLanes.items) ? persistedLanes.items : [];
+  const staleLaneItems = Array.isArray(persistedLanes.stale_items) ? persistedLanes.stale_items : [];
   const taskBroker = tasks.broker || tasks.queue?.broker || {};
   const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
   const visibleBrokerQueues = brokerQueues.slice(0, 6);
@@ -951,7 +952,12 @@ function renderRuntime(runtime) {
       icon: "TW",
       title: "后台任务",
       value: `${tasks.queue?.pending ?? 0}/${tasks.queue?.running ?? 0}`,
-      status: brokerDeadLetters > 0 || Number(sessionLocks.blocked_session_count || 0) > 0 ? "warning" : "ok",
+      status:
+        brokerDeadLetters > 0 ||
+        Number(sessionLocks.blocked_session_count || 0) > 0 ||
+        Number(persistedLanes.stale_count || 0) > 0
+          ? "warning"
+          : "ok",
       summary: "待执行 / 运行中任务",
       chips: [
         `worker ${tasks.running ? "运行中" : "未运行"}`,
@@ -960,6 +966,7 @@ function renderRuntime(runtime) {
         `Broker积压 ${brokerBacklog}`,
         `被锁会话 ${sessionLocks.blocked_session_count ?? 0}`,
         `持久Lane ${persistedLanes.count ?? 0}`,
+        `过期Lane ${persistedLanes.stale_count ?? 0}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
@@ -993,8 +1000,20 @@ function renderRuntime(runtime) {
             : "未接入 PostgreSQL",
         ],
         [
+          "过期 Lane",
+          persistedLanes.configured
+            ? `${persistedLanes.stale_count ?? 0} 条需检查`
+            : "未接入 PostgreSQL",
+        ],
+        [
           "最近 owner",
           persistedLaneItems
+            .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}`)
+            .join(" | ") || "无",
+        ],
+        [
+          "过期 owner",
+          staleLaneItems
             .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}`)
             .join(" | ") || "无",
         ],

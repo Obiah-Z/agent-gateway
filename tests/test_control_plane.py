@@ -1046,11 +1046,16 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["inbound"]["max_concurrent_lanes"] == 4
     assert status["tasks"]["persisted_lanes"]["configured"] is True
     assert status["tasks"]["persisted_lanes"]["count"] == 1
+    assert status["tasks"]["persisted_lanes"]["stale_count"] == 1
     assert status["tasks"]["persisted_lanes"]["items"][0]["worker_id"] == "worker-a"
+    assert status["tasks"]["persisted_lanes"]["stale_items"][0]["session_key"] == "agent:feishu:user-1"
     assert status["cron"]["count"] == 1
-    assert health["ok"] is True
-    assert health["status"] == "ok"
-    assert all(row["status"] == "ok" for row in health["checks"])
+    assert health["ok"] is False
+    assert health["status"] == "degraded"
+    assert any(
+        row["name"] == "tasks.session_lanes.stale" and row["status"] == "warning"
+        for row in health["checks"]
+    )
 
 
 def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:
