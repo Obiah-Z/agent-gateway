@@ -36,8 +36,22 @@ def test_local_task_queue_prefers_primary_atomic_reserve(tmp_path: Path) -> None
             self.row = row
             self.calls: list[dict] = []
 
-        def reserve_task(self, *, worker_id: str, task_types: list[str], now: float | None = None):
-            self.calls.append({"worker_id": worker_id, "task_types": task_types, "now": now})
+        def reserve_task(
+            self,
+            *,
+            worker_id: str,
+            task_types: list[str],
+            blocked_session_keys: list[str],
+            now: float | None = None,
+        ):
+            self.calls.append(
+                {
+                    "worker_id": worker_id,
+                    "task_types": task_types,
+                    "blocked_session_keys": blocked_session_keys,
+                    "now": now,
+                }
+            )
             return self.row
 
     task = TaskInstance.create(task_type="cron", source="scheduler", priority=10)
@@ -56,13 +70,28 @@ def test_local_task_queue_prefers_primary_atomic_reserve(tmp_path: Path) -> None
     assert reserved.id == task.id
     assert reserved.status == "running"
     assert reserved.metadata["worker_id"] == "worker-db"
-    assert backend.calls == [{"worker_id": "worker-db", "task_types": ["cron"], "now": 100.0}]
+    assert backend.calls == [
+        {
+            "worker_id": "worker-db",
+            "task_types": ["cron"],
+            "blocked_session_keys": [],
+            "now": 100.0,
+        }
+    ]
     assert store.get(task.id).status == "running"
 
 
 def test_local_task_queue_falls_back_when_primary_reserve_fails(tmp_path: Path) -> None:
     class FailingWriteBackend:
-        def reserve_task(self, *, worker_id: str, task_types: list[str], now: float | None = None):
+        def reserve_task(
+            self,
+            *,
+            worker_id: str,
+            task_types: list[str],
+            blocked_session_keys: list[str],
+            now: float | None = None,
+        ):
+            del blocked_session_keys
             raise RuntimeError("database unavailable")
 
     store = LocalTaskStore(tmp_path / "tasks")
@@ -76,6 +105,33 @@ def test_local_task_queue_falls_back_when_primary_reserve_fails(tmp_path: Path) 
     assert reserved.id == task.id
     assert reserved.status == "running"
     assert reserved.metadata["worker_id"] == "worker-local"
+
+
+def test_local_task_queue_skips_blocked_session_keys(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    blocked = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-a",
+        priority=10,
+    )
+    available = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-b",
+        priority=20,
+    )
+
+    reserved = queue.reserve(
+        worker_id="worker-1",
+        task_types=["agent_inbound"],
+        blocked_session_keys=["session-a"],
+    )
+
+    assert reserved is not None
+    assert reserved.id == available.id
+    assert queue.store.get(blocked.id).status == "pending"
+    assert queue.store.get(available.id).status == "running"
 
 
 def test_local_task_queue_ack_retry_fail_and_cancel(tmp_path: Path) -> None:

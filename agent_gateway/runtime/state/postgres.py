@@ -1227,6 +1227,7 @@ class PostgresWriteRepository:
         *,
         worker_id: str,
         task_types: list[str] | tuple[str, ...] | None = None,
+        blocked_session_keys: list[str] | tuple[str, ...] | None = None,
         now: float | None = None,
     ) -> dict[str, Any] | None:
         """原子预占一条 pending/retrying 任务。
@@ -1246,6 +1247,10 @@ class PostgresWriteRepository:
         if normalized_types:
             clauses.append("task_type = ANY(%(task_types)s)")
             params["task_types"] = normalized_types
+        blocked_sessions = [str(item) for item in (blocked_session_keys or []) if str(item)]
+        if blocked_sessions:
+            clauses.append("NOT (session_key = ANY(%(blocked_session_keys)s))")
+            params["blocked_session_keys"] = blocked_sessions
         sql = (
             "WITH candidate AS ("
             "SELECT id FROM tasks "

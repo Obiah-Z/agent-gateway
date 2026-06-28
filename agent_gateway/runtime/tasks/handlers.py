@@ -115,6 +115,20 @@ class AgentInboundTaskHandler:
                 except Exception:
                     pass
 
+    def is_session_locked(self, task: TaskInstance) -> bool:
+        """检查任务 session 当前是否已被其他 worker 持锁。"""
+
+        if self.redis_client is None or not self.redis_client.enabled:
+            return False
+        lock_key = self._lock_key(task)
+        if not lock_key:
+            return False
+        try:
+            return self.redis_client.lock_exists(lock_key)
+        except Exception:
+            # Redis 不可用时不在 reserve 阶段跳过，执行阶段会进入 retrying。
+            return False
+
     async def _renew_lock_until_cancelled(self, lock_key: str, lock_value: str) -> None:
         """定期续租当前任务持有的 session 锁，覆盖长模型调用场景。"""
 

@@ -161,6 +161,15 @@ class RedisClient:
             )
         )
 
+    def lock_exists(self, key: str) -> bool:
+        """检查锁 key 是否存在，用于 reserve 阶段避开热点 session。"""
+
+        if not self.enabled:
+            return False
+        if not key:
+            return False
+        return bool(self._get_client().exists(key))
+
     def check_fixed_window_rate_limit(
         self,
         key_prefix: str,

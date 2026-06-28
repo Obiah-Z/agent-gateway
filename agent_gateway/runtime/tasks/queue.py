@@ -48,12 +48,19 @@ class LocalTaskQueue:
         *,
         worker_id: str,
         task_types: Iterable[str] | None = None,
+        blocked_session_keys: Iterable[str] | None = None,
         now: float | None = None,
     ) -> TaskInstance | None:
         """预占一条可执行任务，并标记为 running。"""
 
         type_list = list(task_types or [])
-        reserved = self._reserve_primary(worker_id=worker_id, task_types=type_list, now=now)
+        blocked_sessions = {str(item) for item in (blocked_session_keys or []) if str(item)}
+        reserved = self._reserve_primary(
+            worker_id=worker_id,
+            task_types=type_list,
+            blocked_session_keys=blocked_sessions,
+            now=now,
+        )
         if reserved is not None:
             self.store.write_task_to_disk(reserved)
             return reserved
@@ -61,6 +68,12 @@ class LocalTaskQueue:
         type_set = set(type_list)
         if type_set:
             candidates = [task for task in candidates if task.task_type in type_set]
+        if blocked_sessions:
+            candidates = [
+                task
+                for task in candidates
+                if not task.session_key or task.session_key not in blocked_sessions
+            ]
         if not candidates:
             return None
         candidates.sort(key=lambda item: (item.priority, item.created_at))
@@ -74,6 +87,7 @@ class LocalTaskQueue:
         *,
         worker_id: str,
         task_types: list[str],
+        blocked_session_keys: set[str],
         now: float | None,
     ) -> TaskInstance | None:
         """优先通过数据库原子预占任务，避免多 worker 重复消费。"""
@@ -83,7 +97,12 @@ class LocalTaskQueue:
         if method is None:
             return None
         try:
-            row = method(worker_id=worker_id, task_types=task_types, now=now)
+            row = method(
+                worker_id=worker_id,
+                task_types=task_types,
+                blocked_session_keys=sorted(blocked_session_keys),
+                now=now,
+            )
         except Exception:
             return None
         if not isinstance(row, dict):

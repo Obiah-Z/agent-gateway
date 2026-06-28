@@ -82,6 +82,7 @@ class TaskWorkerRuntime:
         task = self.queue.reserve(
             worker_id=self.worker_id,
             task_types=self.handlers.keys(),
+            blocked_session_keys=self._blocked_session_keys(),
         )
         if task is None:
             return False
@@ -128,3 +129,21 @@ class TaskWorkerRuntime:
                 self.queue.retry(task.id, error=str(exc))
             else:
                 self.queue.fail(task.id, error=str(exc))
+
+    def _blocked_session_keys(self) -> set[str]:
+        """收集 handler 当前要求跳过的 session key。"""
+
+        blocked: set[str] = set()
+        for task in self.queue.store.list(statuses=["pending", "retrying"], limit=500):
+            if not task.session_key:
+                continue
+            handler = self.handlers.get(task.task_type)
+            checker = getattr(handler, "is_session_locked", None)
+            if checker is None:
+                continue
+            try:
+                if checker(task):
+                    blocked.add(task.session_key)
+            except Exception:
+                continue
+        return blocked
