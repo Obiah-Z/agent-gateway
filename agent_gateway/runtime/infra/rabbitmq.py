@@ -176,6 +176,24 @@ class RabbitMQDeliveryBroker:
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         return True
 
+    def purge(self) -> dict[str, int]:
+        """Purge the configured main and dead-letter queues.
+
+        This is intentionally not part of the production DeliveryBroker protocol.
+        It is used by isolated load-test queues to avoid measuring stale broker
+        messages from interrupted runs.
+        """
+
+        if not self.enabled:
+            return {"messages": 0, "dead_letter_messages": 0}
+        channel = self._ensure_channel()
+        queue_result = channel.queue_purge(queue=self.queue)
+        dlq_result = channel.queue_purge(queue=self.dead_letter_queue)
+        return {
+            "messages": int(getattr(queue_result.method, "message_count", 0)),
+            "dead_letter_messages": int(getattr(dlq_result.method, "message_count", 0)),
+        }
+
     def close(self) -> None:
         """Close the cached RabbitMQ connection."""
 

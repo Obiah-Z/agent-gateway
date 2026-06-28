@@ -19,6 +19,7 @@ import statistics
 import subprocess
 import sys
 import time
+import threading
 import uuid
 from typing import Any
 
@@ -54,6 +55,7 @@ class LoadTestChannel(Channel):
     def __init__(self, *, delay_ms: float = 0.0) -> None:
         self.delay_ms = max(0.0, delay_ms)
         self.sent: list[OutboundMessage] = []
+        self._lock = threading.Lock()
 
     def receive(self) -> InboundMessage | None:
         return None
@@ -61,7 +63,8 @@ class LoadTestChannel(Channel):
     def send(self, outbound: OutboundMessage) -> bool:
         if self.delay_ms:
             time.sleep(self.delay_ms / 1000)
-        self.sent.append(outbound)
+        with self._lock:
+            self.sent.append(outbound)
         return True
 
 
@@ -351,10 +354,10 @@ async def run_delivery_rabbitmq(
         enabled=True,
     )
     queue.broker = broker
+    purged_before = broker.purge()
     manager = ChannelManager()
     channel = LoadTestChannel(delay_ms=delivery_delay_ms)
     manager.register(channel, ChannelAccount(channel="load", account_id="load-local"))
-    runtime = DeliveryRuntime(queue, manager)
     samples: list[RequestSample] = []
 
     enqueue_started = time.perf_counter()
@@ -386,12 +389,48 @@ async def run_delivery_rabbitmq(
     max_delivery_backlog = len(queue.pending_entries())
     enqueue_seconds = time.perf_counter() - enqueue_started
 
+    def build_consumer_runtime() -> tuple[DeliveryRuntime, RabbitMQDeliveryBroker]:
+        consumer_queue = DeliveryQueue(queue_dir)
+        consumer_queue.read_backend = backend
+        consumer_queue.write_backend = backend
+        consumer_broker = RabbitMQDeliveryBroker(
+            url=rabbitmq_url,
+            exchange=rabbitmq_exchange,
+            queue=rabbitmq_queue,
+            dead_letter_exchange=rabbitmq_dead_letter_exchange,
+            dead_letter_queue=rabbitmq_dead_letter_queue,
+            connect_timeout_seconds=connect_timeout_seconds,
+            enabled=True,
+        )
+        consumer_queue.broker = consumer_broker
+        return DeliveryRuntime(consumer_queue, manager), consumer_broker
+
+    worker_count = max(1, concurrency)
+    consumer_runtimes: list[DeliveryRuntime] = []
+    consumer_brokers: list[RabbitMQDeliveryBroker] = []
+    for _ in range(worker_count):
+        consumer_runtime, consumer_broker = build_consumer_runtime()
+        consumer_runtimes.append(consumer_runtime)
+        consumer_brokers.append(consumer_broker)
+
     started = time.perf_counter()
-    while len(channel.sent) < requests:
-        tasks = [runtime.flush_once() for _ in range(max(1, concurrency))]
+    broker_stats_after_consume: dict[str, Any] = {}
+    while True:
+        broker_stats_after_consume = queue.broker_stats()
+        if len(channel.sent) >= requests and int(broker_stats_after_consume.get("messages", 0) or 0) == 0:
+            break
+        tasks = [runtime.flush_once() for runtime in consumer_runtimes]
         await asyncio.gather(*tasks)
     wall_seconds = time.perf_counter() - started
     broker_stats_after_consume = queue.broker_stats()
+    purged_after = {"messages": 0, "dead_letter_messages": 0}
+    if int(broker_stats_after_consume.get("messages", 0) or 0) or int(
+        broker_stats_after_consume.get("dead_letter_messages", 0) or 0
+    ):
+        purged_after = broker.purge()
+        broker_stats_after_consume = queue.broker_stats()
+    for consumer_broker in consumer_brokers:
+        consumer_broker.close()
     broker.close()
 
     delivery_finished_ms = wall_seconds * 1000
@@ -408,7 +447,9 @@ async def run_delivery_rabbitmq(
         "queue_dir": str(queue_dir),
         "uses_real_delivery_queue": True,
         "uses_rabbitmq": True,
-        "effective_delivery_workers": max(1, concurrency),
+        "effective_delivery_workers": worker_count,
+        "broker_purged_before": purged_before,
+        "broker_purged_after": purged_after,
         "broker_after_publish": broker_stats_after_publish,
         "broker_after_consume": broker_stats_after_consume,
     }
