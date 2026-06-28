@@ -300,7 +300,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 20：高并发、高性能、高可用架构升级
 
-状态：待实现。
+状态：进行中。
 
 目标：
 
@@ -353,18 +353,15 @@ delivery-worker
 | 20.6 分布式可靠队列升级 | 已完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
 | 20.7 生产部署编排 | 进行中 | 已完成 Dockerfile、Docker Compose、基础依赖编排、数据卷和部署说明；后续补启动前检查、systemd、备份恢复、反向代理和 HTTPS。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
 | 20.8 统一观测与压测 | 进行中 | 先定义压测指标口径、场景边界和报告格式，再增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
-| 20.9 分布式入站任务顺序与互斥 | 待实现 | 在 `agent_inbound` 入站任务队列化基础上，补齐同 session 互斥执行、近似顺序执行、worker 抢占治理，并为后续 per-session lane 演进打基础。 | 多 worker / 多实例消费入站任务时，同一 session 不并发执行，失败可重试，顺序风险可观测。 |
+| 20.9 分布式入站任务顺序与互斥 | 已完成 | 已在 `agent_inbound` 入站任务队列化基础上，补齐 RabbitMQ 分区入站 broker、Redis/PostgreSQL session lane ownership、worker 抢占治理、TTL 接管、运行观测、恢复工具和 readiness smoke。 | 多 worker / 多实例消费入站任务时，同一 session 不并发执行，失败可重试，顺序风险可观测，并可用 readiness smoke 验证部署条件。 |
 
-#### 开展顺序建议
+#### 当前推进建议
 
-1. 先做 20.1：把进程边界和队列边界设计清楚，避免一开始就把代码改散。
-2. 再做 20.2：Redis 的投入最小，但能立即解决多实例去重、Cron 幂等和全局限流。
-3. 接着做 20.3：把 Phase 15 遗留的长任务后台化、低优先级任务调度和 per-agent 并发治理接到 task instance。
-4. 然后做 20.4：PostgreSQL 接管长期状态，支撑 Dashboard 查询、审计、归档和治理。
-5. 再做 20.5：补齐 PostgreSQL schema 初始化和本地数据回填，确保主存储切换不是只停留在代码路径。
-6. 然后做 20.6：当任务和状态稳定后，再升级可靠投递队列，避免同时改动执行链路和出站链路。
-7. 然后做 20.7 和 20.8：补齐部署、观测和压测，用指标验证高可用和高性能目标是否真实达成。
-8. 最后推进 20.9：在入站任务队列化后补齐同 session 互斥、顺序治理和 per-session lane 演进路径。
+1. 20.1 到 20.6 已完成，架构边界、Redis、PostgreSQL、后台任务队列和 RabbitMQ 可靠投递已经进入主链路。
+2. 20.9 已完成，入站任务已具备 RabbitMQ 分区 broker、Redis/PostgreSQL lane ownership、TTL 接管、恢复工具、Dashboard 观测和 readiness smoke。
+3. 当前建议优先补齐 20.7：备份恢复、反向代理 HTTPS、Docker Compose 多角色拆分和新机器部署 Runbook。
+4. 同步推进 20.8：用 mock、本地投递、RabbitMQ、真实模型、完整飞书链路分别建立容量基线，区分网关调度能力和模型调用瓶颈。
+5. Phase 20 收口前应至少完成一次 `docker compose` 部署验收、`lane-doctor` 检查、readiness smoke、压测报告和故障恢复演练。
 
 #### 完成标准
 
@@ -849,7 +846,7 @@ python scripts/build_capacity_baseline.py
 
 #### Phase 20.9 分布式入站任务顺序与互斥
 
-状态：待实现。
+状态：已完成。
 
 目标：
 
@@ -936,10 +933,19 @@ python scripts/build_capacity_baseline.py
 阶段完成标准：
 
 - 开启 `GATEWAY_INBOUND_TASK_QUEUE_ENABLED=true` 且运行多个 worker 时，同一 session 不会并发执行多个 `agent_inbound`。
-- Redis 可用时优先使用分布式 lane ownership；Redis 不可用时有明确降级策略和 warning event。
+- Redis 可用时优先使用分布式 lane ownership；Redis 不可用时任务会进入 retrying / fallback 路径并产生明确观测信号。
 - RabbitMQ 入站 broker 开启后，入站任务先落 TaskStore，再发布轻量 task_id 引用；发布失败不会丢任务，worker 仍可通过轮询兜底。
 - Dashboard 能看到入站任务积压、锁等待和热点 session。
 - 压测报告能说明同 session 多消息场景下的吞吐、P95 和顺序风险。
+
+完成审计：
+
+- `RabbitMQ 分区入站`：`RabbitMQInboundTaskBroker` 已按 `session_key` 分区发布轻量 task 引用，worker 优先消费 broker，失败时回退 TaskStore/PostgreSQL 轮询。
+- `会话级互斥`：`RedisLaneCoordinator` 使用 `worker_id + task_id` owner token，支持 acquire、renew、release、inspect，`AgentInboundTaskHandler` 执行期间续租，确保同 session 串行。
+- `故障接管`：TTL takeover、worker crash、broker unavailable、primary unavailable、duplicate broker message 和 PostgreSQL lane 实库 smoke 均已覆盖。
+- `状态与审计`：PostgreSQL `session_lanes` 和 `session_lane_events` 记录当前 owner、历史 owner、人工释放和 recovery 审计事件。
+- `运维入口`：控制面提供 `tasks.lanes*`、`tasks.executions`、`tasks.lanes.doctor`；CLI 提供 `agent-gateway lane-doctor`；Dashboard 展示 broker、lane、recovery、worker 执行和 readiness 摘要。
+- `部署验收`：`scripts/smoke_distributed_lane.py --scenario readiness` 已可在真实 Redis/PostgreSQL/RabbitMQ 环境下验证最终分布式 lane 关键条件。
 
 #### 当前实现说明
 
@@ -950,9 +956,9 @@ python scripts/build_capacity_baseline.py
 - `dashboard` 角色启动 Dashboard，并自动包含控制面和观测后台。
 - `control` 角色只启动 WebSocket JSON-RPC 控制面。
 - `observability` 角色启动 metrics 和 alerts 后台采集。
-- `worker` 角色已接入任务队列，可消费 Cron task 和明确命令式长任务；PostgreSQL 开启后 reserve 使用 `FOR UPDATE SKIP LOCKED` 原子预占，本地文件仍作为兜底和审计；后续可替换为 Redis/RabbitMQ backend。
+- `worker` 角色已接入任务队列，可消费 Cron、Heartbeat、明确命令式长任务和 `agent_inbound`；PostgreSQL 开启后 reserve 使用 `FOR UPDATE SKIP LOCKED` 原子预占，RabbitMQ 入站 broker 开启后优先按 task_id 消费轻量任务引用，本地文件仍作为兜底和审计。
 - Redis 已增加 `GATEWAY_REDIS_ENABLED`、`GATEWAY_REDIS_URL`、`GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS` 配置。
-- Redis 当前只接入基础设施层和健康检查；默认关闭，不影响本地单机运行。
+- Redis 已接入飞书去重、Cron 幂等/限流和入站 session lane ownership；默认仍可关闭，不影响本地单机运行。
 - Redis 开启但不可用时，`health.check` 会返回 `redis.ping` warning，不会直接阻塞网关启动。
 - 飞书 Webhook 事件去重已支持 Redis `SET NX EX`；Redis 不可用时回退本地 JSONL 去重状态。
 - Cron 自动调度已支持 Redis 幂等 key；手动 `cron-trigger` 不受幂等限制，便于主动重跑。
