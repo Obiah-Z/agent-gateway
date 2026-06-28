@@ -41,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run distributed lane smoke checks.")
     parser.add_argument(
         "--scenario",
-        choices=("inbound", "ttl-takeover", "broker-unavailable"),
+        choices=("inbound", "ttl-takeover", "broker-unavailable", "primary-unavailable"),
         default="inbound",
         help="smoke scenario to run",
     )
@@ -100,6 +100,66 @@ class FailingInboundBroker:
         }
 
 
+class SinglePayloadBroker:
+    """Broker that delivers one task reference, then becomes empty."""
+
+    enabled = True
+    partitions = 1
+
+    def __init__(self, payload: dict) -> None:
+        self.payloads = [payload]
+        self.acked = 0
+        self.nacked = 0
+
+    def publish(self, task) -> None:
+        del task
+        return None
+
+    def consume_once(self, partition: int, handler) -> bool:
+        del partition
+        if not self.payloads:
+            return False
+        payload = self.payloads.pop(0)
+        if handler(payload):
+            self.acked += 1
+        else:
+            self.nacked += 1
+            self.payloads.append(payload)
+        return True
+
+    def stats(self) -> dict:
+        return {
+            "backend": "single-payload-broker",
+            "enabled": True,
+            "messages": len(self.payloads),
+            "dead_letter_messages": 0,
+            "acked": self.acked,
+            "nacked": self.nacked,
+        }
+
+
+class FailingPrimaryBackend:
+    """Write backend that simulates PostgreSQL reserve_task_id failure."""
+
+    enabled = True
+
+    def __init__(self) -> None:
+        self.reserve_task_id_attempts = 0
+
+    def reserve_task_id(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        task_types: list[str],
+        blocked_session_keys: list[str],
+        now: float | None = None,
+    ):
+        del task_id, worker_id, task_types, blocked_session_keys, now
+        self.reserve_task_id_attempts += 1
+        raise RuntimeError("simulated postgres reserve_task_id failure")
+
+
 def assert_broker_unavailable_result(result: dict) -> list[str]:
     """Validate broker-unavailable fallback smoke result."""
 
@@ -124,6 +184,29 @@ def assert_broker_unavailable_result(result: dict) -> list[str]:
         failures.append(f"handler call count mismatch: {result.get('handler_calls')}")
     if result.get("broker_consume_attempts", 0) < 1:
         failures.append("worker did not attempt broker consume before polling fallback")
+    return failures
+
+
+def assert_primary_unavailable_result(result: dict) -> list[str]:
+    """Validate primary-store reserve_task_id fallback smoke result."""
+
+    failures: list[str] = []
+    if result.get("status") != "ok":
+        failures.append(f"unexpected status: {result.get('status')}")
+    if result.get("primary_reserve_failed") is not True:
+        failures.append("primary reserve_task_id failure was not exercised")
+    if result.get("worker_handled") is not True:
+        failures.append("worker did not handle task after primary failure")
+    if result.get("task_status_after_worker") != "done":
+        failures.append(
+            "task was not completed after primary failure: "
+            f"{result.get('task_status_after_worker')}"
+        )
+    if result.get("handler_calls") != 1:
+        failures.append(f"handler call count mismatch: {result.get('handler_calls')}")
+    broker_stats = dict(result.get("broker_stats", {}) or {})
+    if int(broker_stats.get("acked", 0) or 0) != 1:
+        failures.append(f"broker payload was not acked: {broker_stats}")
     return failures
 
 
@@ -343,6 +426,58 @@ async def run_broker_unavailable_smoke(args: argparse.Namespace) -> dict:
     return result
 
 
+async def run_primary_unavailable_smoke(args: argparse.Namespace) -> dict:
+    task_dir = args.work_dir / f"primary-unavailable-{int(time.time())}"
+    store = LocalTaskStore(task_dir)
+    primary = FailingPrimaryBackend()
+    store.write_backend = primary
+    queue = LocalTaskQueue(store)
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="smoke",
+        session_key="smoke-session-primary-unavailable",
+        payload={"text": "primary unavailable fallback"},
+        metadata={"smoke": "primary-unavailable"},
+    )
+    broker = SinglePayloadBroker(
+        {
+            "task_id": task.id,
+            "task_type": task.task_type,
+            "session_key": task.session_key,
+            "partition": 0,
+            "idempotency_key": task.idempotency_key,
+        }
+    )
+    queue.broker = broker
+    handler_calls = 0
+
+    def handler(item) -> str:
+        nonlocal handler_calls
+        handler_calls += 1
+        return f"handled:{item.id}"
+
+    worker = TaskWorkerRuntime(queue, worker_id="smoke-worker-primary-fallback")
+    worker.register_handler("agent_inbound", handler)
+    handled = await worker.run_once()
+    after_worker = store.get(task.id)
+    result = {
+        "status": "ok",
+        "scenario": "primary-unavailable",
+        "task_id": task.id,
+        "primary_reserve_failed": primary.reserve_task_id_attempts >= 1,
+        "primary_reserve_attempts": primary.reserve_task_id_attempts,
+        "worker_handled": handled,
+        "task_status_after_worker": getattr(after_worker, "status", ""),
+        "result_preview": getattr(after_worker, "result_preview", ""),
+        "handler_calls": handler_calls,
+        "broker_stats": broker.stats(),
+        "queue_stats": queue.stats(),
+    }
+    result["failures"] = assert_primary_unavailable_result(result)
+    result["status"] = "ok" if not result["failures"] else "failed"
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.scenario in {"inbound", "ttl-takeover"}:
@@ -362,6 +497,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
+        if args.scenario == "primary-unavailable":
+            primary_result = asyncio.run(run_primary_unavailable_smoke(args))
+            print(json.dumps(primary_result, ensure_ascii=False))
+            return 0 if not primary_result.get("failures") else 1
         if args.scenario == "broker-unavailable":
             broker_result = asyncio.run(run_broker_unavailable_smoke(args))
             print(json.dumps(broker_result, ensure_ascii=False))
