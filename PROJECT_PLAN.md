@@ -475,7 +475,7 @@ delivery-worker
 | 20.8.2 压测脚本 MVP | 已完成 | 新增 `scripts/load_test_gateway.py`，支持 `mock-local` 场景、并发、请求数、模拟 Agent/Delivery 延迟、JSON/Markdown 输出。 | 能跑 `mock-local` 并生成报告到 `workspace/reports/load-tests/`。 |
 | 20.8.3a 本地投递队列压测 | 已完成 | `delivery-local` 场景已接入真实 `DeliveryQueue`、`DeliveryRuntime` 和 mock channel，测量本地文件投递队列的单 worker flush 吞吐。 | 能生成本地投递队列报告，展示最大投递积压、吞吐和投递 P95。 |
 | 20.8.3b RabbitMQ 投递链路压测 | 已完成 | 新增 `delivery-rabbitmq` 场景，覆盖 RabbitMQ 分发、DeliveryQueue reserve、DeliveryRuntime consume、ack 和 broker stats。 | 已能对比 `delivery-local` 和 `delivery-rabbitmq` 的吞吐、积压和 P95。 |
-| 20.8.4 真实链路压测 | 待实现 | 小并发测试真实模型、飞书 Webhook 和飞书发送。 | 能区分外部 API 瓶颈与网关内部瓶颈。 |
+| 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型；飞书 Webhook / 发送真实链路仍待补齐。 | 已能低并发验证真实模型、上下文装配和 AgentLoopRunner 延迟；后续补真实飞书链路。 |
 | 20.8.5 Prometheus metrics endpoint | 待实现 | 暴露 `/metrics` 或控制面等价接口，输出核心计数和队列指标。 | Prometheus 可 scrape，指标名稳定。 |
 | 20.8.6 容量基线报告 | 待实现 | 汇总当前机器在典型配置下的吞吐、P95、错误率和瓶颈。 | `reports/` 下有可复现 Markdown 报告。 |
 
@@ -565,6 +565,34 @@ success=20 failed=0 throughput_rps≈1801 e2e_p95_ms≈0.555
 - `delivery-rabbitmq` 当前验证的是 RabbitMQ 分发路径和 DeliveryRuntime broker consume 能力，不验证真实飞书发送能力。
 - 当前场景没有连接真实 PostgreSQL；后续如需验证 PostgreSQL `reserve_delivery()` 的锁竞争和 SQL 成本，需要新增 `delivery-postgres-rabbitmq` 或在本场景增加显式开关。
 - 压测产物默认写入 `workspace/reports/load-tests/`，该目录已作为生成物忽略，不纳入版本库。
+
+##### 20.8.4a 真实模型压测结果
+
+已完成内容：
+
+- `scripts/load_test_gateway.py` 新增 `model-real` 场景。
+- 该场景复用真实 `build_application().runner.run_turn()`，会走真实 Agent 配置、Prompt 装配、会话写入、ResilienceRunner 和模型 API。
+- 为避免误消耗 API quota 或触发限流，运行时必须显式添加 `--allow-real-external`，否则脚本直接拒绝执行。
+- 该场景不发送飞书消息，不压测出站投递队列，只用于分离真实模型 API、上下文装配和 AgentLoopRunner 的耗时。
+- 报告会把 `uses_real_model=true`、`uses_real_feishu=false` 明确写入 JSON / Markdown，避免与本地 mock 场景混淆。
+
+使用示例：
+
+```bash
+python scripts/load_test_gateway.py \
+  --scenario model-real \
+  --allow-real-external \
+  --requests 3 \
+  --concurrency 1 \
+  --agent-id main \
+  --prompt "请用一句中文回复 pong，不要调用工具。"
+```
+
+当前边界：
+
+- `model-real` 会真实调用模型，建议从 `requests=1 concurrency=1` 开始，避免误判限流或产生额外费用。
+- 该场景生成真实会话记录，建议使用独立 `--session-prefix` 标记压测会话，便于后续清理。
+- 飞书 Webhook 入站和飞书发送出站还未接入真实链路压测，后续可增加 `feishu-webhook` 或 `feishu-send-real` 场景。
 
 #### 当前实现说明
 

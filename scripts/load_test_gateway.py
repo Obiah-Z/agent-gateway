@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """AI Agent Gateway load test helper.
 
-Phase 20.8 starts with a deterministic mock-local scenario. It measures the
-gateway's local scheduling/reporting baseline without calling model providers or
-external messaging platforms.
+Phase 20.8 starts with deterministic local scenarios and then adds explicitly
+enabled real-external scenarios. Real model or platform calls must be opt-in so
+load tests do not accidentally consume API quota or trigger platform limits.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from agent_gateway.runtime.state.queue import DeliveryQueue
 
 
 DEFAULT_REPORT_DIR = Path("workspace/reports/load-tests")
-SUPPORTED_SCENARIOS = {"delivery-local", "delivery-rabbitmq", "mock-local"}
+SUPPORTED_SCENARIOS = {"delivery-local", "delivery-rabbitmq", "mock-local", "model-real"}
 
 
 @dataclass(slots=True)
@@ -131,6 +131,14 @@ class InMemoryDeliveryBackend:
         row["locked_at"] = current
         row["updated_at"] = current
         return dict(row)
+
+
+def build_gateway_application() -> Any:
+    """Build the real gateway application lazily for external load tests."""
+
+    from agent_gateway.app import build_application
+
+    return build_application()
 
 
 def percentile(values: list[float], percent: float) -> float:
@@ -388,6 +396,89 @@ async def run_delivery_rabbitmq(
     return samples, wall_seconds, context
 
 
+async def _run_model_real_request(
+    *,
+    app: Any,
+    request_index: int,
+    semaphore: asyncio.Semaphore,
+    agent_id: str,
+    session_prefix: str,
+    prompt: str,
+) -> RequestSample:
+    """Run one request through the real AgentLoopRunner and model provider."""
+
+    request_id = f"model-real-{request_index:06d}-{uuid.uuid4().hex[:8]}"
+    session_key = f"{session_prefix}:{request_id}"
+    async with semaphore:
+        started = time.perf_counter()
+        try:
+            await app.runner.run_turn(
+                agent_id,
+                session_key,
+                prompt,
+                channel="load-test",
+                correlation_id=request_id,
+            )
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            return RequestSample(
+                request_id=request_id,
+                ok=True,
+                error="",
+                e2e_ms=elapsed_ms,
+                agent_turn_ms=elapsed_ms,
+                delivery_ms=0.0,
+            )
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            return RequestSample(
+                request_id=request_id,
+                ok=False,
+                error=str(exc),
+                e2e_ms=elapsed_ms,
+                agent_turn_ms=elapsed_ms,
+                delivery_ms=0.0,
+            )
+
+
+async def run_model_real(
+    *,
+    requests: int,
+    concurrency: int,
+    agent_id: str,
+    session_prefix: str,
+    prompt: str,
+) -> tuple[list[RequestSample], float, dict[str, Any]]:
+    """Run a low-concurrency real model scenario without sending platform messages."""
+
+    app = build_gateway_application()
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    started = time.perf_counter()
+    samples = await asyncio.gather(
+        *[
+            _run_model_real_request(
+                app=app,
+                request_index=index,
+                semaphore=semaphore,
+                agent_id=agent_id,
+                session_prefix=session_prefix,
+                prompt=prompt,
+            )
+            for index in range(1, requests + 1)
+        ]
+    )
+    wall_seconds = time.perf_counter() - started
+    context = {
+        "uses_real_model": True,
+        "agent_id": agent_id,
+        "session_prefix": session_prefix,
+        "prompt_length": len(prompt),
+        "model_id": getattr(app.settings, "model_id", ""),
+        "base_url_configured": bool(getattr(app.settings, "anthropic_base_url", "")),
+        "api_key_configured": bool(getattr(app.settings, "anthropic_api_key", "")),
+    }
+    return list(samples), wall_seconds, context
+
+
 def git_commit() -> str:
     """Return current short git commit for report reproducibility."""
 
@@ -437,8 +528,8 @@ def build_result(
             "concurrency": concurrency,
             "agent_delay_ms": agent_delay_ms,
             "delivery_delay_ms": delivery_delay_ms,
-            "uses_real_model": False,
-            "uses_real_feishu": False,
+            "uses_real_model": bool(context.get("uses_real_model", False)),
+            "uses_real_feishu": bool(context.get("uses_real_feishu", False)),
             "uses_real_delivery_queue": bool(context.get("uses_real_delivery_queue", False)),
             "uses_rabbitmq": bool(context.get("uses_rabbitmq", False)),
         },
@@ -485,6 +576,12 @@ def render_markdown(result: dict[str, Any]) -> str:
         suggestion = "对比 delivery-local 报告，观察 RabbitMQ 引用分发、ack 和多 worker flush 的成本。"
         middleware = "使用 RabbitMQ；事实状态使用脚本内内存 backend，不访问真实 PostgreSQL"
         runtime_role = "delivery-rabbitmq script"
+    if scenario["name"] == "model-real":
+        bottleneck = "model-real 基线主要反映真实模型 API、上下文装配和 AgentLoopRunner 执行延迟"
+        evidence = "该场景调用真实模型，但不发送飞书消息，也不压测出站投递。"
+        suggestion = "低并发逐步提升，优先观察 P95、错误率、限流和 profile fallback。"
+        middleware = "使用真实模型配置；不访问真实飞书发送链路"
+        runtime_role = "model-real script"
     if summary["error_rate"] > 0:
         bottleneck = "存在请求失败，优先检查脚本错误和本地资源"
     return "\n".join(
@@ -565,6 +662,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rabbitmq-dead-letter-exchange", default="agent_gateway.delivery.load_test.dlx")
     parser.add_argument("--rabbitmq-dead-letter-queue", default="agent_gateway.delivery.load_test.dead")
     parser.add_argument("--rabbitmq-connect-timeout-seconds", type=float, default=2.0)
+    parser.add_argument("--allow-real-external", action="store_true")
+    parser.add_argument("--agent-id", default="main")
+    parser.add_argument("--session-prefix", default="load-test")
+    parser.add_argument("--prompt", default="请用一句中文回复 pong，不要调用工具。")
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
@@ -575,7 +676,19 @@ def main(argv: list[str] | None = None) -> int:
     requests = max(1, args.requests)
     concurrency = max(1, args.concurrency)
     context: dict[str, Any] = {}
-    if args.scenario == "delivery-rabbitmq":
+    if args.scenario == "model-real":
+        if not args.allow_real_external:
+            raise SystemExit("model-real 会调用真实模型；请显式添加 --allow-real-external 后再运行。")
+        samples, wall_seconds, context = asyncio.run(
+            run_model_real(
+                requests=requests,
+                concurrency=concurrency,
+                agent_id=args.agent_id,
+                session_prefix=args.session_prefix,
+                prompt=args.prompt,
+            )
+        )
+    elif args.scenario == "delivery-rabbitmq":
         samples, wall_seconds, context = asyncio.run(
             run_delivery_rabbitmq(
                 requests=requests,

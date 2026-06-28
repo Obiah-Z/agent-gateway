@@ -1,12 +1,15 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import scripts.load_test_gateway as load_test_gateway
 from scripts.load_test_gateway import (
     build_result,
+    main,
     percentile,
     run_delivery_local,
     run_delivery_rabbitmq,
+    run_model_real,
     render_markdown,
     run_mock_local,
     write_reports,
@@ -54,6 +57,21 @@ class FakeRabbitMQBroker:
 
     def close(self) -> None:
         return None
+
+
+class FakeRunner:
+    async def run_turn(self, agent_id, session_key, user_text, *, channel="", correlation_id=""):
+        return SimpleNamespace(text="pong", stop_reason="end_turn", tool_calls=[])
+
+
+class FakeApp:
+    def __init__(self) -> None:
+        self.runner = FakeRunner()
+        self.settings = SimpleNamespace(
+            model_id="fake-model",
+            anthropic_base_url="https://example.test",
+            anthropic_api_key="fake-key",
+        )
 
 
 def test_percentile_uses_nearest_rank() -> None:
@@ -162,3 +180,42 @@ def test_delivery_rabbitmq_load_test_uses_broker_path(tmp_path, monkeypatch) -> 
     assert context["broker_after_publish"]["messages"] == 4
     assert context["broker_after_consume"]["messages"] == 0
     assert "delivery-rabbitmq 基线" in render_markdown(result)
+
+
+def test_model_real_requires_explicit_external_opt_in() -> None:
+    try:
+        main(["--scenario", "model-real", "--requests", "1"])
+    except SystemExit as exc:
+        assert "allow-real-external" in str(exc)
+    else:  # pragma: no cover - regression guard.
+        raise AssertionError("model-real should require --allow-real-external")
+
+
+def test_model_real_load_test_uses_real_model_flag(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(load_test_gateway, "build_gateway_application", lambda: FakeApp())
+
+    samples, wall_seconds, context = asyncio.run(
+        run_model_real(
+            requests=3,
+            concurrency=2,
+            agent_id="main",
+            session_prefix="test-load",
+            prompt="pong",
+        )
+    )
+    result = build_result(
+        scenario="model-real",
+        requests=3,
+        concurrency=2,
+        wall_seconds=wall_seconds,
+        samples=samples,
+        agent_delay_ms=0,
+        delivery_delay_ms=0,
+        context=context,
+    )
+
+    assert result["summary"]["success"] == 3
+    assert result["scenario"]["uses_real_model"] is True
+    assert result["scenario"]["uses_real_feishu"] is False
+    assert context["model_id"] == "fake-model"
+    assert "model-real 基线" in render_markdown(result)
