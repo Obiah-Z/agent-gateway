@@ -30,6 +30,13 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "GATEWAY_REDIS_URL=redis://redis.test:6379/2",
                 "GATEWAY_REDIS_SOCKET_TIMEOUT_SECONDS=0.25",
                 "GATEWAY_REDIS_CRON_RATE_LIMIT_PER_MINUTE=3",
+                "GATEWAY_DELIVERY_BROKER=rabbitmq",
+                "GATEWAY_RABBITMQ_URL=amqp://admin:admin123@127.0.0.1:5672/",
+                "GATEWAY_RABBITMQ_EXCHANGE=gateway.delivery",
+                "GATEWAY_RABBITMQ_QUEUE=gateway.delivery.outbound",
+                "GATEWAY_RABBITMQ_DEAD_LETTER_EXCHANGE=gateway.delivery.dlx",
+                "GATEWAY_RABBITMQ_DEAD_LETTER_QUEUE=gateway.delivery.dead",
+                "GATEWAY_RABBITMQ_CONNECT_TIMEOUT_SECONDS=0.75",
                 "GATEWAY_WEB_SEARCH_ENABLED=true",
                 "GATEWAY_WEB_SEARCH_PROVIDER=tavily",
                 "TAVILY_API_KEY=tvly-test-key",
@@ -62,6 +69,13 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().redis_url == "redis://redis.test:6379/2"
     assert GatewaySettings.from_env().redis_socket_timeout_seconds == 0.25
     assert GatewaySettings.from_env().redis_cron_rate_limit_per_minute == 3
+    assert GatewaySettings.from_env().delivery_broker == "rabbitmq"
+    assert GatewaySettings.from_env().rabbitmq_url == "amqp://admin:admin123@127.0.0.1:5672/"
+    assert GatewaySettings.from_env().rabbitmq_exchange == "gateway.delivery"
+    assert GatewaySettings.from_env().rabbitmq_queue == "gateway.delivery.outbound"
+    assert GatewaySettings.from_env().rabbitmq_dead_letter_exchange == "gateway.delivery.dlx"
+    assert GatewaySettings.from_env().rabbitmq_dead_letter_queue == "gateway.delivery.dead"
+    assert GatewaySettings.from_env().rabbitmq_connect_timeout_seconds == 0.75
     assert GatewaySettings.from_env().web_search_enabled is True
     assert GatewaySettings.from_env().web_search_provider == "tavily"
     assert GatewaySettings.from_env().tavily_api_key == "tvly-test-key"

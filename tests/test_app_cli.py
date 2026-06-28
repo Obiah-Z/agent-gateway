@@ -240,3 +240,23 @@ def test_postgres_smoke_runs_verification_without_serving(monkeypatch, capsys) -
     output = capsys.readouterr().out
     assert "'result': 'ok'" in output
     assert "pg-smoke-test" in output
+
+
+def test_delivery_republish_cli_republishes_without_serving(monkeypatch, capsys) -> None:
+    calls = []
+
+    class FakeControlPlane:
+        def republish_deliveries(self, *, include_pending: bool, include_retrying: bool):
+            calls.append((include_pending, include_retrying))
+            return {"published": 2, "states": ["pending", "retrying"]}
+
+    class FakeBuiltApp:
+        control_plane = FakeControlPlane()
+
+    monkeypatch.setattr(sys, "argv", ["agent-gateway", "delivery-republish"])
+    monkeypatch.setattr(gateway_app, "build_application", lambda: FakeBuiltApp())
+
+    gateway_app.main()
+
+    assert calls == [(True, True)]
+    assert "'published': 2" in capsys.readouterr().out

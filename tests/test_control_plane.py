@@ -836,10 +836,13 @@ def test_control_plane_manages_delivery_queue(tmp_path: Path) -> None:
 
     stats = control.delivery_stats()
     pending = control.list_deliveries(state="pending")
+    all_rows = control.list_deliveries(state="all")
     failed_rows = control.list_deliveries(state="failed", include_text=True)
 
     assert stats["pending"] == 1
+    assert stats["retrying"] == 0
     assert stats["failed"] == 1
+    assert {row["state"] for row in all_rows["items"]} == {"failed", "pending"}
     assert pending["items"][0]["id"] == pending_id
     assert pending["items"][0]["text"] == ""
     assert pending["items"][0]["text_preview"] == "pending delivery text"
@@ -848,6 +851,7 @@ def test_control_plane_manages_delivery_queue(tmp_path: Path) -> None:
 
     assert control.retry_delivery(failed_id) is True
     assert control.delivery_stats()["failed"] == 0
+    assert control.republish_deliveries()["published"] >= 1
     assert control.discard_delivery(pending_id, state="pending") is True
 
 

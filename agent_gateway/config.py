@@ -66,6 +66,13 @@ class GatewaySettings:
     postgres_enabled: bool = False
     postgres_url: str = "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
     postgres_connect_timeout_seconds: float = 2.0
+    delivery_broker: str = "none"
+    rabbitmq_url: str = "amqp://admin:admin123@127.0.0.1:5672/"
+    rabbitmq_exchange: str = "agent_gateway.delivery"
+    rabbitmq_queue: str = "agent_gateway.delivery.outbound"
+    rabbitmq_dead_letter_exchange: str = "agent_gateway.delivery.dlx"
+    rabbitmq_dead_letter_queue: str = "agent_gateway.delivery.dead"
+    rabbitmq_connect_timeout_seconds: float = 2.0
     host: str = "127.0.0.1"
     port: int = 8765
     workspace_root: Path = DEFAULT_WORKSPACE_ROOT
@@ -193,6 +200,31 @@ class GatewaySettings:
             postgres_connect_timeout_seconds=max(
                 0.2,
                 float(os.getenv("GATEWAY_POSTGRES_CONNECT_TIMEOUT_SECONDS", "2.0")),
+            ),
+            delivery_broker=os.getenv("GATEWAY_DELIVERY_BROKER", "none").strip().lower() or "none",
+            rabbitmq_url=os.getenv(
+                "GATEWAY_RABBITMQ_URL",
+                "amqp://admin:admin123@127.0.0.1:5672/",
+            ),
+            rabbitmq_exchange=os.getenv(
+                "GATEWAY_RABBITMQ_EXCHANGE",
+                "agent_gateway.delivery",
+            ),
+            rabbitmq_queue=os.getenv(
+                "GATEWAY_RABBITMQ_QUEUE",
+                "agent_gateway.delivery.outbound",
+            ),
+            rabbitmq_dead_letter_exchange=os.getenv(
+                "GATEWAY_RABBITMQ_DEAD_LETTER_EXCHANGE",
+                "agent_gateway.delivery.dlx",
+            ),
+            rabbitmq_dead_letter_queue=os.getenv(
+                "GATEWAY_RABBITMQ_DEAD_LETTER_QUEUE",
+                "agent_gateway.delivery.dead",
+            ),
+            rabbitmq_connect_timeout_seconds=max(
+                0.2,
+                float(os.getenv("GATEWAY_RABBITMQ_CONNECT_TIMEOUT_SECONDS", "2.0")),
             ),
             host=os.getenv("GATEWAY_HOST", "127.0.0.1"),
             port=int(os.getenv("GATEWAY_PORT", "8765")),

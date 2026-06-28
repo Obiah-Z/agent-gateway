@@ -314,8 +314,8 @@ cd ~/Desktop/claw0/gateway
 | --- | --- | --- | --- | --- |
 | Redis | 最高 | 分布式锁、事件去重、限流计数、短期状态缓存、轻量队列 | 接入成本低，Python 生态成熟，适合解决飞书事件去重、Cron 幂等、全局限流和多实例协调；也可作为后续任务队列的过渡层。 | 如果只做单机，当前内存状态够用；如果队列可靠性要求更高，应引入 RabbitMQ。 |
 | PostgreSQL | 高 | 会话、任务实例、运行事件、错误、指标快照、配置审计、记忆索引 | 当前 JSONL 适合审计和本地调试，但长期查询、筛选、归档、权限治理和 Dashboard 聚合会越来越困难；PostgreSQL 稳定、通用、便于后续做迁移和备份。 | SQLite 可作为轻量过渡，但多进程写入和远程部署能力弱于 PostgreSQL。 |
-| RabbitMQ | 中高 | 入站消息队列、后台任务队列、可靠投递队列、死信队列、延迟重试 | 对可靠投递、ack、重试、死信和消费者扩容支持成熟，适合把 ChannelRuntime、Agent worker、Delivery worker 解耦。 | Redis Streams 更轻量，适合先做 MVP；但 RabbitMQ 在投递语义和运维可解释性上更强。 |
-| Celery / Dramatiq | 中 | Cron、Heartbeat、GitHub 分析、服务器巡检、长任务 Skill 的后台执行 | 可以快速把长任务从入站 lane 中剥离，支持 worker 池、重试、任务状态和定时调度；Celery 功能更全，Dramatiq 更轻量。 | 如果希望保持完全自研，可基于 RabbitMQ/Redis Streams 写 worker，但开发成本更高。 |
+| RabbitMQ | 高 | 入站消息队列、后台任务队列、可靠投递队列、死信队列、延迟重试 | 对可靠投递、ack、重试、死信、durable queue、DLX 和消费者扩容支持成熟，适合把 ChannelRuntime、Agent worker、Delivery worker 解耦；本机 Docker 已验证 RabbitMQ 可访问，后续 20.6 优先使用该方案。 | Redis Streams 更轻量，但本项目的可靠投递更看重明确 ack、死信和运维可解释性，因此 RabbitMQ 作为首选。 |
+| Celery / Dramatiq | 中 | Cron、Heartbeat、GitHub 分析、服务器巡检、长任务 Skill 的后台执行 | 可以快速把长任务从入站 lane 中剥离，支持 worker 池、重试、任务状态和定时调度；Celery 功能更全，Dramatiq 更轻量。 | 如果希望保持完全自研，可基于 RabbitMQ 写 worker；Redis Streams 只作为轻量备选。 |
 | Nginx / Caddy | 中 | HTTPS、反向代理、Dashboard 访问边界、Webhook 公网入口 | 飞书 Webhook 生产环境需要稳定 HTTPS 入口；Caddy 自动证书体验好，Nginx 更通用。 | 本地内网穿透适合测试，不适合长期生产暴露。 |
 | Prometheus + Grafana | 中 | 指标采集、趋势图、告警规则和容量评估 | 当前 Dashboard 已有本地指标，但多实例后需要统一指标面；Prometheus 是事实标准，Grafana 展示能力强。 | 早期可继续用本地 metrics JSONL，等多实例前再接入。 |
 | Loki / ELK | 低到中 | 集中日志检索、多实例排障 | 当 gateway-api、worker、scheduler 拆开后，本地日志不再方便排障；Loki 与 Grafana 组合轻量。 | 当前已有 runtime events，早期可以先增强事件流，不急于接 ELK。 |
@@ -350,7 +350,7 @@ delivery-worker
 | 20.3 后台任务队列 | 已完成 | 已新增 `TaskInstance`、本地 `LocalTaskStore`、本地 `LocalTaskQueue` 和 `TaskWorkerRuntime`；Cron/Heartbeat 自动调度已进入任务链路；明确命令式长任务可配置化转入后台执行；控制面和 Dashboard 已支持任务查看、取消和重试；PostgreSQL 开启后任务预占优先使用数据库原子 reserve。 | 用户消息可快速返回“已接收/处理中”，长任务由 worker 后台完成，并可通过控制面和 Dashboard 追踪和干预；多 worker 共享 PostgreSQL 时不会重复抢占同一任务。 |
 | 20.4 PostgreSQL 状态外置 | 已完成 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明、状态迁移审计，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计；Prompt、Skill、Cron 配置等运行资产继续文件化。 |
-| 20.6 分布式可靠队列升级 | 待实现 | 在 PostgreSQL-backed delivery queue 基础上，新增 Redis Streams 或 RabbitMQ backend；支持多 delivery worker ack、retry、dead-letter、idempotency key 和消费组。 | delivery-worker 可水平扩展，失败消息不会丢失，可在 Dashboard 中重试或丢弃。 |
+| 20.6 分布式可靠队列升级 | 基本完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
 | 20.7 生产部署编排 | 待实现 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
 | 20.8 统一观测与压测 | 待实现 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
 
@@ -471,6 +471,349 @@ delivery-worker
 | 20.5.17 schema drift 预检命令 | 已完成 | 新增 `agent-gateway postgres-check-schema`，基于 `information_schema.columns` 检查实库表、列和基础类型是否与当前代码声明一致，提前暴露旧库 schema 漂移问题。 |
 | 20.5.18 控制面 schema 健康检查 | 已完成 | `runtime.status` 在 PostgreSQL 启用且连通时返回 `postgres.schema`，`health.check` 增加 `postgres.schema` 检查项，schema drift 会以 warning 形式暴露到控制面和 Dashboard。 |
 | 20.5.19 默认主存储切换 | 已完成 | `.env.example` 已把 `GATEWAY_POSTGRES_ENABLED=true` 作为默认示例，本机 `.env` 已切到 PostgreSQL 主存储；应用构建验证读仓储、写仓储、SessionStore 和 TaskStore 均使用 PostgreSQL 后端，本地文件继续作为 fallback/audit。 |
+
+#### Phase 20.6 分布式可靠队列升级
+
+状态：已完成。
+
+目标：
+
+- 把当前 `DeliveryRuntime` 的“单实例轮询 pending 队列”升级为“多 delivery worker 可并发消费、可确认、可重试、可死信”的分布式可靠投递链路。
+- 保留 PostgreSQL `delivery_entries` 作为事实状态表，确保 Dashboard、控制面、人工 retry/discard 和迁移审计仍有统一查询来源。
+- 新增 broker-backed 分发层，用于跨进程唤醒 worker、削峰、消费组协调和失败恢复，避免多个 worker 扫描同一批 pending 记录。
+- 保持本地单机默认体验不变：未启用 broker 时继续使用 PostgreSQL/文件队列轮询。
+
+##### 队列中间件选型
+
+| 方案 | 适用定位 | 优点 | 风险与取舍 | 本项目建议 |
+| --- | --- | --- | --- | --- |
+| PostgreSQL `FOR UPDATE SKIP LOCKED` | 可靠状态表 + 最小多 worker 预占 | 已接入 PostgreSQL；一致性强；便于 Dashboard 查询、人工处理和审计；部署依赖少。 | 高频投递下会增加数据库压力；不适合作为高吞吐消息 broker。 | 作为 20.6 的事实状态表和 fallback，先补齐原子 reserve。 |
+| RabbitMQ | 生产级可靠队列、ack、DLX、延迟重试 | 投递语义成熟；支持 durable queue、manual ack、dead-letter exchange、消费者扩容；本机 Docker 已验证 `127.0.0.1:5672` 和 `127.0.0.1:15672` 可访问。 | 新增运维依赖；需要补 Python AMQP 客户端、连接恢复和本地开发文档。 | 作为 20.6 首选 broker MVP。 |
+| Redis Streams | 轻量消息 broker、消费组、pending entries | 已有 Redis 基础设施；接入成本低；适合本地/小规模多 worker；支持 consumer group、XACK、XPENDING、XCLAIM。 | 持久化、死信、延迟重试和运维语义弱于 RabbitMQ；需要处理 stream 与 PostgreSQL 状态一致性。 | 降级为轻量备选，不作为 20.6 默认实现。 |
+
+选型结论：
+
+- 第一阶段不直接把队列事实状态迁到 RabbitMQ，而是采用“PostgreSQL 状态表 + RabbitMQ 消费通知”的混合模式。
+- `DeliveryQueue.enqueue()` 仍先写 `delivery_entries`，再向 broker publish 一个轻量消息 `{delivery_id, channel, account_id, idempotency_key}`。
+- worker 消费 broker 消息后，必须回查 PostgreSQL 并原子 reserve 该 delivery，发送成功后 ack broker 并删除/标记 PostgreSQL 记录。
+- broker 不可用时，系统降级为当前轮询模式；PostgreSQL 不可用时，继续保留本地文件 fallback，但不承诺多实例一致性。
+
+本机开发 RabbitMQ 连接基线：
+
+```text
+GATEWAY_DELIVERY_BROKER=rabbitmq
+GATEWAY_RABBITMQ_URL=amqp://admin:admin123@127.0.0.1:5672/
+GATEWAY_RABBITMQ_MANAGEMENT_URL=http://127.0.0.1:15672
+GATEWAY_RABBITMQ_USER=admin
+GATEWAY_RABBITMQ_PASSWORD=admin123
+```
+
+##### 目标链路
+
+```text
+GatewayDispatcher.deliver_reply / deliver_text
+        ↓
+DeliveryQueue.enqueue()
+        ↓
+PostgreSQL delivery_entries pending
+        ↓
+Broker publish delivery_id
+        ↓
+DeliveryWorker consumer group
+        ↓
+reserve delivery entry
+        ↓
+channel.send()
+        ↓
+ack / retry / dead-letter
+        ↓
+runtime events + Dashboard
+```
+
+##### 子阶段拆解
+
+| 子阶段 | 状态 | 主要内容 | 完成标准 |
+| --- | --- | --- | --- |
+| 20.6.1 当前投递链路审计 | 已完成 | 已梳理 `DeliveryQueue`、`DeliveryRunner`、`DeliveryRuntime`、控制面和 Dashboard 对 pending/failed 的读写依赖；确认 broker 接入前必须保持 enqueue、stats、retry、discard、flush 和事件流兼容。 | 已输出接口边界说明；明确 broker 接入点不能破坏现有 retry/discard。 |
+| 20.6.2 Delivery backend 抽象 | 已完成 | 已定义 `DeliveryQueueBackend` / `DeliveryBroker` 协议，并新增 `NoopDeliveryBroker`；`DeliveryQueue` 继续保留 PostgreSQL/本地文件事实状态路径，同时在 enqueue、ack、retry、dead_letter、discard 上预留 broker 分发钩子。 | 本地文件、PostgreSQL 和未来 RabbitMQ broker 的职责边界已拆清；现有投递、控制面和测试行为保持兼容。 |
+| 20.6.3 PostgreSQL 原子预占 | 已完成 | 已为 `delivery_entries` 增加 `locked_by`、`locked_at` 字段和索引，新增 `PostgresWriteRepository.reserve_delivery(worker_id, now)`，使用 `FOR UPDATE SKIP LOCKED` 原子抢占 pending/retrying 到期消息；`DeliveryQueue.reserve()` 优先走数据库原子预占，`DeliveryRunner` 已改为按 reserve 消费。 | PostgreSQL backend 可用时，多个 delivery worker 不会通过普通 pending 扫描重复抢占同一条 delivery；本地 fallback 仍保持单机扫描行为。 |
+| 20.6.4 RabbitMQ broker MVP | 已完成 | 已新增 RabbitMQ producer/consumer MVP：enqueue 后向 durable queue publish 轻量 `{delivery_id}` 引用；`DeliveryRuntime` 优先 basic_get broker 消息，回查并 reserve PostgreSQL 后发送，成功后 ack；无 broker 消息时回退 PostgreSQL/本地轮询。 | 启用 RabbitMQ 后，delivery worker 不再只依赖 1 秒轮询；RabbitMQ 分发与 PostgreSQL reserve 已形成最小闭环，并通过本机 RabbitMQ smoke 验证。 |
+| 20.6.5 retry 与 dead-letter 语义 | 已完成 | 已统一 `pending/retrying/failed` 状态；可重试失败写入 `retrying` 并保留 `retry_count/next_retry_at`，到期后由 `publish_due_retries()` 重新 publish 到 RabbitMQ；超过上限或永久失败进入 `failed` 并发布轻量 DLQ 引用。 | 临时失败按退避重试；超过上限进入 failed/DLQ；控制面可看到 pending/retrying/failed、retry_ready 和 RabbitMQ/DLQ 队列深度。 |
+| 20.6.6 幂等投递保护 | 已完成 | 已为 outgoing message 增加 `idempotency_key`，显式 key 优先，否则由 channel/to/text/kind/correlation_id 派生；`DeliveryQueue.enqueue()` 会软查询 pending/retrying/failed 中相同 key 并复用 delivery_id，`force_delivery=true` 可强制重发。 | 进程重启、broker 重投、人工 retry 和重复入队不易造成重复投递；必要时允许显式强制重发。 |
+| 20.6.7 控制面与 Dashboard 适配 | 已完成 | 控制面 `delivery.stats` 已增加 broker、retrying、retry_ready、DLQ 队列深度；`delivery.list` 支持 pending/retrying/failed/all；Dashboard 已展示待投递/等待重试/失败、DLQ 数量，并提供“重建队列”操作入口。 | 运维面板能区分数据库积压、broker 积压、等待重试、发送失败和 DLQ。 |
+| 20.6.8 Redis Streams 可选后端评估 | 已移出主线 | RabbitMQ 已作为 20.6 主 broker 方案落地；Redis Streams 不再作为分布式可靠投递升级的完成标准，仅保留为轻量部署备选增强。 | 后续如果确实需要轻量 broker，再在独立阶段评估 `GATEWAY_DELIVERY_BROKER=redis`。 |
+| 20.6.9 迁移与降级策略 | 已完成 | 已新增控制面 `delivery.republish`、Dashboard“重建队列”按钮和 CLI `agent-gateway delivery-republish`；可从 PostgreSQL/本地事实状态重新 publish pending/retrying 到 broker；RabbitMQ 不可用时 `DeliveryRuntime` 回退轮询并写 `delivery.broker.failed` warning event。 | RabbitMQ 清空或重启后，可从事实状态恢复投递队列；broker 故障能在事件流中看到。 |
+| 20.6.10 并发与压测验收 | 已完成 | 已增加多 runner 不重复消费测试、幂等重复投递保护测试、broker 故障 fallback 测试、RabbitMQ publish/consume/stats smoke 和全量测试回归；正式压测脚本后续可并入 20.8 统一观测与压测。 | 当前测试能证明多 worker reserve 不重复、RabbitMQ 分发可用、故障可回退；全量测试 347 passed。 |
+| 20.6.11 旧库 schema drift 收口 | 已完成 | `postgres-init` 已在建表 SQL 后、建索引前追加幂等迁移，自动为旧 `delivery_entries` 表补齐 `locked_by`、`locked_at`；`locked_at` 已归类为 `DOUBLE PRECISION` 时间字段。 | 本机旧库执行 `agent-gateway postgres-init` 成功，随后 `agent-gateway postgres-check-schema` 返回 `ok: True`。 |
+
+##### 关键设计约束
+
+- 不把 RabbitMQ 当作唯一事实来源。RabbitMQ 负责分发、ack、重试路由和 DLQ，PostgreSQL 负责状态、查询、人工干预和恢复。
+- broker message 只放轻量引用，不放完整正文，避免 RabbitMQ/Redis 中长期保存敏感消息正文。
+- 任何 worker 发送前必须回查并 reserve PostgreSQL 记录，避免 broker 重投或多 worker 并发造成重复发送。
+- 成功发送后先更新 PostgreSQL 状态，再 ack broker；如果 ack broker 失败，下一次重投会因为 PostgreSQL 状态已完成而被安全跳过。
+- retry 调度基于 PostgreSQL `next_retry_at`，broker 只负责到期消息的再次分发。
+- 本地文件队列继续作为 fallback/audit，但多实例 HA 只在 PostgreSQL + broker 开启时承诺。
+
+##### 20.6.1 当前投递链路审计结果
+
+当前链路：
+
+```text
+GatewayDispatcher.deliver_reply / deliver_text
+        ↓
+DeliveryQueue.enqueue()
+        ↓
+PostgreSQL delivery_entries pending + 本地 JSON 文件 fallback/audit
+        ↓
+DeliveryRuntime.flush_once()
+        ↓
+DeliveryRunner.run_once()
+        ↓
+DeliveryQueue.pending_entries() 全量扫描
+        ↓
+channel.send()
+        ↓
+ack / fail / move_to_failed
+```
+
+现有写入点：
+
+- 普通回复通过 `GatewayDispatcher.deliver_reply()` 入队，写入 `delivery.enqueued` 事件。
+- 主动任务、Cron、Heartbeat、告警等通过 `GatewayDispatcher.deliver_text()` 入队，写入 `delivery.enqueued` 事件。
+- `DeliveryQueue.enqueue()` 负责生成 `delivery_id`，优先写 PostgreSQL `delivery_entries`，再写本地 pending JSON 文件作为 fallback/audit。
+
+现有消费点：
+
+- `DeliveryRuntime` 后台每秒调用 `flush_once()`，内部通过 `DeliveryRunner.run_once()` 扫描 pending 队列。
+- `DeliveryRunner.run_once()` 当前使用 `DeliveryQueue.pending_entries()` 全量读取 pending 记录，并按 `next_retry_at` 判断是否可重试。
+- 发送成功后调用 `DeliveryQueue.ack()` 删除主存储记录和本地 pending 文件。
+- 发送失败但未超过上限时调用 `DeliveryQueue.fail()` 增加 `retry_count` 并设置 `next_retry_at`。
+- 超过重试上限或永久失败时调用 `DeliveryQueue.move_to_failed()`，进入 failed 队列等待人工处理。
+
+控制面与 Dashboard 依赖：
+
+- `delivery.stats` 依赖 `DeliveryQueue.pending_entries()`、`failed_entries()`、`retry_ready` 和 `oldest_pending_at`。
+- `delivery.retry` 依赖 `DeliveryQueue.retry_now()`，需要支持 pending/failed 记录立即重试。
+- `delivery.discard` 依赖 `DeliveryQueue.discard()`，需要支持 pending/failed/any 删除。
+- `delivery.flush` 依赖 `DeliveryRuntime.flush_once()` 和 `pending_count()`，RabbitMQ 化后仍应保留为“触发投递推进”的兼容入口。
+- Dashboard 依赖上述控制面接口展示积压、失败、重试和人工丢弃操作。
+
+PostgreSQL 状态现状：
+
+- `delivery_entries` 已作为可靠投递主存储，可按 `state=pending|failed` 查询。
+- 当前 `DeliveryQueue` 只区分 pending/failed，没有正式 running/locked/retrying/dead-letter 状态。
+- 当前 PostgreSQL 读路径按 `enqueued_at ASC` 返回队列记录，适合展示和单机扫描，但不适合作为多 worker 并发消费依据。
+
+主要风险：
+
+- `DeliveryRunner.run_once()` 当前是全量扫描 pending，没有 reserve/lock；多个 delivery worker 同时运行时可能重复发送同一条消息。
+- `ack()` 当前是删除记录语义；RabbitMQ 化后需要明确“已发送记录是否删除、归档或保留事件”的策略。
+- `fail()` 当前直接回写 pending 并依赖下一轮轮询；RabbitMQ 化后需要补“到期 retry 重新 publish”的调度机制。
+- `flush_delivery()` 当前语义是手动轮询发送；RabbitMQ 化后不能删除该接口，应改为触发 broker 唤醒/重建，并在 broker 不可用时走本地 fallback flush。
+- RabbitMQ message 不能承载完整正文，只能承载 `delivery_id` 等轻量引用，避免敏感消息正文进入 broker 长期留存。
+
+后续实现边界：
+
+- 20.6.2 需要先拆出状态存储与 broker 分发边界，避免 RabbitMQ 代码直接侵入 `GatewayDispatcher` 和控制面。
+- 20.6.3 必须先实现 PostgreSQL 原子 reserve，否则 20.6.4 即使接入 RabbitMQ，也无法证明多 worker 不重复发送。
+- `DeliveryQueue` 对外兼容接口至少要保留 `enqueue()`、`pending_entries()`、`failed_entries()`、`retry_now()`、`discard()`、`ack()`、`fail()`、`move_to_failed()`。
+- 新增 broker 后，Dashboard 和控制面应继续从 PostgreSQL 查询事实状态，RabbitMQ 只提供 queue depth、consumer、DLQ 等运行指标。
+
+##### 20.6.2 Delivery backend 抽象结果
+
+已完成内容：
+
+- 新增 `DeliveryQueueBackend` 协议，描述可靠投递事实状态存储最小接口：`list()`、`get()`、`upsert()`、`delete()`。
+- 新增 `DeliveryBroker` 协议，描述 broker 分发层接口：`publish()`、`ack()`、`retry()`、`dead_letter()`、`discard()`、`stats()`。
+- 新增 `NoopDeliveryBroker`，作为默认 broker，保持未启用 RabbitMQ 时的本地单机行为不变。
+- `DeliveryQueue` 保留 `read_backend` / `write_backend` 兼容字段，现有 PostgreSQL 和测试用内存 backend 不需要大改。
+- `DeliveryQueue.enqueue()` 在事实状态落盘后调用 `broker.publish()`；broker 失败不会影响 PostgreSQL/本地文件队列落盘。
+- `DeliveryQueue.ack()`、`fail()`、`move_to_failed()`、`retry_now()`、`discard()` 分别预留 `broker.ack()`、`retry()`、`dead_letter()`、`publish()`、`discard()` 钩子。
+- 控制面 `delivery.stats` 已增加 `broker` 摘要字段，当前默认返回 `backend=none`、`enabled=false`。
+
+兼容性结论：
+
+- 当前没有接入真实 RabbitMQ 网络调用，运行行为仍是 PostgreSQL/本地文件队列 + `DeliveryRuntime` 轮询。
+- `GatewayDispatcher` 不感知 broker，仍只调用 `DeliveryQueue.enqueue()`。
+- 控制面和 Dashboard 仍从 `DeliveryQueue.pending_entries()` / `failed_entries()` 获取事实状态。
+- 已通过 `tests/test_delivery_runtime.py` 和投递控制面相关测试，证明 broker 抽象未破坏现有投递、重试、失败和人工处理路径。
+
+后续实现边界：
+
+- 20.6.3 应在 `DeliveryQueueBackend` / PostgreSQL 写仓储侧补 `reserve_delivery()`，而不是让 RabbitMQ 直接决定一条消息是否可发送。
+- 20.6.4 的 RabbitMQ message 只需要携带 `delivery_id` 等轻量引用，消费时必须回查并 reserve PostgreSQL 事实记录。
+
+##### 20.6.3 PostgreSQL 原子预占结果
+
+已完成内容：
+
+- `delivery_entries` schema 增加 `locked_by`、`locked_at` 字段，并增加 `idx_delivery_entries_locked_by_locked_at` 索引。
+- `PostgresWriteRepository._normalize_delivery_entry()` 已补齐 `locked_by`、`locked_at` 归一化，保证写入结构和 schema 一致。
+- 新增 `PostgresWriteRepository.reserve_delivery(worker_id, now)`，通过 `UPDATE ... FROM (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1)` 原子选择并标记一条可发送记录。
+- `reserve_delivery()` 只抢占 `state in ('pending', 'retrying')` 且 `next_retry_at <= now` 的记录，抢占后设置 `state='running'`、`locked_by`、`locked_at` 和 `updated_at`。
+- `DeliveryQueue.reserve(worker_id, now)` 优先调用主存储 `reserve_delivery()`；主存储不可用或未实现时，回退本地 pending 扫描。
+- `DeliveryRunner.run_once()` 已从全量 `pending_entries()` 扫描改为循环调用 `DeliveryQueue.reserve()`，直到没有可发送消息。
+
+兼容性结论：
+
+- PostgreSQL backend 可用时，多 delivery worker 通过 `FOR UPDATE SKIP LOCKED` 避免重复抢占同一条消息。
+- 未启用 PostgreSQL 或数据库不可用时，仍保持原本本地文件队列扫描语义，不影响单机运行。
+- 当前尚未接入 RabbitMQ；20.6.3 只解决“谁有权发送这条 delivery”的事实状态正确性。
+
+验证：
+
+- `python -m compileall agent_gateway tests` 通过。
+- `pytest tests/test_delivery_runtime.py tests/test_postgres_state.py tests/test_control_plane.py::test_control_plane_manages_delivery_queue tests/test_gateway_server.py::test_gateway_server_exposes_delivery_control_methods -q` 通过，35 passed。
+
+注意事项：
+
+- 旧 PostgreSQL 表可通过 `agent-gateway postgres-init` 幂等补齐 `delivery_entries.locked_by/locked_at`，补列后再运行 `agent-gateway postgres-check-schema` 应返回 `ok: True`。
+- RabbitMQ 消费者在 20.6.4 中必须仍然回查并 reserve PostgreSQL，不能只凭 RabbitMQ message 直接发送。
+
+##### 20.6.4 RabbitMQ broker MVP 结果
+
+已完成内容：
+
+- `pyproject.toml` 增加 `pika` 依赖，作为同步 AMQP 客户端。
+- `GatewaySettings` 增加 RabbitMQ 配置：`GATEWAY_DELIVERY_BROKER`、`GATEWAY_RABBITMQ_URL`、exchange、queue、DLX、DLQ 和连接超时。
+- 新增 `RabbitMQDeliveryBroker`，负责声明 durable exchange、durable queue、dead-letter exchange、dead-letter queue。
+- `RabbitMQDeliveryBroker.publish()` 只发布轻量引用：`delivery_id`、`channel`、`account_id`、`correlation_id`、`published_at`，不发布 outbound 正文。
+- `RabbitMQDeliveryBroker.consume_once()` 使用 `basic_get(auto_ack=False)` 消费单条消息，handler 成功后 `basic_ack`，handler 失败后 `basic_nack(requeue=True)`。
+- `DeliveryRuntime.flush_once()` 已改为优先消费一条 broker 消息；broker 未启用、无消息或不可用时回退原有 `DeliveryRunner.run_once()` 轮询。
+- broker 消息处理时，`DeliveryRuntime` 只从 RabbitMQ 读取 `delivery_id`，随后调用 `DeliveryQueue.reserve(worker_id, delivery_id=...)` 回查并原子预占 PostgreSQL 事实记录，reserve 不到则 ack 跳过旧消息。
+- `build_application()` 在 `GATEWAY_DELIVERY_BROKER=rabbitmq` 时装配 `RabbitMQDeliveryBroker`；默认仍是 no-op broker。
+
+验证：
+
+- `pytest tests/test_rabbitmq_broker.py tests/test_config_loader.py tests/test_delivery_runtime.py tests/test_postgres_state.py -q` 通过，45 passed。
+- `python -m compileall agent_gateway tests` 通过。
+- 本机 Docker RabbitMQ 使用 `amqp://admin:admin123@127.0.0.1:5672/` 完成真实 publish/consume/ack smoke；管理 API 最终确认 `agent_gateway.delivery.outbound` 队列消息数为 0。
+
+当前边界：
+
+- 20.6.4 是 RabbitMQ 最小闭环，不包含完整延迟重试调度、DLQ 人工恢复和队列重建命令。
+- `basic_get` 适合当前 MVP 和低吞吐场景；后续如果要提升吞吐，可在 20.6.10 或生产化阶段改为 `basic_consume` 长连接 worker。
+- RabbitMQ 只负责分发和唤醒；重复发送保护仍依赖 PostgreSQL `reserve_delivery()`。
+
+##### 20.6.5 retry 与 dead-letter 语义结果
+
+已完成内容：
+
+- `DeliveryQueue.fail()` 现在把可重试失败写为 `state='retrying'`，同时更新 `retry_count`、`last_error` 和 `next_retry_at`。
+- 新增 `DeliveryQueue.retrying_entries()` 和 `get_retrying()`，用于控制面统计、手动 retry 和到期重发。
+- 新增 `DeliveryQueue.publish_due_retries()`，把到期 `retrying` 记录改回 `pending` 并重新 publish 到 RabbitMQ。
+- `DeliveryRuntime.flush_once()` 在 broker 空闲时会先调用 `publish_due_retries()`，再尝试消费 broker；如果仍没有 broker 消息，则回退本地轮询。
+- `DeliveryQueue.move_to_failed()` 保持 failed 事实状态，并调用 `broker.dead_letter()` 发布轻量 DLQ 引用。
+- `delivery.stats` 已增加 `retrying`、`oldest_retrying_at`，`retry_ready` 现在基于 retrying 队列计算。
+- `RabbitMQDeliveryBroker.stats()` 已通过 RabbitMQ passive queue declare 暴露 `messages`、`consumers`、`dead_letter_messages`、`dead_letter_consumers`。
+- `retry_now()` 支持 pending、retrying、failed 三类记录，人工重试会立即重新 publish。
+
+验证：
+
+- `pytest tests/test_delivery_runtime.py tests/test_rabbitmq_broker.py tests/test_control_plane.py::test_control_plane_manages_delivery_queue -q` 通过，20 passed。
+- `pytest tests/test_postgres_state.py tests/test_config_loader.py -q` 通过，29 passed。
+- 本机 RabbitMQ stats smoke 通过，能读取 outbound queue 和 dead-letter queue 深度。
+
+当前边界：
+
+- DLQ 中仍只保存轻量引用，完整错误和正文以 PostgreSQL `delivery_entries` / runtime events 为准。
+- 延迟重试由 `DeliveryRuntime.flush_once()` 主动扫描到期 retrying 并重新 publish，不依赖 RabbitMQ delayed message 插件。
+- 后续 20.6.7 需要把这些新字段在 Dashboard 上更清晰展示。
+
+##### 20.6.6 幂等投递保护结果
+
+已完成内容：
+
+- `DeliveryQueue.enqueue()` 现在会为每条出站消息写入 `metadata.idempotency_key`。
+- 上游显式提供 `idempotency_key` 时优先使用；未提供时由 `channel`、`to`、`text`、`kind`、`correlation_id` 派生 SHA-256。
+- 入队前会在 pending、retrying、failed 三类未完成记录中软查询相同 `idempotency_key`；命中时复用原 `delivery_id` 并重新 publish broker 引用。
+- 支持 `metadata.force_delivery=true` 跳过去重，显式强制重发。
+- RabbitMQ 轻量消息和 headers 已携带 `idempotency_key`，便于排障和后续消费者侧观测。
+
+验证：
+
+- 覆盖重复入队复用、强制重发、派生稳定 key、RabbitMQ lightweight payload 携带 key。
+- `pytest tests/test_delivery_runtime.py tests/test_rabbitmq_broker.py -q` 通过，22 passed。
+- `pytest tests/test_control_plane.py::test_control_plane_manages_delivery_queue tests/test_postgres_state.py tests/test_config_loader.py -q` 通过，30 passed。
+
+当前边界：
+
+- 当前采用软去重查询，暂未给 PostgreSQL 增加唯一约束，避免误伤允许强制重发的场景。
+- 如果未来需要强一致幂等，可增加 `idempotency_key` 独立列和部分唯一索引，但需要先设计 force delivery 的绕过策略。
+
+##### 20.6.7/20.6.9 控制面、Dashboard 与恢复入口阶段结果
+
+已完成内容：
+
+- `delivery.stats` 增加 `retrying`、`oldest_retrying_at`、`broker`，其中 RabbitMQ broker stats 包含 outbound queue 和 DLQ 深度。
+- `delivery.list` 支持 `state=retrying` 和 `state=all`。
+- 新增控制面方法 `republish_deliveries()`，可从事实状态重新发布 pending/retrying 引用到 broker。
+- WebSocket JSON-RPC 新增 `delivery.republish`。
+- `DeliveryQueue.republish_pending()` 与 `publish_due_retries()` 可作为 RabbitMQ 队列清空后的恢复基础。
+- Dashboard 投递筛选新增“等待重试”，顶部指标显示“待投递 / 等待重试 / 失败”，问题摘要显示 DLQ 数量。
+- Dashboard 投递面板新增“重建队列”按钮，可调用 `delivery.republish`。
+- CLI 新增 `agent-gateway delivery-republish`，可在不打开 Dashboard 的情况下重建 RabbitMQ 投递引用。
+- RabbitMQ consume 异常时，`DeliveryRuntime` 会写入 `delivery.broker.failed` warning event，并回退 PostgreSQL/本地轮询。
+
+验证：
+
+- `pytest tests/test_monitoring_static.py tests/test_control_plane.py::test_control_plane_manages_delivery_queue tests/test_gateway_server.py::test_gateway_server_exposes_delivery_control_methods -q` 通过，14 passed。
+- `pytest tests/test_delivery_runtime.py tests/test_rabbitmq_broker.py tests/test_postgres_state.py tests/test_config_loader.py -q` 通过，51 passed。
+- `pytest tests/test_app_cli.py::test_delivery_republish_cli_republishes_without_serving -q` 通过。
+- `python -m compileall agent_gateway tests` 通过。
+
+待完成内容：
+
+- 20.6.10 还需要补并发验收测试和完整回归。
+
+##### 20.6.10 并发与验收结果
+
+已完成内容：
+
+- 新增测试覆盖两个 `DeliveryRuntime` / `DeliveryRunner` 共享同一 PostgreSQL-like backend 时不会重复发送同一条 delivery。
+- 新增幂等重复入队测试，覆盖显式 `idempotency_key`、派生 key 和 `force_delivery` 强制重发。
+- 新增 broker consume 故障 fallback 测试，确认 RabbitMQ 异常时仍会回退 PostgreSQL/本地轮询，并记录 warning event。
+- 新增 RabbitMQ broker publish、consume、nack、DLQ、stats 单元测试。
+- 使用本机 Docker RabbitMQ 完成真实 publish/consume/ack/stats smoke。
+
+验证：
+
+- `pytest tests -q` 通过，347 passed。
+- `python -m compileall agent_gateway tests` 通过。
+
+阶段结论：
+
+- 20.6 已形成“PostgreSQL 事实状态 + RabbitMQ 分发 + Dashboard/控制面/CLI 恢复”的可运行闭环。
+- Redis Streams 备选后端不再阻塞 20.6；当前主方案以 RabbitMQ 为准，Redis Streams 如需实现应单独进入后续增强阶段。
+- 正式高并发压测脚本和 P95/吞吐报告建议并入 Phase 20.8 统一观测与压测，而不是继续塞在 20.6。
+
+##### 20.6.11 旧库 schema drift 收口结果
+
+已完成内容：
+
+- `build_postgres_schema_sql()` 现在同时生成建表 SQL 和保守的旧库迁移 SQL。
+- 迁移 SQL 会在建表后、建索引前执行，避免旧表缺失新列时先创建 `locked_by/locked_at` 索引导致初始化失败。
+- 已为旧 `delivery_entries` 表追加幂等补列：
+  - `locked_by TEXT NOT NULL DEFAULT ''`
+  - `locked_at DOUBLE PRECISION NOT NULL DEFAULT 0`
+- `_column_type()` 已将 `locked_at` 归类为浮点时间字段，避免全新建库时被错误创建为 `TEXT`。
+- 已补测试覆盖迁移 SQL 内容和执行顺序。
+
+验证：
+
+- `pytest tests/test_postgres_state.py -q` 通过，24 passed。
+- `python -m compileall agent_gateway/runtime/state/postgres.py tests/test_postgres_state.py` 通过。
+- 本机旧库执行 `agent-gateway postgres-init` 成功。
+- 本机旧库执行 `agent-gateway postgres-check-schema` 返回 `{'ok': True, 'missing_tables': [], 'missing_columns': {}, 'type_mismatches': {}}`。
+
+##### 建议实施顺序
+
+1. 先做 20.6.1 和 20.6.2，冻结接口边界，避免 RabbitMQ 代码直接侵入业务链路。
+2. 再做 20.6.3，用 PostgreSQL 原子 reserve 解决“多 worker 是否会重复发送”的核心正确性问题。
+3. 然后做 20.6.4 和 20.6.5，用 RabbitMQ 打通 durable queue、manual ack、retry 和 failed/DLQ。
+4. 接着做 20.6.6 和 20.6.7，把幂等、状态视图和运维面板补齐。
+5. 最后完成恢复命令、schema drift 收口和验收；Redis Streams 仅作为后续可选增强，不阻塞 RabbitMQ 主方案。
 
 ## 9. 推荐执行顺序
 

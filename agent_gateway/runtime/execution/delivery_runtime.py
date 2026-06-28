@@ -61,12 +61,72 @@ class DeliveryRuntime:
     async def flush_once(self) -> None:
         """手动执行一轮投递扫描。"""
 
-        await asyncio.to_thread(self.runner.run_once)
+        consumed = await asyncio.to_thread(self._flush_broker_once)
+        if not consumed:
+            await asyncio.to_thread(self.queue.publish_due_retries)
+            consumed = await asyncio.to_thread(self._flush_broker_once)
+        if not consumed:
+            await asyncio.to_thread(self.runner.run_once)
 
     def pending_count(self) -> int:
         """返回当前 pending 消息数量。"""
 
         return len(self.queue.pending_entries())
+
+    def _flush_broker_once(self) -> bool:
+        """优先消费一条 broker 消息；未启用 broker 时返回 False。"""
+
+        consume_once = getattr(self.queue.broker, "consume_once", None)
+        if consume_once is None:
+            return False
+
+        def handle(payload: dict) -> bool:
+            delivery_id = str(payload.get("delivery_id", ""))
+            if not delivery_id:
+                return True
+            entry = self.queue.reserve(
+                worker_id=self.runner.worker_id,
+                delivery_id=delivery_id,
+            )
+            if entry is None:
+                return True
+            self.runner.run_entry(entry)
+            return True
+
+        try:
+            return bool(consume_once(handle))
+        except Exception as exc:
+            self._record_broker_event(
+                "delivery.broker.failed",
+                status="warning",
+                message="Delivery broker consume failed; falling back to polling",
+                error=exc,
+            )
+            return False
+
+    def _record_broker_event(
+        self,
+        event_type: str,
+        *,
+        status: str,
+        message: str,
+        error: str | Exception = "",
+    ) -> None:
+        """记录 broker 层事件。"""
+
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="delivery",
+                message=message,
+                error=error,
+                metadata={"broker": self.queue.broker_stats()},
+            )
+        except Exception:
+            pass
 
     async def _loop(self) -> None:
         """后台循环，按固定间隔推进投递。"""

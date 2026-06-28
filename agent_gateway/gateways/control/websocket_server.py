@@ -144,6 +144,7 @@ class GatewayServer:
             "delivery.retry": self._m_delivery_retry,
             "delivery.discard": self._m_delivery_discard,
             "delivery.flush": self._m_delivery_flush,
+            "delivery.republish": self._m_delivery_republish,
             "tasks.list": self._m_tasks_list,
             "tasks.get": self._m_tasks_get,
             "tasks.cancel": self._m_tasks_cancel,
@@ -732,6 +733,15 @@ class GatewayServer:
         if self.control_plane is None:
             raise RuntimeError("control plane not configured")
         return await self.control_plane.flush_delivery(rounds=int(params.get("rounds", 1)))
+
+    async def _m_delivery_republish(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 投递队列重建 broker 引用 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.republish_deliveries(
+            include_pending=bool(params.get("include_pending", True)),
+            include_retrying=bool(params.get("include_retrying", True)),
+        )
 
     async def _m_tasks_list(self, params: dict[str, Any]) -> dict[str, Any]:
         """处理控制面 后台任务 RPC 请求。"""

@@ -45,6 +45,7 @@ from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
+from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
@@ -229,6 +230,16 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     delivery_queue = DeliveryQueue(settings.delivery_queue_dir)
     delivery_queue.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None
     delivery_queue.write_backend = primary_write
+    if settings.delivery_broker == "rabbitmq":
+        delivery_queue.broker = RabbitMQDeliveryBroker(
+            url=settings.rabbitmq_url,
+            exchange=settings.rabbitmq_exchange,
+            queue=settings.rabbitmq_queue,
+            dead_letter_exchange=settings.rabbitmq_dead_letter_exchange,
+            dead_letter_queue=settings.rabbitmq_dead_letter_queue,
+            connect_timeout_seconds=settings.rabbitmq_connect_timeout_seconds,
+            enabled=True,
+        )
     task_queue = LocalTaskQueue(task_store)
     dispatcher = GatewayDispatcher(
         agents,
@@ -918,6 +929,20 @@ def main() -> None:
         "postgres-smoke",
         help="Verify PostgreSQL primary storage and local fallback writes.",
     )
+    delivery_republish = subparsers.add_parser(
+        "delivery-republish",
+        help="Republish pending/retrying delivery references to the configured broker.",
+    )
+    delivery_republish.add_argument(
+        "--no-pending",
+        action="store_true",
+        help="Do not republish pending delivery records.",
+    )
+    delivery_republish.add_argument(
+        "--no-retrying",
+        action="store_true",
+        help="Do not republish due retrying delivery records.",
+    )
 
     parser.add_argument("--env-file", default="")
     args = parser.parse_args()
@@ -977,6 +1002,13 @@ def main() -> None:
                 flush_rounds=args.flush_rounds,
                 timeout_seconds=args.timeout_seconds,
             )
+        )
+        print(result)
+        return
+    if args.command == "delivery-republish":
+        result = app.control_plane.republish_deliveries(
+            include_pending=not args.no_pending,
+            include_retrying=not args.no_retrying,
         )
         print(result)
         return

@@ -36,6 +36,7 @@ def test_monitoring_json_rpc_client_covers_first_stage_methods() -> None:
         "delivery.retry",
         "delivery.discard",
         "delivery.flush",
+        "delivery.republish",
         "tasks.list",
         "tasks.cancel",
         "tasks.retry",
@@ -56,6 +57,8 @@ def test_monitoring_dashboard_includes_triage_and_delivery_detail_ui() -> None:
     assert "delivery-detail" in index
     assert "tasks-panel" in index
     assert "后台任务" in index
+    assert "重建队列" in index
+    assert "等待重试" in index
     assert "data-jump" in index
     assert "console-sidebar" in index
     assert "Operations Console" in index

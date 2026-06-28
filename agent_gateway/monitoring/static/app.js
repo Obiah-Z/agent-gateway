@@ -159,6 +159,7 @@ const dom = {
   deliveryState: $("#delivery-state"),
   includeText: $("#include-text"),
   deliveryFlushBtn: $("#delivery-flush-btn"),
+  deliveryRepublishBtn: $("#delivery-republish-btn"),
   deliveryTable: $("#delivery-table"),
   cronSummary: $("#cron-summary"),
   cronList: $("#cron-list"),
@@ -754,6 +755,8 @@ function buildIssues(health, runtime, deliveryStats, metricsSummary = {}) {
   const delivery = deliveryStats || runtime.delivery || {};
   const failed = Number(delivery.failed || 0);
   const pending = Number(delivery.pending || 0);
+  const retrying = Number(delivery.retrying || 0);
+  const dlq = Number(delivery.broker?.dead_letter_messages || 0);
   if (failed > 0) {
     issues.push({
       status: "warning",
@@ -767,6 +770,14 @@ function buildIssues(health, runtime, deliveryStats, metricsSummary = {}) {
       status: "warning",
       title: `${pending} 条投递待处理`,
       detail: `${delivery.retry_ready || 0} 条可立即重试或 flush。`,
+      target: "#delivery-panel",
+    });
+  }
+  if (retrying > 0 || dlq > 0) {
+    issues.push({
+      status: dlq > 0 ? "warning" : "info",
+      title: `${retrying} 条等待重试，DLQ ${dlq} 条`,
+      detail: "可使用“重建队列”从事实状态重新发布 RabbitMQ 引用。",
       target: "#delivery-panel",
     });
   }
@@ -844,8 +855,8 @@ function renderSummary(health, runtime, deliveryStats, metricsSummary = {}) {
 
   dom.metricUptime.textContent = formatDuration(server.uptime_seconds);
   dom.metricServer.textContent = server.running ? "服务正在运行" : "服务未运行";
-  dom.metricDelivery.textContent = `${delivery.pending ?? "--"} / ${delivery.failed ?? "--"}`;
-  dom.metricDeliveryDetail.textContent = `${delivery.retry_ready ?? 0} 条可立即重试`;
+  dom.metricDelivery.textContent = `${delivery.pending ?? "--"} / ${delivery.retrying ?? 0} / ${delivery.failed ?? "--"}`;
+  dom.metricDeliveryDetail.textContent = `待投递 / 等待重试 / 失败，DLQ ${delivery.broker?.dead_letter_messages ?? 0} 条`;
   dom.metricChannels.textContent = `${channels.active ?? "--"} / ${channels.count ?? "--"}`;
   dom.metricChannelsDetail.textContent = "活跃通道 / 已配置通道";
   dom.metricProfiles.textContent = `${profiles.available ?? "--"} / ${profiles.count ?? "--"}`;
@@ -2054,6 +2065,26 @@ async function flushDelivery() {
   }
 }
 
+async function republishDelivery() {
+  const confirmed = confirmAction(
+    "确认重建 RabbitMQ 投递队列？",
+    "该操作会从 PostgreSQL/本地事实状态重新发布 pending 和 retrying 投递引用，不会复制完整正文到 RabbitMQ。",
+  );
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const result = await rpc("delivery.republish", {
+      include_pending: true,
+      include_retrying: true,
+    });
+    showToast(`已重新发布 ${result.published ?? 0} 条投递引用`);
+    await refreshAll();
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
 async function triggerCron(jobId, jobName = "") {
   if (!jobId) {
     return;
@@ -2160,6 +2191,7 @@ async function bootstrap() {
     }
   });
   dom.deliveryFlushBtn.addEventListener("click", flushDelivery);
+  dom.deliveryRepublishBtn.addEventListener("click", republishDelivery);
   dom.autoRefresh.addEventListener("change", restartAutoRefresh);
   dom.deliveryDetailClose.addEventListener("click", closeDeliveryDetail);
   dom.deliveryDetail.addEventListener("click", (event) => {

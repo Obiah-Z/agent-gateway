@@ -38,6 +38,8 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
     assert "api_key_env" in POSTGRES_STATE_TABLES[2].columns
     assert "account_id" in POSTGRES_STATE_TABLES[3].columns
     assert "next_retry_at" in POSTGRES_STATE_TABLES[4].columns
+    assert "locked_by" in POSTGRES_STATE_TABLES[4].columns
+    assert "locked_at" in POSTGRES_STATE_TABLES[4].columns
     assert "session_key" in POSTGRES_STATE_TABLES[5].columns
     assert "payload" in POSTGRES_STATE_TABLES[6].columns
     assert "correlation_id" in POSTGRES_STATE_TABLES[7].columns
@@ -73,6 +75,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'PRIMARY KEY ("key")' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_bindings_agent_id"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_delivery_entries_state_next_retry_at"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_delivery_entries_locked_by_locked_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_runtime_events_component_status_timestamp"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_webhook_events_outcome_received_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_onboarding_sessions_binding_code"' in sql
@@ -80,6 +83,25 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE INDEX IF NOT EXISTS "idx_cron_runs_job_id_run_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_news_items_store_name_state"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_card_states_owner_account_id_updated_at"' in sql
+    assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_by"' in sql
+    assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_at"' in sql
+
+
+def test_postgres_schema_sql_migrates_old_delivery_queue_tables() -> None:
+    sql = build_postgres_schema_sql()
+
+    assert (
+        'ALTER TABLE "delivery_entries" '
+        'ADD COLUMN IF NOT EXISTS "locked_by" TEXT NOT NULL DEFAULT \'\';'
+    ) in sql
+    assert (
+        'ALTER TABLE "delivery_entries" '
+        'ADD COLUMN IF NOT EXISTS "locked_at" DOUBLE PRECISION NOT NULL DEFAULT 0;'
+    ) in sql
+    assert '"locked_at" DOUBLE PRECISION NOT NULL DEFAULT 0' in sql
+    assert sql.index('ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_by"') < sql.index(
+        'CREATE INDEX IF NOT EXISTS "idx_delivery_entries_locked_by_locked_at"'
+    )
 
 
 def test_initialize_postgres_schema_runs_generated_sql(monkeypatch) -> None:
@@ -97,6 +119,7 @@ def test_initialize_postgres_schema_runs_generated_sql(monkeypatch) -> None:
 
     assert calls == [("postgresql://local/db", sql, 1.5)]
     assert 'CREATE TABLE IF NOT EXISTS "agents"' in sql
+    assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_by"' in sql
 
 
 def test_postgres_read_repository_formats_time_fields(monkeypatch) -> None:
@@ -447,6 +470,47 @@ def test_postgres_write_feishu_webhook_event_appends_row(monkeypatch) -> None:
 
     assert captured[0][0] == "feishu_webhook_events"
     assert row["event_id"] == "evt-1"
+
+
+def test_postgres_reserve_delivery_uses_skip_locked(monkeypatch) -> None:
+    captured = []
+
+    def fake_query(self, table, *, sql, params=None):
+        captured.append((table, sql, params or {}))
+        return [
+            {
+                "row": {
+                    "id": "del-1",
+                    "state": "running",
+                    "channel": "cli",
+                    "to": "peer-1",
+                    "text": "hello",
+                    "retry_count": 0,
+                    "last_error": "",
+                    "metadata": {},
+                    "enqueued_at": 1.0,
+                    "next_retry_at": 0.0,
+                    "locked_by": "worker-a",
+                    "locked_at": 10.0,
+                    "updated_at": 10.0,
+                }
+            }
+        ]
+
+    monkeypatch.setattr(PostgresWriteRepository, "query", fake_query)
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
+
+    row = repo.reserve_delivery(worker_id="worker-a", now=10.0)
+
+    assert row is not None
+    assert row["id"] == "del-1"
+    table, sql, params = captured[0]
+    assert table == "delivery_entries"
+    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "state = 'running'" in sql
+    assert params["states"] == ["pending", "retrying"]
+    assert params["worker_id"] == "worker-a"
+    assert params["now"] == 10.0
 
 
 def test_postgres_write_feishu_onboarding_session_upserts_row(monkeypatch) -> None:

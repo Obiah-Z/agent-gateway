@@ -244,13 +244,17 @@ class GatewayControlPlane:
 
         queue = self._require_delivery_queue()
         pending = queue.pending_entries()
+        retrying = queue.retrying_entries()
         failed = queue.failed_entries()
         return {
             "pending": len(pending),
+            "retrying": len(retrying),
             "failed": len(failed),
-            "retry_ready": sum(1 for entry in pending if not entry.next_retry_at or entry.next_retry_at <= time.time()),
+            "retry_ready": sum(1 for entry in retrying if not entry.next_retry_at or entry.next_retry_at <= time.time()),
             "oldest_pending_at": min((entry.enqueued_at for entry in pending), default=None),
+            "oldest_retrying_at": min((entry.enqueued_at for entry in retrying), default=None),
             "oldest_failed_at": min((entry.enqueued_at for entry in failed), default=None),
+            "broker": queue.broker_stats(),
         }
 
     def tail_events(
@@ -512,6 +516,11 @@ class GatewayControlPlane:
                 self._delivery_entry_to_dict(entry, "pending", include_text=include_text)
                 for entry in queue.pending_entries()
             )
+        if normalized_state in {"retrying", "all"}:
+            rows.extend(
+                self._delivery_entry_to_dict(entry, "retrying", include_text=include_text)
+                for entry in queue.retrying_entries()
+            )
         if normalized_state in {"failed", "all"}:
             rows.extend(
                 self._delivery_entry_to_dict(entry, "failed", include_text=include_text)
@@ -531,6 +540,20 @@ class GatewayControlPlane:
         if not delivery_id:
             raise ValueError("delivery_id is required")
         return self._require_delivery_queue().retry_now(delivery_id)
+
+    def republish_deliveries(self, *, include_pending: bool = True, include_retrying: bool = True) -> dict[str, Any]:
+        """从事实状态重新发布 delivery 引用到 broker。"""
+
+        queue = self._require_delivery_queue()
+        published = 0
+        states: list[str] = []
+        if include_pending:
+            published += queue.republish_pending()
+            states.append("pending")
+        if include_retrying:
+            published += queue.publish_due_retries(now=time.time())
+            states.append("retrying")
+        return {"published": published, "states": states, "broker": queue.broker_stats()}
 
     def discard_delivery(self, delivery_id: str, *, state: str = "any") -> bool:
         """人工丢弃一条投递记录。"""
@@ -1130,7 +1153,7 @@ class GatewayControlPlane:
         """规范化投递状态过滤条件。"""
 
         normalized = str(state or "").strip().lower() or "pending"
-        allowed = {"pending", "failed"}
+        allowed = {"pending", "retrying", "failed"}
         if allow_all:
             allowed.add("all")
         if allow_any:

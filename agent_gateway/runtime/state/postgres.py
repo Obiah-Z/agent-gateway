@@ -126,17 +126,27 @@ class PostgresSchemaCheckResult:
 def build_postgres_schema_sql(
     tables: tuple[PostgresTableSpec, ...] = (),
 ) -> str:
-    """根据表规格生成 PostgreSQL 初始化 SQL。"""
+    """根据表规格生成 PostgreSQL 初始化 SQL。
+
+    该 SQL 同时承担两类职责：
+
+    - 全新数据库：创建当前版本声明的状态表与索引。
+    - 旧数据库：执行少量幂等迁移，补齐已上线表缺失的新列。
+
+    旧库迁移保持保守，只补明确需要向后兼容的字段，避免对未知历史表结构做
+    大范围自动 ALTER。
+    """
 
     specs = tables or POSTGRES_STATE_TABLES
-    statements: list[str] = []
+    table_statements: list[str] = []
+    index_statements: list[str] = []
     for spec in specs:
         column_defs = [
             f"{_quote_ident(column)} {_column_type(spec.name, column)}"
             for column in spec.columns
         ]
         column_defs.append(f"PRIMARY KEY ({_quote_ident(spec.primary_key)})")
-        statements.append(
+        table_statements.append(
             "CREATE TABLE IF NOT EXISTS "
             f"{_quote_ident(spec.name)} (\n  "
             + ",\n  ".join(column_defs)
@@ -145,11 +155,43 @@ def build_postgres_schema_sql(
         for index_columns in spec.indexes:
             index_name = _index_name(spec.name, index_columns)
             columns_sql = ", ".join(_quote_ident(column) for column in index_columns)
-            statements.append(
+            index_statements.append(
                 "CREATE INDEX IF NOT EXISTS "
                 f"{_quote_ident(index_name)} ON {_quote_ident(spec.name)} ({columns_sql});"
             )
+    statements = [
+        *table_statements,
+        *_build_postgres_schema_migration_statements(specs),
+        *index_statements,
+    ]
     return "\n\n".join(statements) + "\n"
+
+
+def _build_postgres_schema_migration_statements(
+    specs: tuple[PostgresTableSpec, ...],
+) -> list[str]:
+    """生成旧库兼容迁移 SQL。
+
+    `CREATE TABLE IF NOT EXISTS` 不会给已有表补列；这里专门收口那些已经进入
+    运行路径、旧库缺失会导致启动或消费失败的字段。
+    """
+
+    spec_names = {spec.name for spec in specs}
+    statements: list[str] = []
+    if "delivery_entries" in spec_names:
+        statements.extend(
+            [
+                (
+                    'ALTER TABLE "delivery_entries" '
+                    'ADD COLUMN IF NOT EXISTS "locked_by" TEXT NOT NULL DEFAULT \'\';'
+                ),
+                (
+                    'ALTER TABLE "delivery_entries" '
+                    'ADD COLUMN IF NOT EXISTS "locked_at" DOUBLE PRECISION NOT NULL DEFAULT 0;'
+                ),
+            ]
+        )
+    return statements
 
 
 def initialize_postgres_schema(
@@ -283,6 +325,7 @@ def _column_type(table: str, column: str) -> str:
         "finished_at",
         "last_good_at",
         "last_message_at",
+        "locked_at",
         "next_retry_at",
         "received_at",
         "run_at",
@@ -1299,6 +1342,59 @@ class PostgresWriteRepository:
 
         return self.delete("delivery_entries", delivery_id)
 
+    def reserve_delivery(
+        self,
+        *,
+        worker_id: str,
+        now: float | None = None,
+        delivery_id: str = "",
+    ) -> dict[str, Any] | None:
+        """原子预占一条可发送的可靠投递记录。
+
+        多 delivery worker 共享 PostgreSQL 时，普通 list 后再发送会重复抢占；
+        这里使用 `FOR UPDATE SKIP LOCKED` 把选择和 running 标记放在同一事务语义内。
+        """
+
+        current = time.time() if now is None else float(now)
+        clauses = [
+            "state = ANY(%(states)s)",
+            "(next_retry_at IS NULL OR next_retry_at <= %(now)s)",
+        ]
+        params: dict[str, Any] = {
+            "states": ["pending", "retrying"],
+            "worker_id": worker_id,
+            "now": current,
+        }
+        if delivery_id:
+            clauses.append("id = %(delivery_id)s")
+            params["delivery_id"] = delivery_id
+        sql = (
+            "WITH candidate AS ("
+            "SELECT id FROM delivery_entries "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY enqueued_at ASC "
+            "FOR UPDATE SKIP LOCKED LIMIT 1"
+            "), updated AS ("
+            "UPDATE delivery_entries SET "
+            "state = 'running', "
+            "locked_by = %(worker_id)s, "
+            "locked_at = %(now)s, "
+            "updated_at = %(now)s "
+            "FROM candidate WHERE delivery_entries.id = candidate.id "
+            "RETURNING delivery_entries.*"
+            ") SELECT row_to_json(updated) AS row FROM updated"
+        )
+        rows = self.query(
+            "delivery_entries",
+            sql=sql,
+            params=params,
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        payload = row.get("row", row)
+        return payload if isinstance(payload, dict) else None
+
     def mark_feishu_event_if_new(
         self,
         event_id: str,
@@ -1572,6 +1668,8 @@ class PostgresWriteRepository:
             "metadata": dict(metadata if isinstance(metadata, dict) else {}),
             "enqueued_at": float(row.get("enqueued_at", now) or now),
             "next_retry_at": float(row.get("next_retry_at", 0.0) or 0.0),
+            "locked_by": str(row.get("locked_by") or ""),
+            "locked_at": float(row.get("locked_at", 0.0) or 0.0),
             "updated_at": float(row.get("updated_at", now) or now),
         }
 
@@ -2033,9 +2131,11 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
             "metadata",
             "enqueued_at",
             "next_retry_at",
+            "locked_by",
+            "locked_at",
             "updated_at",
         ),
-        indexes=(("state", "next_retry_at"), ("state", "enqueued_at"), ("channel", "state")),
+        indexes=(("state", "next_retry_at"), ("state", "enqueued_at"), ("channel", "state"), ("locked_by", "locked_at")),
     ),
     PostgresTableSpec(
         name="sessions",

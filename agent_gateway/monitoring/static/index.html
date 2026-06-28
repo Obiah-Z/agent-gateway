@@ -267,6 +267,7 @@
           <div class="actions">
             <select id="delivery-state" aria-label="投递队列状态">
               <option value="failed">失败</option>
+              <option value="retrying">等待重试</option>
               <option value="pending">待投递</option>
               <option value="all">全部</option>
             </select>
@@ -275,6 +276,7 @@
               <span>完整正文</span>
             </label>
             <button id="delivery-flush-btn" class="button" type="button">立即投递</button>
+            <button id="delivery-republish-btn" class="button" type="button">重建队列</button>
           </div>
         </div>
         <div id="delivery-table" class="table-card empty">尚未加载投递队列</div>

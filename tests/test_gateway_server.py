@@ -601,12 +601,14 @@ def test_gateway_server_exposes_delivery_control_methods(tmp_path) -> None:
     stats = asyncio.run(server._m_delivery_stats({}))
     listed = asyncio.run(server._m_delivery_list({"include_text": True}))
     retried = asyncio.run(server._m_delivery_retry({"delivery_id": delivery_id}))
+    republished = asyncio.run(server._m_delivery_republish({}))
     flushed = asyncio.run(server._m_delivery_flush({"rounds": 2}))
     discarded = asyncio.run(server._m_delivery_discard({"delivery_id": delivery_id}))
 
     assert stats["pending"] == 1
     assert listed["items"][0]["text"] == "delivery body"
     assert retried == {"ok": True}
+    assert republished["published"] == 1
     assert runtime.flush_calls == 2
     assert flushed["after"]["pending"] == 1
     assert discarded == {"ok": True}
