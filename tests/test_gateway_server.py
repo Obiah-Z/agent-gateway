@@ -1003,6 +1003,7 @@ def test_gateway_server_executes_session_lane_recovery_only_when_confirmed(tmp_p
         channels=channels,
         state_repository=repository,
         state_write_repository=repository,
+        event_store=RuntimeEventStore(settings.data_dir / "events" / "runtime-events.jsonl"),
     )
     server = GatewayServer(
         host="127.0.0.1",
@@ -1022,6 +1023,13 @@ def test_gateway_server_executes_session_lane_recovery_only_when_confirmed(tmp_p
     assert executed["executed"] is True
     assert executed["released_count"] == 1
     assert repository.releases[0]["owner_token"] == "worker-a:task-a"
+    assert control.event_store is not None
+    assert (
+        control.event_store.tail(limit=10, event_type="session_lane.recovery.completed")[0][
+            "metadata"
+        ]["released_count"]
+        == 1
+    )
 
 
 def test_gateway_server_releases_session_lane(tmp_path) -> None:

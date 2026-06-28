@@ -123,6 +123,33 @@ class GatewayControlPlane:
         except Exception:
             return
 
+    def _record_lane_recovery_event(
+        self,
+        event_type: str,
+        *,
+        status: str,
+        message: str,
+        session_key: str = "",
+        metadata: dict[str, Any] | None = None,
+        error: str = "",
+    ) -> None:
+        """记录 session lane 恢复操作事件，失败不影响控制面主流程。"""
+
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="session_lane_recovery",
+                message=message,
+                session_key=session_key,
+                error=error,
+                metadata=metadata or {},
+            )
+        except Exception:
+            return
+
     def _state_repo_list(
         self,
         table: str,
@@ -868,6 +895,7 @@ class GatewayControlPlane:
         *,
         limit: int = 50,
         execute: bool = False,
+        record_events: bool = True,
     ) -> dict[str, Any]:
         """受控执行 stale session lane 批量恢复。
 
@@ -878,7 +906,7 @@ class GatewayControlPlane:
         plan = self.plan_session_lane_recovery(limit=limit)
         actions = list(plan.get("actions", []) or [])
         if not execute:
-            return {
+            payload = {
                 "configured": bool(plan.get("configured")),
                 "dry_run": True,
                 "executed": False,
@@ -888,6 +916,19 @@ class GatewayControlPlane:
                 "plan": plan,
                 "message": "未传入 execute=true，仅返回批量恢复预检计划。",
             }
+            if record_events:
+                self._record_lane_recovery_event(
+                    "session_lane.recovery.dry_run",
+                    status="ok",
+                    message="session lane 批量恢复 dry-run 已生成",
+                    metadata={
+                        "candidate_count": plan.get("candidate_count", 0),
+                        "action_count": plan.get("action_count", 0),
+                        "skipped_count": plan.get("skipped_count", 0),
+                        "limit": plan.get("limit", limit),
+                    },
+                )
+            return payload
         results: list[dict[str, Any]] = []
         released_count = 0
         failed_count = 0
@@ -910,10 +951,37 @@ class GatewayControlPlane:
             }
             if row["released"]:
                 released_count += 1
+                if record_events:
+                    self._record_lane_recovery_event(
+                        "session_lane.recovery.released",
+                        status="ok",
+                        message="stale session lane 已释放",
+                        session_key=str(row["session_key"]),
+                        metadata={
+                            "worker_id": row["worker_id"],
+                            "task_id": row["task_id"],
+                            "owner_token": row["owner_token"],
+                            "reason": row["reason"],
+                        },
+                    )
             else:
                 failed_count += 1
+                if record_events:
+                    self._record_lane_recovery_event(
+                        "session_lane.recovery.release_failed",
+                        status="failed",
+                        message="stale session lane 释放失败",
+                        session_key=str(row["session_key"]),
+                        error=str(row["reason"]),
+                        metadata={
+                            "worker_id": row["worker_id"],
+                            "task_id": row["task_id"],
+                            "owner_token": row["owner_token"],
+                            "reason": row["reason"],
+                        },
+                    )
             results.append(row)
-        return {
+        payload = {
             "configured": bool(plan.get("configured")),
             "dry_run": False,
             "executed": True,
@@ -922,6 +990,20 @@ class GatewayControlPlane:
             "results": results,
             "plan": plan,
         }
+        if record_events:
+            self._record_lane_recovery_event(
+                "session_lane.recovery.completed",
+                status="ok" if failed_count == 0 else "warning",
+                message="session lane 批量恢复执行完成",
+                metadata={
+                    "candidate_count": plan.get("candidate_count", 0),
+                    "action_count": plan.get("action_count", 0),
+                    "released_count": released_count,
+                    "failed_count": failed_count,
+                    "limit": plan.get("limit", limit),
+                },
+            )
+        return payload
 
     def release_session_lane(
         self,
@@ -1381,7 +1463,11 @@ class GatewayControlPlane:
         recovery = self.session_lane_recovery_suggestions(limit=50)
         recovery_rows = list(recovery.get("items", []) or [])
         recovery_plan = self.plan_session_lane_recovery(limit=50)
-        recovery_execute_preview = self.execute_session_lane_recovery(limit=50, execute=False)
+        recovery_execute_preview = self.execute_session_lane_recovery(
+            limit=50,
+            execute=False,
+            record_events=False,
+        )
         return {
             "configured": bool(lanes.get("configured")),
             "count": len(rows),

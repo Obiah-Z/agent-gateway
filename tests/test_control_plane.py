@@ -1065,6 +1065,7 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         state_repository=FakeLaneStateRepository(),
         task_worker=FakeTaskWorker(),
         task_queue=LocalTaskQueue(LocalTaskStore(tmp_path / "tasks")),
+        event_store=RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl"),
     )
 
     status = control.runtime_status()
@@ -1102,6 +1103,8 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         row["name"] == "tasks.session_lanes.stale" and row["status"] == "warning"
         for row in health["checks"]
     )
+    assert control.event_store is not None
+    assert control.event_store.tail(limit=10, event_type="session_lane.recovery.dry_run") == []
 
 
 def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:
@@ -1303,6 +1306,7 @@ def test_control_plane_recovery_execute_defaults_to_dry_run(tmp_path: Path) -> N
         channels=ChannelManager(),
         state_repository=repository,
         state_write_repository=repository,
+        event_store=RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl"),
     )
 
     result = control.execute_session_lane_recovery(limit=10)
@@ -1312,6 +1316,10 @@ def test_control_plane_recovery_execute_defaults_to_dry_run(tmp_path: Path) -> N
     assert result["released_count"] == 0
     assert result["plan"]["action_count"] == 1
     assert repository.releases == []
+    assert control.event_store is not None
+    events = control.event_store.tail(limit=10, event_type="session_lane.recovery.dry_run")
+    assert len(events) == 1
+    assert events[0]["metadata"]["action_count"] == 1
 
 
 def test_control_plane_recovery_execute_releases_stale_lanes(tmp_path: Path) -> None:
@@ -1327,6 +1335,7 @@ def test_control_plane_recovery_execute_releases_stale_lanes(tmp_path: Path) -> 
         channels=ChannelManager(),
         state_repository=repository,
         state_write_repository=repository,
+        event_store=RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl"),
     )
 
     result = control.execute_session_lane_recovery(limit=10, execute=True)
@@ -1338,6 +1347,11 @@ def test_control_plane_recovery_execute_releases_stale_lanes(tmp_path: Path) -> 
     assert result["results"][0]["released"] is True
     assert repository.releases[0]["owner_token"] == "worker-a:task-a"
     assert repository.releases[0]["reason"] == "stale lane recovery"
+    assert control.event_store is not None
+    released_events = control.event_store.tail(limit=10, event_type="session_lane.recovery.released")
+    completed_events = control.event_store.tail(limit=10, event_type="session_lane.recovery.completed")
+    assert released_events[0]["session_key"] == "agent:feishu:user-1"
+    assert completed_events[0]["metadata"]["released_count"] == 1
 
 
 def test_control_plane_releases_only_stale_session_lane_by_default(tmp_path: Path) -> None:
