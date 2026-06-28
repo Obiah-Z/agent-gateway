@@ -86,16 +86,6 @@ def test_session_store_omits_empty_assistant_content_and_patches_empty_tool_resu
 
     assert messages == [
         {"role": "user", "content": "heartbeat"},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "toolu_1",
-                    "content": "[empty tool result]",
-                }
-            ],
-        },
         {"role": "assistant", "content": [{"type": "text", "text": "done"}]},
     ]
 
@@ -123,16 +113,6 @@ def test_session_store_sanitizes_read_backend_history(tmp_path: Path) -> None:
 
     assert messages == [
         {"role": "user", "content": "heartbeat"},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "toolu_1",
-                    "content": "[empty tool result]",
-                }
-            ],
-        },
         {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
     ]
 
@@ -161,4 +141,33 @@ def test_session_store_rewrite_does_not_persist_empty_assistant_messages(
     assert store.load_messages("research", session_key) == [
         {"role": "user", "content": "heartbeat"},
         {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ]
+
+
+def test_session_store_drops_unmatched_tool_use_from_rebuilt_history(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path)
+    session_key = "agent:main:direct:u-4"
+    path = store.session_path("main", session_key)
+    path.write_text(
+        "\n".join(
+            [
+                '{"type":"user","content":"please use a tool"}',
+                '{"type":"assistant","content":[{"type":"text","text":"I will inspect it."},{"type":"tool_use","id":"call_1","name":"read_file","input":{"file_path":"README.md"}}]}',
+                '{"type":"assistant","content":[{"type":"text","text":"oops"}]}',
+                '{"type":"user","content":"next question"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    messages = store.load_messages("main", session_key)
+
+    assert messages == [
+        {"role": "user", "content": "please use a tool"},
+        {"role": "assistant", "content": [{"type": "text", "text": "I will inspect it."}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "oops"}]},
+        {"role": "user", "content": "next question"},
     ]

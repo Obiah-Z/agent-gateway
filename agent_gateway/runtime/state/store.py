@@ -120,14 +120,14 @@ class SessionStore:
                 if hasattr(self.read_backend, "read_session_messages"):
                     history = self.read_backend.read_session_messages(agent_id, session_key)
                     if history:
-                        return self.sanitize_messages(history)
+                        return self._sanitize_rebuilt_history(history)
             except Exception:
                 pass
         path = self.session_path(agent_id, session_key)
         if not path.exists():
             return []
 
-        return self.sanitize_messages(self._rebuild_history(path))
+        return self._sanitize_rebuilt_history(self._rebuild_history(path))
 
     def list_sessions(self, agent_id: str = "") -> dict[str, int]:
         """列出会话文件及其消息条数，用于控制面查看。"""
@@ -244,6 +244,74 @@ class SessionStore:
                         messages.append({"role": "user", "content": [result_block]})
 
         return messages
+
+    def _sanitize_rebuilt_history(self, messages: list[ConversationMessage]) -> list[ConversationMessage]:
+        """把重建后的历史再做一次序列修复，丢弃不完整的工具调用片段。"""
+
+        sanitized: list[ConversationMessage] = []
+        pending_tool_ids: set[str] = set()
+
+        for message in self.sanitize_messages(messages):
+            role = message["role"]
+            content = message.get("content")
+
+            if role == "assistant" and isinstance(content, list):
+                tool_use_ids = [
+                    str(block.get("id", ""))
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id")
+                ]
+                if tool_use_ids:
+                    pending_tool_ids.update(tool_use_ids)
+                sanitized.append(message)
+                continue
+
+            if role == "user" and self._is_tool_result_batch(content):
+                result_ids = {
+                    str(block.get("tool_use_id", ""))
+                    for block in content
+                    if isinstance(block, dict) and block.get("tool_use_id")
+                }
+                if pending_tool_ids and result_ids & pending_tool_ids:
+                    pending_tool_ids.difference_update(result_ids)
+                    sanitized.append(message)
+                else:
+                    continue
+                continue
+
+            if pending_tool_ids:
+                sanitized = self._drop_unmatched_tool_uses(sanitized, pending_tool_ids)
+                pending_tool_ids.clear()
+
+            sanitized.append(message)
+
+        if pending_tool_ids:
+            sanitized = self._drop_unmatched_tool_uses(sanitized, pending_tool_ids)
+
+        return sanitized
+
+    @staticmethod
+    def _drop_unmatched_tool_uses(
+        messages: list[ConversationMessage],
+        tool_ids: set[str],
+    ) -> list[ConversationMessage]:
+        """移除缺少 tool_result 的 assistant tool_use，避免向模型发送非法历史。"""
+
+        if not tool_ids:
+            return messages
+        cleaned: list[ConversationMessage] = []
+        for message in messages:
+            if message["role"] != "assistant" or not isinstance(message.get("content"), list):
+                cleaned.append(message)
+                continue
+            content: list[dict[str, Any]] = []
+            for block in message["content"]:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id") in tool_ids:
+                    continue
+                content.append(block)
+            if content and SessionStore._content_has_payload(content):
+                cleaned.append({"role": "assistant", "content": content})
+        return cleaned
 
     def _messages_to_records(self, messages: list[ConversationMessage]) -> list[dict[str, Any]]:
         """把 Anthropic Messages 拆成适合 JSONL 审计和增量恢复的记录。"""
