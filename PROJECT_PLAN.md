@@ -477,7 +477,7 @@ delivery-worker
 | 20.8.3b RabbitMQ 投递链路压测 | 已完成 | 新增 `delivery-rabbitmq` 场景，覆盖 RabbitMQ 分发、DeliveryQueue reserve、DeliveryRuntime consume、ack 和 broker stats。 | 已能对比 `delivery-local` 和 `delivery-rabbitmq` 的吞吐、积压和 P95。 |
 | 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 和 `feishu-send-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型或发送真实飞书消息；飞书 Webhook 入站压测仍待补齐。 | 已能低并发验证真实模型、上下文装配、AgentLoopRunner 延迟和飞书出站发送延迟；后续补真实飞书入站链路。 |
 | 20.8.5 Prometheus metrics endpoint | 已完成 | Dashboard HTTP 服务新增 `/metrics`，输出 Prometheus text exposition，覆盖 metrics 可用性、窗口样本数、投递积压、入站 lane、事件错误、Cron 和模型 profile 指标。 | Prometheus 可 scrape，指标名稳定。 |
-| 20.8.6 容量基线报告 | 待实现 | 汇总当前机器在典型配置下的吞吐、P95、错误率和瓶颈。 | `reports/` 下有可复现 Markdown 报告。 |
+| 20.8.6 容量基线报告 | 已完成 | 新增 `scripts/build_capacity_baseline.py`，可汇总 load-test JSON，按场景生成容量基线 Markdown，包含吞吐、P95、错误率、积压和瓶颈判断。 | `workspace/reports/capacity-baseline.md` 下有可复现 Markdown 报告。 |
 
 ##### 20.8.2 压测脚本 MVP 结果
 
@@ -653,6 +653,42 @@ curl http://127.0.0.1:8780/metrics
 - `/metrics` 依赖本地 metrics snapshot；刚启动且尚未采集时会显示 `gateway_metrics_available 0`。
 - 当前暴露的是摘要型 gauge，尚未输出请求级 histogram、counter 和 label 化的 per-agent/per-channel 指标。
 - Prometheus/Grafana 部署配置和容量基线报告放到 20.8.6 或 Phase 20.7 生产编排中继续补齐。
+
+##### 20.8.6 容量基线报告结果
+
+已完成内容：
+
+- 新增 `scripts/build_capacity_baseline.py`。
+- 脚本读取 `workspace/reports/load-tests/*.json`，自动筛选合法压测报告。
+- 同一场景多份报告会按成功数、吞吐和请求数择优，避免基线表过长。
+- 输出 `workspace/reports/capacity-baseline.md`，包含：
+  - 基本环境信息。
+  - 场景、请求数、并发、成功/失败、错误率、吞吐。
+  - E2E / Agent / Delivery P95。
+  - 最大投递积压。
+  - 分场景瓶颈判断。
+  - 使用边界和原始报告路径。
+
+使用示例：
+
+```bash
+python scripts/build_capacity_baseline.py
+```
+
+建议基线采集顺序：
+
+```bash
+python scripts/load_test_gateway.py --scenario mock-local --requests 100 --concurrency 8 --basename baseline-mock-local
+python scripts/load_test_gateway.py --scenario delivery-local --requests 100 --concurrency 1 --delivery-delay-ms 0 --basename baseline-delivery-local
+python scripts/load_test_gateway.py --scenario delivery-rabbitmq --requests 100 --concurrency 8 --delivery-delay-ms 0 --basename baseline-delivery-rabbitmq
+python scripts/build_capacity_baseline.py
+```
+
+当前边界：
+
+- 容量基线报告只汇总已有 JSON，不负责自动执行所有压测命令。
+- 真实模型和飞书场景需要显式 `--allow-real-external`，不建议纳入默认自动基线。
+- 报告是单次或少量样本的容量快照，不等同 SLA；严谨结论需要多轮重复压测和固定机器负载。
 
 #### 当前实现说明
 
