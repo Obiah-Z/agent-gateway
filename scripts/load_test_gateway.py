@@ -30,6 +30,7 @@ from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker, RabbitMQInboundTaskBroker
 from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
+from agent_gateway.runtime.tasks.worker import RetryableTaskError
 
 
 DEFAULT_REPORT_DIR = Path("workspace/reports/load-tests")
@@ -206,6 +207,49 @@ class InMemoryTaskBackend:
             metadata["worker_id"] = worker_id
             row["metadata"] = metadata
             return dict(row)
+
+
+class LocalLoadTestLaneCoordinator:
+    """In-process lane ownership probe for inbound load tests.
+
+    This does not replace RedisLaneCoordinator in production. It lets the load
+    test measure session-level serialization without requiring a real Redis
+    server, while preserving the same invariant: one active owner per session.
+    """
+
+    def __init__(self) -> None:
+        self._active_by_session: dict[str, str] = {}
+        self._active_counts: dict[str, int] = {}
+        self._lock = asyncio.Lock()
+        self.max_active_lanes = 0
+        self.max_same_session_concurrency = 0
+        self.acquire_conflicts = 0
+        self.acquire_attempts = 0
+
+    async def acquire(self, session_key: str, task_id: str) -> bool:
+        async with self._lock:
+            self.acquire_attempts += 1
+            if session_key in self._active_by_session:
+                self.acquire_conflicts += 1
+                return False
+            self._active_by_session[session_key] = task_id
+            self._active_counts[session_key] = self._active_counts.get(session_key, 0) + 1
+            self.max_active_lanes = max(self.max_active_lanes, len(self._active_by_session))
+            self.max_same_session_concurrency = max(
+                self.max_same_session_concurrency,
+                self._active_counts[session_key],
+            )
+            return True
+
+    async def release(self, session_key: str, task_id: str) -> None:
+        async with self._lock:
+            if self._active_by_session.get(session_key) == task_id:
+                self._active_by_session.pop(session_key, None)
+            current = max(0, self._active_counts.get(session_key, 0) - 1)
+            if current:
+                self._active_counts[session_key] = current
+            else:
+                self._active_counts.pop(session_key, None)
 
 
 def build_gateway_application() -> Any:
@@ -542,6 +586,7 @@ async def run_inbound_rabbitmq(
     rabbitmq_partitions: int,
     rabbitmq_prefetch: int,
     session_count: int,
+    lane_mode: str,
     connect_timeout_seconds: float,
 ) -> tuple[list[RequestSample], float, dict[str, Any]]:
     """Run RabbitMQ-backed inbound task publishing and worker consumption."""
@@ -569,17 +614,32 @@ async def run_inbound_rabbitmq(
     sample_started_at: dict[str, float] = {}
     worker_count = max(1, concurrency)
     effective_session_count = max(1, session_count)
+    normalized_lane_mode = lane_mode.strip().lower() or "local"
+    lane_coordinator = (
+        LocalLoadTestLaneCoordinator()
+        if normalized_lane_mode in {"local", "inmemory", "memory"}
+        else None
+    )
 
     async def inbound_handler(task) -> str:
-        if agent_delay_ms:
-            await asyncio.sleep(agent_delay_ms / 1000)
-        sample = sample_by_task_id.get(task.id)
-        if sample is not None:
-            elapsed_ms = (time.perf_counter() - sample_started_at[task.id]) * 1000
-            sample.ok = True
-            sample.e2e_ms = elapsed_ms
-            sample.agent_turn_ms = elapsed_ms
-        return "inbound processed"
+        acquired = False
+        if lane_coordinator is not None:
+            acquired = await lane_coordinator.acquire(task.session_key or task.id, task.id)
+            if not acquired:
+                raise RetryableTaskError("session lane is currently owned by another task")
+        try:
+            if agent_delay_ms:
+                await asyncio.sleep(agent_delay_ms / 1000)
+            sample = sample_by_task_id.get(task.id)
+            if sample is not None:
+                elapsed_ms = (time.perf_counter() - sample_started_at[task.id]) * 1000
+                sample.ok = True
+                sample.e2e_ms = elapsed_ms
+                sample.agent_turn_ms = elapsed_ms
+            return "inbound processed"
+        finally:
+            if acquired and lane_coordinator is not None:
+                await lane_coordinator.release(task.session_key or task.id, task.id)
 
     enqueue_started = time.perf_counter()
     for index in range(1, requests + 1):
@@ -620,10 +680,27 @@ async def run_inbound_rabbitmq(
     enqueue_seconds = time.perf_counter() - enqueue_started
 
     workers: list[TaskWorkerRuntime] = []
+    worker_brokers: list[RabbitMQInboundTaskBroker] = []
     for index in range(worker_count):
-        worker = TaskWorkerRuntime(queue, worker_id=f"load-worker-{index + 1}")
+        worker_broker = RabbitMQInboundTaskBroker(
+            url=rabbitmq_url,
+            exchange=rabbitmq_exchange,
+            queue_prefix=rabbitmq_queue_prefix,
+            dead_letter_exchange=rabbitmq_dead_letter_exchange,
+            dead_letter_queue=rabbitmq_dead_letter_queue,
+            partitions=rabbitmq_partitions,
+            prefetch=rabbitmq_prefetch,
+            connect_timeout_seconds=connect_timeout_seconds,
+            enabled=True,
+        )
+        worker_store = LocalTaskStore(task_dir)
+        worker_store.read_backend = backend
+        worker_store.write_backend = backend
+        worker_queue = LocalTaskQueue(worker_store, broker=worker_broker)
+        worker = TaskWorkerRuntime(worker_queue, worker_id=f"load-worker-{index + 1}")
         worker.register_handler("agent_inbound", inbound_handler)
         workers.append(worker)
+        worker_brokers.append(worker_broker)
 
     started = time.perf_counter()
     broker_stats_after_consume: dict[str, Any] = {}
@@ -644,6 +721,8 @@ async def run_inbound_rabbitmq(
     ):
         purged_after = broker.purge()
         broker_stats_after_consume = broker.stats()
+    for worker_broker in worker_brokers:
+        worker_broker.close()
     broker.close()
 
     for sample in samples:
@@ -668,6 +747,13 @@ async def run_inbound_rabbitmq(
         "inbound_session_count": effective_session_count,
         "inbound_partitions": max(1, rabbitmq_partitions),
         "inbound_prefetch": max(1, rabbitmq_prefetch),
+        "lane_mode": "local" if lane_coordinator is not None else "off",
+        "max_active_lanes": lane_coordinator.max_active_lanes if lane_coordinator is not None else 0,
+        "max_same_session_concurrency": (
+            lane_coordinator.max_same_session_concurrency if lane_coordinator is not None else 0
+        ),
+        "lane_acquire_attempts": lane_coordinator.acquire_attempts if lane_coordinator is not None else 0,
+        "lane_acquire_conflicts": lane_coordinator.acquire_conflicts if lane_coordinator is not None else 0,
         "partitions_seen": len(partitions_seen),
         "broker_purged_before": purged_before,
         "broker_purged_after": purged_after,
@@ -945,8 +1031,8 @@ def render_markdown(result: dict[str, Any]) -> str:
         middleware = "使用 RabbitMQ；事实状态使用脚本内内存 backend，不访问真实 PostgreSQL"
         runtime_role = "delivery-rabbitmq script"
     if scenario["name"] == "inbound-rabbitmq":
-        bottleneck = "inbound-rabbitmq 基线主要反映 RabbitMQ 入站分区、task_id 预占和 TaskWorkerRuntime 消费吞吐"
-        evidence = "该场景使用真实 RabbitMQ inbound broker、真实 LocalTaskQueue/TaskWorkerRuntime 和内存任务状态 backend，不调用真实模型或飞书。"
+        bottleneck = "inbound-rabbitmq 基线主要反映 RabbitMQ 入站分区、task_id 预占、session lane ownership 和 TaskWorkerRuntime 消费吞吐"
+        evidence = "该场景使用真实 RabbitMQ inbound broker、真实 LocalTaskQueue/TaskWorkerRuntime、本地 lane ownership 探针和内存任务状态 backend，不调用真实模型或飞书。"
         suggestion = "调整 --inbound-session-count、--inbound-rabbitmq-partitions 和 --concurrency，观察热点 session、分区数和 worker 池对吞吐的影响。"
         middleware = "使用 RabbitMQ；任务事实状态使用脚本内内存 backend，不访问真实 PostgreSQL"
         runtime_role = "inbound-rabbitmq script"
@@ -1049,6 +1135,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--inbound-rabbitmq-partitions", type=int, default=8)
     parser.add_argument("--inbound-rabbitmq-prefetch", type=int, default=1)
     parser.add_argument("--inbound-session-count", type=int, default=32)
+    parser.add_argument(
+        "--inbound-lane-mode",
+        choices=("local", "off"),
+        default="local",
+        help="inbound-rabbitmq lane ownership verification mode",
+    )
     parser.add_argument("--allow-real-external", action="store_true")
     parser.add_argument("--agent-id", default="main")
     parser.add_argument("--session-prefix", default="load-test")
@@ -1124,6 +1216,7 @@ def main(argv: list[str] | None = None) -> int:
                 rabbitmq_partitions=max(1, args.inbound_rabbitmq_partitions),
                 rabbitmq_prefetch=max(1, args.inbound_rabbitmq_prefetch),
                 session_count=max(1, args.inbound_session_count),
+                lane_mode=args.inbound_lane_mode,
                 connect_timeout_seconds=max(0.2, args.rabbitmq_connect_timeout_seconds),
             )
         )

@@ -334,6 +334,7 @@ def test_inbound_rabbitmq_load_test_uses_broker_partition_path(tmp_path, monkeyp
             rabbitmq_partitions=4,
             rabbitmq_prefetch=1,
             session_count=3,
+            lane_mode="local",
             connect_timeout_seconds=0.2,
         )
     )
@@ -357,9 +358,43 @@ def test_inbound_rabbitmq_load_test_uses_broker_partition_path(tmp_path, monkeyp
     assert context["effective_task_workers"] == 2
     assert context["inbound_session_count"] == 3
     assert context["inbound_partitions"] == 4
+    assert context["lane_mode"] == "local"
+    assert context["max_active_lanes"] >= 1
+    assert context["max_same_session_concurrency"] == 1
+    assert context["lane_acquire_attempts"] >= 6
     assert context["broker_after_publish"]["messages"] == 6
     assert context["broker_after_consume"]["messages"] == 0
     assert "inbound-rabbitmq 基线" in render_markdown(result)
+
+
+def test_inbound_rabbitmq_load_test_can_disable_lane_probe(tmp_path, monkeypatch) -> None:
+    FakeInboundRabbitMQBroker.queues = {}
+    FakeInboundRabbitMQBroker.dead = []
+    monkeypatch.setattr(load_test_gateway, "RabbitMQInboundTaskBroker", FakeInboundRabbitMQBroker)
+
+    samples, _wall_seconds, context = asyncio.run(
+        run_inbound_rabbitmq(
+            requests=2,
+            concurrency=2,
+            agent_delay_ms=0,
+            work_dir=tmp_path / "work",
+            rabbitmq_url="amqp://example",
+            rabbitmq_exchange="inbound-ex",
+            rabbitmq_queue_prefix="inbound-q",
+            rabbitmq_dead_letter_exchange="inbound-dlx",
+            rabbitmq_dead_letter_queue="inbound-dlq",
+            rabbitmq_partitions=2,
+            rabbitmq_prefetch=1,
+            session_count=1,
+            lane_mode="off",
+            connect_timeout_seconds=0.2,
+        )
+    )
+
+    assert sum(1 for sample in samples if sample.ok) == 2
+    assert context["lane_mode"] == "off"
+    assert context["max_active_lanes"] == 0
+    assert context["max_same_session_concurrency"] == 0
 
 
 def test_model_real_requires_explicit_external_opt_in() -> None:

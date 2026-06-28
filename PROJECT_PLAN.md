@@ -541,7 +541,7 @@ sudo systemctl start agent-gateway
 | `mock-local` | 1、4、8、16、32 | 找网关本地调度上限和入站 lane 瓶颈 | 否 |
 | `delivery-local` | 1、4、8、16 | 找 PostgreSQL + 本地投递轮询瓶颈 | 否 |
 | `delivery-rabbitmq` | 1、4、8、16、32 | 找 RabbitMQ 分发、reserve 和 ack 瓶颈 | 否 |
-| `inbound-rabbitmq` | 1、4、8、16、32 | 找 RabbitMQ 入站分区、task_id 预占、TaskWorkerRuntime 和热点 session 瓶颈 | 否 |
+| `inbound-rabbitmq` | 1、4、8、16、32 | 找 RabbitMQ 入站分区、task_id 预占、session lane ownership、TaskWorkerRuntime 和热点 session 瓶颈 | 否 |
 | `feishu-webhook` | 1、2、4、8 | 验证飞书入站和出站真实稳定性 | 是 |
 | `model-real` | 1、2、4 | 验证真实模型 profile、fallback、限流和上下文开销 | 是 |
 
@@ -599,7 +599,7 @@ sudo systemctl start agent-gateway
 | 20.8.2 压测脚本 MVP | 已完成 | 新增 `scripts/load_test_gateway.py`，支持 `mock-local` 场景、并发、请求数、模拟 Agent/Delivery 延迟、JSON/Markdown 输出。 | 能跑 `mock-local` 并生成报告到 `workspace/reports/load-tests/`。 |
 | 20.8.3a 本地投递队列压测 | 已完成 | `delivery-local` 场景已接入真实 `DeliveryQueue`、`DeliveryRuntime` 和 mock channel，测量本地文件投递队列的单 worker flush 吞吐。 | 能生成本地投递队列报告，展示最大投递积压、吞吐和投递 P95。 |
 | 20.8.3b RabbitMQ 投递链路压测 | 已完成 | 新增 `delivery-rabbitmq` 场景，覆盖 RabbitMQ 分发、DeliveryQueue reserve、DeliveryRuntime consume、ack 和 broker stats。 | 已能对比 `delivery-local` 和 `delivery-rabbitmq` 的吞吐、积压和 P95。 |
-| 20.8.3c RabbitMQ 入站任务压测 | 已完成 | 新增 `inbound-rabbitmq` 场景，覆盖 RabbitMQ 入站分区、轻量 task_id 引用、`LocalTaskQueue.reserve_task_id()`、`TaskWorkerRuntime` hybrid consume、worker 池和 session 分布参数。 | 能生成入站 broker 报告，展示最大入站积压、吞吐、P95、分区数、命中分区数和消费后 broker 积压。 |
+| 20.8.3c RabbitMQ 入站任务压测 | 已完成 | 新增 `inbound-rabbitmq` 场景，覆盖 RabbitMQ 入站分区、轻量 task_id 引用、`LocalTaskQueue.reserve_task_id()`、`TaskWorkerRuntime` hybrid consume、worker 池、session 分布参数和本地 lane ownership 探针；压测 worker 使用独立 broker 连接，避免共享 pika channel。 | 能生成入站 broker 报告，展示最大入站积压、吞吐、P95、分区数、命中分区数、最大活跃 lane、同 session 最大并发和消费后 broker 积压；本机 smoke 已验证 `max_same_session_concurrency=1` 且消费后 broker 积压为 0。 |
 | 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 和 `feishu-send-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型或发送真实飞书消息；飞书 Webhook 入站压测仍待补齐。 | 已能低并发验证真实模型、上下文装配、AgentLoopRunner 延迟和飞书出站发送延迟；后续补真实飞书入站链路。 |
 | 20.8.5 Prometheus metrics endpoint | 已完成 | Dashboard HTTP 服务新增 `/metrics`，输出 Prometheus text exposition，覆盖 metrics 可用性、窗口样本数、投递积压、入站 lane、事件错误、Cron 和模型 profile 指标。 | Prometheus 可 scrape，指标名稳定。 |
 | 20.8.6 容量基线报告 | 已完成 | 新增 `scripts/build_capacity_baseline.py`，可汇总 load-test JSON，按场景生成容量基线 Markdown，包含吞吐、P95、错误率、积压和瓶颈判断。 | `workspace/reports/capacity-baseline.md` 下有可复现 Markdown 报告。 |
@@ -901,7 +901,7 @@ python scripts/build_capacity_baseline.py
 | 20.9.9 RabbitMQ 入站 broker MVP | 已完成 | 新增 `RabbitMQInboundTaskBroker`，按 `hash(session_key) % partitions` 发布轻量任务引用；消息体只包含 task_id、task_type、session_key、partition、idempotency_key 和 published_at，不包含用户正文或 payload。 | 同 session 稳定进入同一分区；RabbitMQ 不保存完整入站消息；broker 支持 ack/nack、DLQ topology、stats 和 purge。 |
 | 20.9.10 task_id 精确预占 | 已完成 | `LocalTaskQueue.reserve_task_id()` 和 PostgreSQL `reserve_task_id()` 支持按 broker 消息中的 task_id 原子预占，过滤 task_type、状态和 blocked session。 | 过期 broker 消息不会重复执行已完成任务；worker 不会因为 broker 唤醒而抢到其他 session 的任务。 |
 | 20.9.11 worker hybrid consume | 已完成 | `TaskWorkerRuntime.run_once()` 优先消费 RabbitMQ 入站分区消息，预占成功后执行 handler；无 broker 消息时回退原有 PostgreSQL/本地轮询。 | RabbitMQ 可作为分布式唤醒/分发层；broker 不可用或发布失败时任务仍保留在 TaskStore 等待轮询消费。 |
-| 20.9.12 入站 broker 观测与压测 | 已完成 | 已将入站 RabbitMQ broker stats 暴露到 `runtime.status.tasks.broker`，Dashboard 后台任务卡片展示入站 Broker 开关、分区数、prefetch、总积压、死信和前 6 个分区积压；Prometheus 已输出 `gateway_tasks_*` broker 积压、死信、分区和最大分区积压指标；broker 消费已记录 `task.broker.acked/requeued/discarded` 事件；`inbound-rabbitmq` 压测场景可验证 partition/worker/session 分布。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session。 |
+| 20.9.12 入站 broker 观测与压测 | 已完成 | 已将入站 RabbitMQ broker stats 暴露到 `runtime.status.tasks.broker`，Dashboard 后台任务卡片展示入站 Broker 开关、分区数、prefetch、总积压、死信和前 6 个分区积压；Prometheus 已输出 `gateway_tasks_*` broker 积压、死信、分区和最大分区积压指标；broker 消费已记录 `task.broker.acked/requeued/discarded` 事件；`inbound-rabbitmq` 压测场景可验证 partition/worker/session 分布和同 session 串行。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session。 |
 
 推荐落地顺序：
 
