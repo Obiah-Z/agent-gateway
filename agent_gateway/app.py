@@ -276,7 +276,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     task_worker = TaskWorkerRuntime(
         task_queue,
-        worker_id="local-worker",
+        worker_id=settings.task_worker_id,
+        concurrency=settings.task_worker_concurrency,
         event_store=event_store,
     )
     task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)

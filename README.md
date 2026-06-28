@@ -373,6 +373,30 @@ agent-gateway delivery-republish
 
 `delivery-republish` 会重新发布 pending 和 retrying 投递引用到 RabbitMQ，不会复制完整消息正文。Dashboard 的“投递队列”面板也提供“重建队列”按钮，并展示 pending、retrying、failed、broker 队列和 DLQ 状态。
 
+## 分布式入站任务与 Lane
+
+入站分布式链路采用“TaskStore/PostgreSQL 事实状态 + RabbitMQ 轻量任务引用 + Redis session lane ownership”的组合：
+
+- 外部通道接入后先解析、验签、去重和标准化，不在入口层直接长时间执行 Agent。
+- 开启入站任务队列后，非 CLI 入站会先写入 `agent_inbound` 任务，再由 task worker 执行。
+- `GATEWAY_INBOUND_BROKER=rabbitmq` 时，任务落库后会把 `task_id`、`session_key`、partition 等轻量引用发布到 RabbitMQ 分区队列。
+- Redis lane ownership 用 `session_key` 做互斥，保证同一会话同一时间只有一个 worker 进入 AgentLoop；不同 session 可并行执行。
+- `GATEWAY_TASK_WORKER_ID` 用于标识当前 worker，建议多实例部署时每个实例使用不同 ID；`GATEWAY_TASK_WORKER_CONCURRENCY` 用于控制单实例 worker 池并发。
+
+典型配置：
+
+```env
+GATEWAY_INBOUND_TASK_QUEUE_ENABLED=true
+GATEWAY_INBOUND_BROKER=rabbitmq
+GATEWAY_INBOUND_RABBITMQ_PARTITIONS=16
+GATEWAY_INBOUND_RABBITMQ_PREFETCH=1
+GATEWAY_REDIS_ENABLED=true
+GATEWAY_INBOUND_SESSION_LOCK_TTL_SECONDS=300
+GATEWAY_INBOUND_SESSION_LOCK_RENEW_INTERVAL_SECONDS=0
+GATEWAY_TASK_WORKER_ID=worker-1
+GATEWAY_TASK_WORKER_CONCURRENCY=4
+```
+
 ## 飞书接入
 
 项目支持两种飞书接入方式：

@@ -172,6 +172,7 @@ agent-gateway --env-file /etc/agent-gateway/agent-gateway.env postgres-check-sch
 ## 当前边界
 
 - service 示例默认使用单进程 `GATEWAY_RUNTIME_ROLES=all`。
+- 如果拆分多个 worker service，确保每个实例使用不同的 `GATEWAY_TASK_WORKER_ID`，并根据 CPU、模型调用限流和工具执行成本调整 `GATEWAY_TASK_WORKER_CONCURRENCY`。
 - Dashboard 默认绑定 `127.0.0.1`，不建议直接暴露公网。
 - 飞书 Webhook 生产环境需要 HTTPS，后续应通过 Nginx/Caddy 反向代理暴露。
 - `ExecStartPre` 会执行 `agent-gateway doctor`；如果存在 `FAIL`，systemd 会拒绝启动服务。

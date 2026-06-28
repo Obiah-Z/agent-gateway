@@ -7,6 +7,7 @@ from agent_gateway.app import build_application
 from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.state.factory import StateRepositoryBundle
 from agent_gateway.runtime.state.repository import StateReadRepository
+from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
 
 
 class FakeConfigReadRepository(StateReadRepository):
@@ -165,3 +166,30 @@ def test_build_application_injects_primary_write_backend_only_when_enabled(
     assert enabled_app.metrics_store.write_backend is not None
     assert enabled_app.alert_store.write_backend is not None
     assert enabled_app.delivery_queue.write_backend is not None
+
+
+def test_build_application_uses_configured_task_worker_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        task_worker_id="worker-east-1",
+        task_worker_concurrency=5,
+    )
+
+    def fake_build_state_repository(settings, **kwargs):
+        del settings, kwargs
+        return StateRepositoryBundle(read=None, write=None, config_write=None, backup=None)
+
+    monkeypatch.setattr(gateway_app, "build_state_repository", fake_build_state_repository)
+
+    application = build_application(settings)
+    agent_handler = application.task_worker.handlers["agent_inbound"]
+
+    assert application.task_worker.worker_id == "worker-east-1"
+    assert application.task_worker.concurrency == 5
+    assert isinstance(agent_handler, AgentInboundTaskHandler)
+    assert agent_handler.worker_id == "worker-east-1"

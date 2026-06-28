@@ -103,6 +103,8 @@ class GatewaySettings:
     inbound_task_queue_enabled: bool = False
     inbound_session_lock_ttl_seconds: int = 300
     inbound_session_lock_renew_interval_seconds: float = 0.0
+    task_worker_id: str = "local-worker"
+    task_worker_concurrency: int = 2
     background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor")
     heartbeat_interval_seconds: float = 1800.0
     heartbeat_active_start: int = 9
@@ -315,6 +317,12 @@ class GatewaySettings:
             inbound_session_lock_renew_interval_seconds=max(
                 0.0,
                 float(os.getenv("GATEWAY_INBOUND_SESSION_LOCK_RENEW_INTERVAL_SECONDS", "0")),
+            ),
+            task_worker_id=os.getenv("GATEWAY_TASK_WORKER_ID", "local-worker").strip()
+            or "local-worker",
+            task_worker_concurrency=max(
+                1,
+                int(os.getenv("GATEWAY_TASK_WORKER_CONCURRENCY", "2")),
             ),
             background_inbound_commands=parse_csv_tuple(
                 os.getenv(

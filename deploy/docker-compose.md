@@ -192,4 +192,4 @@ docker compose exec gateway agent-gateway postgres-init
 - 当前 Compose 是单机编排，不是 Kubernetes 或多主高可用部署。
 - Dashboard 默认仍无鉴权，只绑定本机；不要直接改成 `0.0.0.0` 暴露公网。
 - 飞书 Webhook 生产接入需要 HTTPS，后续应通过 Nginx/Caddy 反向代理补齐。
-- `gateway` 当前以 `GATEWAY_RUNTIME_ROLES=all` 运行；多实例拆分可在后续阶段按 `api/worker/delivery/scheduler/dashboard` 角色扩展。
+- `gateway` 当前以 `GATEWAY_RUNTIME_ROLES=all` 运行；多实例拆分可按 `api/worker/delivery/scheduler/dashboard` 角色扩展。拆出多个 worker 时，为每个实例配置不同的 `GATEWAY_TASK_WORKER_ID`，并按机器容量调整 `GATEWAY_TASK_WORKER_CONCURRENCY`。

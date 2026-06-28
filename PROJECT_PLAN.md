@@ -278,7 +278,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 19：生产部署形态
 
-状态：待实现。
+状态：进行中。
 
 目标：
 
@@ -902,6 +902,7 @@ python scripts/build_capacity_baseline.py
 | 20.9.10 task_id 精确预占 | 已完成 | `LocalTaskQueue.reserve_task_id()` 和 PostgreSQL `reserve_task_id()` 支持按 broker 消息中的 task_id 原子预占，过滤 task_type、状态和 blocked session。 | 过期 broker 消息不会重复执行已完成任务；worker 不会因为 broker 唤醒而抢到其他 session 的任务。 |
 | 20.9.11 worker hybrid consume | 已完成 | `TaskWorkerRuntime.run_once()` 优先消费 RabbitMQ 入站分区消息，预占成功后执行 handler；无 broker 消息时回退原有 PostgreSQL/本地轮询。 | RabbitMQ 可作为分布式唤醒/分发层；broker 不可用或发布失败时任务仍保留在 TaskStore 等待轮询消费。 |
 | 20.9.12 入站 broker 观测与压测 | 已完成 | 已将入站 RabbitMQ broker stats 暴露到 `runtime.status.tasks.broker`，Dashboard 后台任务卡片展示入站 Broker 开关、分区数、prefetch、总积压、死信和前 6 个分区积压；Prometheus 已输出 `gateway_tasks_*` broker 积压、死信、分区和最大分区积压指标；broker 消费已记录 `task.broker.acked/requeued/discarded` 事件；`inbound-rabbitmq` 压测场景可验证 partition/worker/session 分布、本地 lane 探针和真实 Redis lane ownership。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session；已完成 RabbitMQ + Redis lane smoke，证明同 session 串行且 broker 积压可清零。 |
+| 20.9.13 worker identity 与并发配置 | 已完成 | 新增 `GATEWAY_TASK_WORKER_ID` 和 `GATEWAY_TASK_WORKER_CONCURRENCY`，应用装配时传入 `TaskWorkerRuntime`，并同步给 `AgentInboundTaskHandler` 的 lane owner metadata。 | 多 worker / 多实例部署时，每个 worker 的 Redis lane owner、事件和 Dashboard 样例可区分；单实例 worker 池并发可按机器容量调整。 |
 
 推荐落地顺序：
 
