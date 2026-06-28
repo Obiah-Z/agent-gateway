@@ -31,7 +31,7 @@ from agent_gateway.runtime.state.queue import DeliveryQueue
 
 
 DEFAULT_REPORT_DIR = Path("workspace/reports/load-tests")
-SUPPORTED_SCENARIOS = {"delivery-local", "delivery-rabbitmq", "mock-local", "model-real"}
+SUPPORTED_SCENARIOS = {"delivery-local", "delivery-rabbitmq", "feishu-send-real", "mock-local", "model-real"}
 
 
 @dataclass(slots=True)
@@ -479,6 +479,93 @@ async def run_model_real(
     return list(samples), wall_seconds, context
 
 
+async def _run_feishu_send_real_request(
+    *,
+    channel: Channel,
+    request_index: int,
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    peer_id: str,
+    text: str,
+) -> RequestSample:
+    """Send one real Feishu outbound message through the configured channel."""
+
+    request_id = f"feishu-send-{request_index:06d}-{uuid.uuid4().hex[:8]}"
+    async with semaphore:
+        started = time.perf_counter()
+        outbound = OutboundMessage(
+            channel="feishu",
+            to=peer_id,
+            text=f"{text}\n\n[load-test:{request_id}]",
+            metadata={
+                "account_id": account_id,
+                "kind": "load-test",
+                "request_id": request_id,
+                "correlation_id": request_id,
+            },
+        )
+        try:
+            ok = await asyncio.to_thread(channel.send, outbound)
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            return RequestSample(
+                request_id=request_id,
+                ok=bool(ok),
+                error="" if ok else "channel.send returned false",
+                e2e_ms=elapsed_ms,
+                agent_turn_ms=0.0,
+                delivery_ms=elapsed_ms,
+            )
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            return RequestSample(
+                request_id=request_id,
+                ok=False,
+                error=str(exc),
+                e2e_ms=elapsed_ms,
+                agent_turn_ms=0.0,
+                delivery_ms=elapsed_ms,
+            )
+
+
+async def run_feishu_send_real(
+    *,
+    requests: int,
+    concurrency: int,
+    account_id: str,
+    peer_id: str,
+    text: str,
+) -> tuple[list[RequestSample], float, dict[str, Any]]:
+    """Run a real Feishu outbound send scenario without model calls."""
+
+    app = build_gateway_application()
+    channel = app.channel_manager.get("feishu", account_id)
+    if channel is None:
+        raise ValueError(f"feishu channel account not found: {account_id}")
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    started = time.perf_counter()
+    samples = await asyncio.gather(
+        *[
+            _run_feishu_send_real_request(
+                channel=channel,
+                request_index=index,
+                semaphore=semaphore,
+                account_id=account_id,
+                peer_id=peer_id,
+                text=text,
+            )
+            for index in range(1, requests + 1)
+        ]
+    )
+    wall_seconds = time.perf_counter() - started
+    context = {
+        "uses_real_feishu": True,
+        "feishu_account_id": account_id,
+        "peer_id": peer_id,
+        "text_length": len(text),
+    }
+    return list(samples), wall_seconds, context
+
+
 def git_commit() -> str:
     """Return current short git commit for report reproducibility."""
 
@@ -582,6 +669,12 @@ def render_markdown(result: dict[str, Any]) -> str:
         suggestion = "低并发逐步提升，优先观察 P95、错误率、限流和 profile fallback。"
         middleware = "使用真实模型配置；不访问真实飞书发送链路"
         runtime_role = "model-real script"
+    if scenario["name"] == "feishu-send-real":
+        bottleneck = "feishu-send-real 基线主要反映飞书出站 API、lark-cli 或 token 刷新延迟"
+        evidence = "该场景不调用模型，只通过已配置飞书通道向指定 peer 发送真实消息。"
+        suggestion = "从 requests=1 concurrency=1 开始，逐步观察 P95、失败率和平台限流。"
+        middleware = "使用真实飞书发送链路；不调用真实模型"
+        runtime_role = "feishu-send-real script"
     if summary["error_rate"] > 0:
         bottleneck = "存在请求失败，优先检查脚本错误和本地资源"
     return "\n".join(
@@ -666,6 +759,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agent-id", default="main")
     parser.add_argument("--session-prefix", default="load-test")
     parser.add_argument("--prompt", default="请用一句中文回复 pong，不要调用工具。")
+    parser.add_argument("--feishu-account-id", default="")
+    parser.add_argument("--feishu-peer-id", default="")
+    parser.add_argument("--message-text", default="AI Agent Gateway 飞书发送压测。")
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
@@ -686,6 +782,20 @@ def main(argv: list[str] | None = None) -> int:
                 agent_id=args.agent_id,
                 session_prefix=args.session_prefix,
                 prompt=args.prompt,
+            )
+        )
+    elif args.scenario == "feishu-send-real":
+        if not args.allow_real_external:
+            raise SystemExit("feishu-send-real 会发送真实飞书消息；请显式添加 --allow-real-external 后再运行。")
+        if not args.feishu_account_id or not args.feishu_peer_id:
+            raise SystemExit("feishu-send-real 需要同时提供 --feishu-account-id 和 --feishu-peer-id。")
+        samples, wall_seconds, context = asyncio.run(
+            run_feishu_send_real(
+                requests=requests,
+                concurrency=concurrency,
+                account_id=args.feishu_account_id,
+                peer_id=args.feishu_peer_id,
+                text=args.message_text,
             )
         )
     elif args.scenario == "delivery-rabbitmq":

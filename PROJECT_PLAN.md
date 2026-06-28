@@ -475,7 +475,7 @@ delivery-worker
 | 20.8.2 压测脚本 MVP | 已完成 | 新增 `scripts/load_test_gateway.py`，支持 `mock-local` 场景、并发、请求数、模拟 Agent/Delivery 延迟、JSON/Markdown 输出。 | 能跑 `mock-local` 并生成报告到 `workspace/reports/load-tests/`。 |
 | 20.8.3a 本地投递队列压测 | 已完成 | `delivery-local` 场景已接入真实 `DeliveryQueue`、`DeliveryRuntime` 和 mock channel，测量本地文件投递队列的单 worker flush 吞吐。 | 能生成本地投递队列报告，展示最大投递积压、吞吐和投递 P95。 |
 | 20.8.3b RabbitMQ 投递链路压测 | 已完成 | 新增 `delivery-rabbitmq` 场景，覆盖 RabbitMQ 分发、DeliveryQueue reserve、DeliveryRuntime consume、ack 和 broker stats。 | 已能对比 `delivery-local` 和 `delivery-rabbitmq` 的吞吐、积压和 P95。 |
-| 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型；飞书 Webhook / 发送真实链路仍待补齐。 | 已能低并发验证真实模型、上下文装配和 AgentLoopRunner 延迟；后续补真实飞书链路。 |
+| 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 和 `feishu-send-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型或发送真实飞书消息；飞书 Webhook 入站压测仍待补齐。 | 已能低并发验证真实模型、上下文装配、AgentLoopRunner 延迟和飞书出站发送延迟；后续补真实飞书入站链路。 |
 | 20.8.5 Prometheus metrics endpoint | 待实现 | 暴露 `/metrics` 或控制面等价接口，输出核心计数和队列指标。 | Prometheus 可 scrape，指标名稳定。 |
 | 20.8.6 容量基线报告 | 待实现 | 汇总当前机器在典型配置下的吞吐、P95、错误率和瓶颈。 | `reports/` 下有可复现 Markdown 报告。 |
 
@@ -593,6 +593,36 @@ python scripts/load_test_gateway.py \
 - `model-real` 会真实调用模型，建议从 `requests=1 concurrency=1` 开始，避免误判限流或产生额外费用。
 - 该场景生成真实会话记录，建议使用独立 `--session-prefix` 标记压测会话，便于后续清理。
 - 飞书 Webhook 入站和飞书发送出站还未接入真实链路压测，后续可增加 `feishu-webhook` 或 `feishu-send-real` 场景。
+
+##### 20.8.4b 飞书真实发送压测结果
+
+已完成内容：
+
+- `scripts/load_test_gateway.py` 新增 `feishu-send-real` 场景。
+- 该场景复用真实 `build_application().channel_manager.get("feishu", account_id).send()`，会走当前配置的飞书发送方式、token 刷新、lark-cli 或 OpenAPI 出站链路。
+- 为避免误刷飞书消息，运行时必须显式添加 `--allow-real-external`。
+- 为避免误发到默认对象，运行时必须同时传入 `--feishu-account-id` 和 `--feishu-peer-id`。
+- 该场景不调用模型，不经过 Agent Loop，只用于分离飞书出站 API、lark-cli、token 刷新和平台限流的耗时。
+- 报告会把 `uses_real_model=false`、`uses_real_feishu=true` 明确写入 JSON / Markdown。
+
+使用示例：
+
+```bash
+python scripts/load_test_gateway.py \
+  --scenario feishu-send-real \
+  --allow-real-external \
+  --requests 1 \
+  --concurrency 1 \
+  --feishu-account-id feishu-main \
+  --feishu-peer-id ou_xxx \
+  --message-text "AI Agent Gateway 飞书发送压测。"
+```
+
+当前边界：
+
+- `feishu-send-real` 会真实发送飞书消息，建议从 `requests=1 concurrency=1` 开始。
+- 该场景不测试飞书 Webhook 入站、事件验签、去重和路由，后续需要单独增加 `feishu-webhook` 场景。
+- 该场景不经过可靠投递队列；如需测“入队到飞书发送”的真实出站链路，应新增基于 `DeliveryQueue + DeliveryRuntime + FeishuChannel` 的场景。
 
 #### 当前实现说明
 

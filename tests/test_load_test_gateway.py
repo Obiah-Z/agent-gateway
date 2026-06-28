@@ -9,6 +9,7 @@ from scripts.load_test_gateway import (
     percentile,
     run_delivery_local,
     run_delivery_rabbitmq,
+    run_feishu_send_real,
     run_model_real,
     render_markdown,
     run_mock_local,
@@ -67,11 +68,25 @@ class FakeRunner:
 class FakeApp:
     def __init__(self) -> None:
         self.runner = FakeRunner()
+        self.channel_manager = SimpleNamespace(
+            get=lambda name, account_id="": FakeFeishuChannel()
+            if name == "feishu" and account_id == "feishu-main"
+            else None
+        )
         self.settings = SimpleNamespace(
             model_id="fake-model",
             anthropic_base_url="https://example.test",
             anthropic_api_key="fake-key",
         )
+
+
+class FakeFeishuChannel:
+    def __init__(self) -> None:
+        self.sent = []
+
+    def send(self, outbound) -> bool:
+        self.sent.append(outbound)
+        return True
 
 
 def test_percentile_uses_nearest_rank() -> None:
@@ -219,3 +234,51 @@ def test_model_real_load_test_uses_real_model_flag(tmp_path, monkeypatch) -> Non
     assert result["scenario"]["uses_real_feishu"] is False
     assert context["model_id"] == "fake-model"
     assert "model-real 基线" in render_markdown(result)
+
+
+def test_feishu_send_real_requires_explicit_external_opt_in() -> None:
+    try:
+        main(["--scenario", "feishu-send-real", "--requests", "1"])
+    except SystemExit as exc:
+        assert "allow-real-external" in str(exc)
+    else:  # pragma: no cover - regression guard.
+        raise AssertionError("feishu-send-real should require --allow-real-external")
+
+
+def test_feishu_send_real_requires_target() -> None:
+    try:
+        main(["--scenario", "feishu-send-real", "--allow-real-external", "--requests", "1"])
+    except SystemExit as exc:
+        assert "feishu-account-id" in str(exc)
+    else:  # pragma: no cover - regression guard.
+        raise AssertionError("feishu-send-real should require target args")
+
+
+def test_feishu_send_real_load_test_uses_real_feishu_flag(monkeypatch) -> None:
+    monkeypatch.setattr(load_test_gateway, "build_gateway_application", lambda: FakeApp())
+
+    samples, wall_seconds, context = asyncio.run(
+        run_feishu_send_real(
+            requests=2,
+            concurrency=1,
+            account_id="feishu-main",
+            peer_id="ou_fake",
+            text="hello",
+        )
+    )
+    result = build_result(
+        scenario="feishu-send-real",
+        requests=2,
+        concurrency=1,
+        wall_seconds=wall_seconds,
+        samples=samples,
+        agent_delay_ms=0,
+        delivery_delay_ms=0,
+        context=context,
+    )
+
+    assert result["summary"]["success"] == 2
+    assert result["scenario"]["uses_real_model"] is False
+    assert result["scenario"]["uses_real_feishu"] is True
+    assert context["feishu_account_id"] == "feishu-main"
+    assert "feishu-send-real 基线" in render_markdown(result)
