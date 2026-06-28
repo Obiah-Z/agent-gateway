@@ -1,9 +1,11 @@
 import asyncio
 import json
+import threading
 from types import SimpleNamespace
 
 import scripts.load_test_gateway as load_test_gateway
 from scripts.load_test_gateway import (
+    build_gateway_application_async,
     build_result,
     main,
     percentile,
@@ -132,6 +134,33 @@ def test_mock_local_load_test_generates_summary_and_reports(tmp_path) -> None:
     assert render_markdown(result).startswith("# AI Agent Gateway 压测报告")
 
 
+def test_main_loads_gateway_env_file(tmp_path, monkeypatch) -> None:
+    loaded = []
+
+    def fake_load_env(path):
+        loaded.append(path)
+
+    monkeypatch.setattr(load_test_gateway, "load_gateway_env", fake_load_env)
+
+    assert main(
+        [
+            "--scenario",
+            "mock-local",
+            "--requests",
+            "1",
+            "--concurrency",
+            "1",
+            "--env-file",
+            str(tmp_path / ".env.test"),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "--basename",
+            "env-load",
+        ]
+    ) == 0
+    assert loaded == [tmp_path / ".env.test"]
+
+
 def test_delivery_local_load_test_uses_real_delivery_queue(tmp_path) -> None:
     samples, wall_seconds, context = asyncio.run(
         run_delivery_local(
@@ -207,7 +236,10 @@ def test_model_real_requires_explicit_external_opt_in() -> None:
 
 
 def test_model_real_load_test_uses_real_model_flag(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(load_test_gateway, "build_gateway_application", lambda: FakeApp())
+    async def fake_build_app():
+        return FakeApp()
+
+    monkeypatch.setattr(load_test_gateway, "build_gateway_application_async", fake_build_app)
 
     samples, wall_seconds, context = asyncio.run(
         run_model_real(
@@ -255,7 +287,10 @@ def test_feishu_send_real_requires_target() -> None:
 
 
 def test_feishu_send_real_load_test_uses_real_feishu_flag(monkeypatch) -> None:
-    monkeypatch.setattr(load_test_gateway, "build_gateway_application", lambda: FakeApp())
+    async def fake_build_app():
+        return FakeApp()
+
+    monkeypatch.setattr(load_test_gateway, "build_gateway_application_async", fake_build_app)
 
     samples, wall_seconds, context = asyncio.run(
         run_feishu_send_real(
@@ -282,3 +317,19 @@ def test_feishu_send_real_load_test_uses_real_feishu_flag(monkeypatch) -> None:
     assert result["scenario"]["uses_real_feishu"] is True
     assert context["feishu_account_id"] == "feishu-main"
     assert "feishu-send-real 基线" in render_markdown(result)
+
+
+def test_build_gateway_application_async_runs_in_worker_thread(monkeypatch) -> None:
+    caller_thread = threading.get_ident()
+    observed: dict[str, int] = {}
+
+    def fake_build_app():
+        observed["thread"] = threading.get_ident()
+        return FakeApp()
+
+    monkeypatch.setattr(load_test_gateway, "build_gateway_application", fake_build_app)
+
+    app = asyncio.run(build_gateway_application_async())
+
+    assert isinstance(app, FakeApp)
+    assert observed["thread"] != caller_thread

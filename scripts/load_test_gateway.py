@@ -141,6 +141,25 @@ def build_gateway_application() -> Any:
     return build_application()
 
 
+def load_gateway_env(env_file: Path | None = None) -> None:
+    """Load gateway `.env` before building settings for standalone scripts."""
+
+    from agent_gateway.config import load_env
+
+    load_env(env_file)
+
+
+async def build_gateway_application_async() -> Any:
+    """Build the real gateway app outside the active asyncio loop.
+
+    `build_application()` still performs some synchronous startup work that calls
+    `asyncio.run()` internally. Running it in a worker thread avoids nested event
+    loops when load-test scenarios are already inside `asyncio.run()`.
+    """
+
+    return await asyncio.to_thread(build_gateway_application)
+
+
 def percentile(values: list[float], percent: float) -> float:
     """Return a nearest-rank percentile value."""
 
@@ -450,7 +469,7 @@ async def run_model_real(
 ) -> tuple[list[RequestSample], float, dict[str, Any]]:
     """Run a low-concurrency real model scenario without sending platform messages."""
 
-    app = build_gateway_application()
+    app = await build_gateway_application_async()
     semaphore = asyncio.Semaphore(max(1, concurrency))
     started = time.perf_counter()
     samples = await asyncio.gather(
@@ -537,7 +556,7 @@ async def run_feishu_send_real(
 ) -> tuple[list[RequestSample], float, dict[str, Any]]:
     """Run a real Feishu outbound send scenario without model calls."""
 
-    app = build_gateway_application()
+    app = await build_gateway_application_async()
     channel = app.channel_manager.get("feishu", account_id)
     if channel is None:
         raise ValueError(f"feishu channel account not found: {account_id}")
@@ -762,6 +781,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--feishu-account-id", default="")
     parser.add_argument("--feishu-peer-id", default="")
     parser.add_argument("--message-text", default="AI Agent Gateway 飞书发送压测。")
+    parser.add_argument("--env-file", type=Path, default=None)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
@@ -769,6 +789,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    load_gateway_env(args.env_file)
     requests = max(1, args.requests)
     concurrency = max(1, args.concurrency)
     context: dict[str, Any] = {}
