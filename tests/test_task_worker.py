@@ -105,6 +105,51 @@ def test_task_worker_records_broker_ack_event(tmp_path: Path) -> None:
     assert events.rows[-1]["metadata"]["reason"] == "task status: done"
 
 
+def test_task_worker_discards_duplicate_broker_message_after_task_done(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    queue = LocalTaskQueue(store)
+    target = queue.enqueue(
+        task_type="echo",
+        source="test",
+        session_key="session-duplicate",
+        payload={"text": "target"},
+    )
+    payload = {
+        "task_id": target.id,
+        "task_type": "echo",
+        "session_key": "session-duplicate",
+        "partition": 1,
+        "idempotency_key": "idem-duplicate",
+    }
+    broker = FakeInboundTaskBroker([payload, dict(payload)])
+    queue.broker = broker
+    events = FakeEventStore()
+    calls: list[str] = []
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=events)
+
+    def handler(item):
+        calls.append(item.id)
+        return f"echo:{item.payload['text']}"
+
+    worker.register_handler("echo", handler)
+
+    first_handled = asyncio.run(worker.run_once())
+    second_handled = asyncio.run(worker.run_once())
+
+    assert first_handled is True
+    assert second_handled is True
+    assert calls == [target.id]
+    assert broker.acked == [target.id, target.id]
+    assert broker.nacked == []
+    assert store.get(target.id).status == "done"
+    assert [row["type"] for row in events.rows[-2:]] == [
+        "task.broker.acked",
+        "task.broker.discarded",
+    ]
+    assert events.rows[-1]["status"] == "ok"
+    assert events.rows[-1]["metadata"]["reason"] == "task status: done"
+
+
 def test_task_worker_records_broker_requeue_for_unregistered_handler(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     broker = FakeInboundTaskBroker(

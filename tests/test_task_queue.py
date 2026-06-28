@@ -142,6 +142,43 @@ def test_local_task_queue_falls_back_when_primary_reserve_fails(tmp_path: Path) 
     assert reserved.metadata["worker_id"] == "worker-local"
 
 
+def test_local_task_queue_reserve_task_id_falls_back_when_primary_fails(tmp_path: Path) -> None:
+    class FailingWriteBackend:
+        def reserve_task_id(
+            self,
+            *,
+            task_id: str,
+            worker_id: str,
+            task_types: list[str],
+            blocked_session_keys: list[str],
+            now: float | None = None,
+        ):
+            del task_id, worker_id, task_types, blocked_session_keys, now
+            raise RuntimeError("database unavailable")
+
+    store = LocalTaskStore(tmp_path / "tasks")
+    store.write_backend = FailingWriteBackend()
+    queue = LocalTaskQueue(store)
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-db-fallback",
+    )
+
+    reserved = queue.reserve_task_id(
+        task.id,
+        worker_id="worker-local",
+        task_types=["agent_inbound"],
+        now=200.0,
+    )
+
+    assert reserved is not None
+    assert reserved.id == task.id
+    assert reserved.status == "running"
+    assert reserved.metadata["worker_id"] == "worker-local"
+    assert store.get(task.id).status == "running"
+
+
 def test_local_task_queue_skips_blocked_session_keys(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     blocked = queue.enqueue(

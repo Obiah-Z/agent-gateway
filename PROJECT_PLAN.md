@@ -903,12 +903,13 @@ python scripts/build_capacity_baseline.py
 | 20.9.11 worker hybrid consume | 已完成 | `TaskWorkerRuntime.run_once()` 优先消费 RabbitMQ 入站分区消息，预占成功后执行 handler；无 broker 消息时回退原有 PostgreSQL/本地轮询。 | RabbitMQ 可作为分布式唤醒/分发层；broker 不可用或发布失败时任务仍保留在 TaskStore 等待轮询消费。 |
 | 20.9.12 入站 broker 观测与压测 | 已完成 | 已将入站 RabbitMQ broker stats 暴露到 `runtime.status.tasks.broker`，Dashboard 后台任务卡片展示入站 Broker 开关、分区数、prefetch、总积压、死信和前 6 个分区积压；Prometheus 已输出 `gateway_tasks_*` broker 积压、死信、分区和最大分区积压指标；broker 消费已记录 `task.broker.acked/requeued/discarded` 事件；`inbound-rabbitmq` 压测场景可验证 partition/worker/session 分布、本地 lane 探针和真实 Redis lane ownership。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session；已完成 RabbitMQ + Redis lane smoke，证明同 session 串行且 broker 积压可清零。 |
 | 20.9.13 worker identity 与并发配置 | 已完成 | 新增 `GATEWAY_TASK_WORKER_ID` 和 `GATEWAY_TASK_WORKER_CONCURRENCY`，应用装配时传入 `TaskWorkerRuntime`，并同步给 `AgentInboundTaskHandler` 的 lane owner metadata。 | 多 worker / 多实例部署时，每个 worker 的 Redis lane owner、事件和 Dashboard 样例可区分；单实例 worker 池并发可按机器容量调整。 |
+| 20.9.14 故障注入补强 | 进行中 | 已补重复 RabbitMQ 入站消息幂等验证：已完成 task 的重复 broker 消息会 ack/discard，不会再次执行 handler；已补 PostgreSQL/主存储 `reserve_task_id` 短暂异常时的本地 TaskStore fallback 验证。 | 继续补真实 RabbitMQ 不可用、worker crash、lane owner TTL 过期和 PostgreSQL 短暂不可用的集成 smoke，形成可复现故障注入清单。 |
 
 推荐落地顺序：
 
-1. 先完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
-2. 再补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
-3. 再做故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
+1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
+2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
+3. 当前继续做故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
 4. 最后评估是否需要把 lane state 从 Redis lock 进一步升级为 PostgreSQL 持久 lane 表。
 
 阶段完成标准：
