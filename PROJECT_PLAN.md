@@ -351,7 +351,7 @@ delivery-worker
 | 20.4 PostgreSQL 状态外置 | 已完成 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明、状态迁移审计，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计；Prompt、Skill、Cron 配置等运行资产继续文件化。 |
 | 20.6 分布式可靠队列升级 | 已完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
-| 20.7 生产部署编排 | 进行中 | 已完成 Dockerfile、Docker Compose、基础依赖编排、数据卷和部署说明；后续补启动前检查、systemd、备份恢复、反向代理和 HTTPS。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
+| 20.7 生产部署编排 | 已完成 | 已完成 Dockerfile、Docker Compose、基础依赖编排、启动前检查、systemd、备份恢复、反向代理 HTTPS、多角色 Compose overlay 和部署说明。 | 新机器可按文档启动完整依赖和 Gateway 服务，并可验证多角色分布式 lane 部署形态。 |
 | 20.8 统一观测与压测 | 进行中 | 先定义压测指标口径、场景边界和报告格式，再增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
 | 20.9 分布式入站任务顺序与互斥 | 已完成 | 已在 `agent_inbound` 入站任务队列化基础上，补齐 RabbitMQ 分区入站 broker、Redis/PostgreSQL session lane ownership、worker 抢占治理、TTL 接管、运行观测、恢复工具和 readiness smoke。 | 多 worker / 多实例消费入站任务时，同一 session 不并发执行，失败可重试，顺序风险可观测，并可用 readiness smoke 验证部署条件。 |
 
@@ -359,8 +359,8 @@ delivery-worker
 
 1. 20.1 到 20.6 已完成，架构边界、Redis、PostgreSQL、后台任务队列和 RabbitMQ 可靠投递已经进入主链路。
 2. 20.9 已完成，入站任务已具备 RabbitMQ 分区 broker、Redis/PostgreSQL lane ownership、TTL 接管、恢复工具、Dashboard 观测和 readiness smoke。
-3. 当前建议优先补齐 20.7：备份恢复、反向代理 HTTPS、Docker Compose 多角色拆分和新机器部署 Runbook。
-4. 同步推进 20.8：用 mock、本地投递、RabbitMQ、真实模型、完整飞书链路分别建立容量基线，区分网关调度能力和模型调用瓶颈。
+3. 20.7 已完成，部署侧已具备 Docker Compose、systemd、备份恢复、反向代理 HTTPS 和多角色 Compose overlay。
+4. 当前建议优先收口 20.8：用 mock、本地投递、RabbitMQ、真实模型、完整飞书链路分别建立容量基线，区分网关调度能力和模型调用瓶颈。
 5. Phase 20 收口前应至少完成一次 `docker compose` 部署验收、`lane-doctor` 检查、readiness smoke、压测报告和故障恢复演练。
 
 #### 完成标准
@@ -375,7 +375,7 @@ delivery-worker
 
 #### Phase 20.7 生产部署编排
 
-状态：进行中。
+状态：已完成。
 
 目标：
 
