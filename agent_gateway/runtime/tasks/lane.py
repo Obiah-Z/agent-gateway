@@ -85,9 +85,11 @@ class RedisLaneCoordinator:
         redis_client: RedisClient | None,
         *,
         namespace: str = "gateway:lane:agent_inbound",
+        state_repository: Any | None = None,
     ) -> None:
         self.redis_client = redis_client
         self.namespace = namespace.strip(":") or "gateway:lane:agent_inbound"
+        self.state_repository = state_repository
 
     @property
     def enabled(self) -> bool:
@@ -123,13 +125,15 @@ class RedisLaneCoordinator:
             renewed_at=current,
         )
         if not self.enabled or not lane_key:
-            return LaneOwnership(
+            ownership = LaneOwnership(
                 session_key=session_key,
                 lane_key=lane_key,
                 owner=owner,
                 ttl_seconds=max(1, int(ttl_seconds)),
                 owner_value=owner_value,
             )
+            self._write_state(ownership, acquired_at=current, renewed_at=current, state="owned")
+            return ownership
         acquired = self.redis_client.acquire_lock(
             lane_key,
             value=owner_value,
@@ -137,13 +141,15 @@ class RedisLaneCoordinator:
         )
         if not acquired:
             return None
-        return LaneOwnership(
+        ownership = LaneOwnership(
             session_key=session_key,
             lane_key=lane_key,
             owner=owner,
             ttl_seconds=max(1, int(ttl_seconds)),
             owner_value=owner_value,
         )
+        self._write_state(ownership, acquired_at=current, renewed_at=current, state="owned")
+        return ownership
 
     def renew(self, ownership: LaneOwnership, *, now: float | None = None) -> LaneOwnership | None:
         """续租当前 owner 持有的 lane。"""
@@ -179,23 +185,34 @@ class RedisLaneCoordinator:
             new_value = ownership.owner_value
         if not replaced:
             return None
-        return LaneOwnership(
+        renewed = LaneOwnership(
             session_key=ownership.session_key,
             lane_key=ownership.lane_key,
             owner=ownership.owner,
             ttl_seconds=ownership.ttl_seconds,
             owner_value=new_value,
         )
+        self._write_state(
+            renewed,
+            acquired_at=acquired_at,
+            renewed_at=current,
+            state="owned",
+        )
+        return renewed
 
     def release(self, ownership: LaneOwnership) -> bool:
         """释放当前 owner 持有的 lane。"""
 
         if not self.enabled or not ownership.lane_key:
+            self._release_state(ownership)
             return True
-        return self.redis_client.release_lock(
+        released = self.redis_client.release_lock(
             ownership.lane_key,
             value=ownership.owner_value,
         )
+        if released:
+            self._release_state(ownership)
+        return released
 
     def is_owned(self, session_key: str) -> bool:
         """检查 session lane 当前是否已有 owner。"""
@@ -252,6 +269,56 @@ class RedisLaneCoordinator:
             ensure_ascii=False,
             sort_keys=True,
         )
+
+    def _write_state(
+        self,
+        ownership: LaneOwnership,
+        *,
+        acquired_at: float,
+        renewed_at: float,
+        state: str,
+    ) -> None:
+        """把 lane owner 状态镜像到持久仓储；失败不影响 Redis 主路径。"""
+
+        writer = getattr(self.state_repository, "write_session_lane", None)
+        if writer is None:
+            return
+        try:
+            writer(
+                {
+                    "session_key": ownership.session_key,
+                    "lane_key": ownership.lane_key,
+                    "worker_id": ownership.owner.worker_id,
+                    "task_id": ownership.owner.task_id,
+                    "owner_token": ownership.owner.value,
+                    "state": state,
+                    "ttl_seconds": ownership.ttl_seconds,
+                    "acquired_at": acquired_at,
+                    "renewed_at": renewed_at,
+                    "updated_at": renewed_at,
+                    "metadata": {
+                        "owner_value": ownership.owner_value,
+                        "source": "redis_lane_coordinator",
+                    },
+                }
+            )
+        except Exception:
+            return
+
+    def _release_state(self, ownership: LaneOwnership) -> None:
+        """把 lane 释放状态镜像到持久仓储；失败不影响释放结果。"""
+
+        releaser = getattr(self.state_repository, "release_session_lane", None)
+        if releaser is None:
+            return
+        try:
+            releaser(
+                ownership.session_key,
+                owner_token=ownership.owner.value,
+                now=time.time(),
+            )
+        except Exception:
+            return
 
     def _decode_owner(
         self,

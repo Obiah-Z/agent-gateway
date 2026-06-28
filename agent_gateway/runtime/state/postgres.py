@@ -327,6 +327,7 @@ def _column_type(table: str, column: str) -> str:
         "last_message_at",
         "locked_at",
         "next_retry_at",
+        "renewed_at",
         "received_at",
         "run_at",
         "seen_at",
@@ -343,6 +344,7 @@ def _column_type(table: str, column: str) -> str:
         "page_index",
         "page_size",
         "retry_count",
+        "ttl_seconds",
         "tier",
         "window_seconds",
     }
@@ -453,6 +455,8 @@ class PostgresReadRepository(StateReadRepository):
         if table == "news_items":
             return self._list_generic_rows(table, limit=limit, filters=filters)
         if table == "feishu_card_states":
+            return self._list_generic_rows(table, limit=limit, filters=filters)
+        if table == "session_lanes":
             return self._list_generic_rows(table, limit=limit, filters=filters)
         sql, params = self._build_list_query(table, limit=limit, filters=filters)
         return self.query(table, sql=sql, params=params)
@@ -622,6 +626,12 @@ class PostgresReadRepository(StateReadRepository):
                     params[key] = value
         if table == "feishu_card_states":
             for key in ("card_id", "owner_account_id", "peer_id", "message_id"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{key} = %({key})s")
+                    params[key] = value
+        if table == "session_lanes":
+            for key in ("session_key", "lane_key", "worker_id", "task_id", "state"):
                 value = str(filters.get(key, ""))
                 if value:
                     clauses.append(f"{key} = %({key})s")
@@ -942,6 +952,7 @@ class PostgresReadRepository(StateReadRepository):
             "cron_runs",
             "news_items",
             "feishu_card_states",
+            "session_lanes",
         }
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
@@ -969,6 +980,7 @@ class PostgresReadRepository(StateReadRepository):
             "cron_runs": "id",
             "news_items": "key",
             "feishu_card_states": "card_id",
+            "session_lanes": "session_key",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -996,6 +1008,7 @@ class PostgresReadRepository(StateReadRepository):
             "cron_runs": "run_at",
             "news_items": "updated_at",
             "feishu_card_states": "updated_at",
+            "session_lanes": "updated_at",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -1047,6 +1060,8 @@ class PostgresWriteRepository:
             return self._append_news_item(row)
         if table == "feishu_card_states":
             return self._append_feishu_card_state(row)
+        if table == "session_lanes":
+            return self._append_session_lane(row)
         payload = dict(row)
         primary_key = self._primary_key(table)
         if primary_key not in payload:
@@ -1114,6 +1129,8 @@ class PostgresWriteRepository:
             return self._upsert_news_item(row)
         if table == "feishu_card_states":
             return self._upsert_feishu_card_state(row)
+        if table == "session_lanes":
+            return self._upsert_session_lane(row)
         payload = dict(row)
         primary_key = self._primary_key(table)
         if primary_key not in payload:
@@ -1155,6 +1172,8 @@ class PostgresWriteRepository:
             return self._delete_news_item(key)
         if table == "feishu_card_states":
             return self._delete_feishu_card_state(key)
+        if table == "session_lanes":
+            return self._delete_session_lane(key)
         sql = f"DELETE FROM {self._table_name(table)} WHERE {self._primary_key(table)} = %(id)s"
         self.query(table, sql=sql, params={"id": key})
         return True
@@ -1550,6 +1569,51 @@ class PostgresWriteRepository:
         """写入或更新飞书有状态卡片状态。"""
 
         return self.upsert("feishu_card_states", row)
+
+    def write_session_lane(self, row: dict[str, Any]) -> dict[str, Any]:
+        """写入或更新分布式 session lane owner 状态。"""
+
+        return self.upsert("session_lanes", row)
+
+    def release_session_lane(
+        self,
+        session_key: str,
+        *,
+        owner_token: str = "",
+        now: float | None = None,
+    ) -> bool:
+        """把指定 session lane 标记为 released。
+
+        如果提供 owner_token，则只释放当前 token 匹配的 owner，避免旧 worker 误覆盖
+        新 worker 的 lane 状态。
+        """
+
+        if not session_key:
+            return False
+        current = time.time() if now is None else float(now)
+        clauses = ["session_key = %(session_key)s"]
+        params: dict[str, Any] = {
+            "session_key": session_key,
+            "owner_token": owner_token,
+            "now": current,
+        }
+        if owner_token:
+            clauses.append("owner_token = %(owner_token)s")
+        sql = (
+            "WITH updated AS ("
+            "UPDATE session_lanes SET "
+            "state = 'released', "
+            "updated_at = %(now)s, "
+            "renewed_at = %(now)s "
+            f"WHERE {' AND '.join(clauses)} "
+            "RETURNING session_key"
+            ") SELECT json_build_object('released', COUNT(*) > 0) AS row FROM updated"
+        )
+        rows = self.query("session_lanes", sql=sql, params=params)
+        if not rows:
+            return False
+        row = rows[0].get("row", rows[0])
+        return bool(row.get("released")) if isinstance(row, dict) else False
 
     def write_agent(self, row: dict[str, Any]) -> dict[str, Any]:
         """兼容控制面 Agent 配置写入。"""
@@ -1949,6 +2013,45 @@ class PostgresWriteRepository:
         )
         return True
 
+    def _append_session_lane(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = self._normalize_session_lane(row)
+        if not payload.get("session_key"):
+            raise ValueError("missing primary key for session_lanes: session_key")
+        sql = self._build_upsert_sql("session_lanes")
+        rows = self.query("session_lanes", sql=sql, params={"row": payload})
+        return rows[0] if rows else payload
+
+    def _upsert_session_lane(self, row: dict[str, Any]) -> dict[str, Any]:
+        return self._append_session_lane(row)
+
+    def _delete_session_lane(self, key: str) -> bool:
+        self.query(
+            "session_lanes",
+            sql="DELETE FROM session_lanes WHERE session_key = %(id)s",
+            params={"id": key},
+        )
+        return True
+
+    @staticmethod
+    def _normalize_session_lane(row: dict[str, Any]) -> dict[str, Any]:
+        now = time.time()
+        metadata = row.get("metadata", {})
+        acquired_at = float(row.get("acquired_at", now) or now)
+        renewed_at = float(row.get("renewed_at", acquired_at) or acquired_at)
+        return {
+            "session_key": str(row.get("session_key", "")),
+            "lane_key": str(row.get("lane_key", "")),
+            "worker_id": str(row.get("worker_id", "")),
+            "task_id": str(row.get("task_id", "")),
+            "owner_token": str(row.get("owner_token", "")),
+            "state": str(row.get("state", "owned") or "owned"),
+            "ttl_seconds": int(row.get("ttl_seconds", 0) or 0),
+            "acquired_at": acquired_at,
+            "renewed_at": renewed_at,
+            "updated_at": float(row.get("updated_at", now) or now),
+            "metadata": dict(metadata if isinstance(metadata, dict) else {}),
+        }
+
     def _append_config_audit(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row)
         if not payload.get("id"):
@@ -2064,6 +2167,7 @@ class PostgresWriteRepository:
             "cron_runs",
             "news_items",
             "feishu_card_states",
+            "session_lanes",
         }
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
@@ -2091,6 +2195,7 @@ class PostgresWriteRepository:
             "cron_runs": "id",
             "news_items": "key",
             "feishu_card_states": "card_id",
+            "session_lanes": "session_key",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -2436,5 +2541,24 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
             "metadata",
         ),
         indexes=(("owner_account_id", "updated_at"), ("peer_id", "updated_at"), ("message_id",)),
+    ),
+    PostgresTableSpec(
+        name="session_lanes",
+        primary_key="session_key",
+        time_column="updated_at",
+        columns=(
+            "session_key",
+            "lane_key",
+            "worker_id",
+            "task_id",
+            "owner_token",
+            "state",
+            "ttl_seconds",
+            "acquired_at",
+            "renewed_at",
+            "updated_at",
+            "metadata",
+        ),
+        indexes=(("state", "updated_at"), ("worker_id", "updated_at"), ("task_id",), ("renewed_at",)),
     ),
 )

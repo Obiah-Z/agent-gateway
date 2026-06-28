@@ -72,6 +72,31 @@ class FakeLaneRedisClient(RedisClient):
             self.expires_at.pop(key, None)
 
 
+class FakeLaneStateRepository:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.writes: list[dict] = []
+        self.releases: list[dict] = []
+
+    def write_session_lane(self, row: dict) -> dict:
+        if self.fail:
+            raise RuntimeError("state unavailable")
+        self.writes.append(dict(row))
+        return row
+
+    def release_session_lane(self, session_key: str, *, owner_token: str = "", now: float = 0.0) -> bool:
+        if self.fail:
+            raise RuntimeError("state unavailable")
+        self.releases.append(
+            {
+                "session_key": session_key,
+                "owner_token": owner_token,
+                "now": now,
+            }
+        )
+        return True
+
+
 def test_redis_lane_coordinator_allows_only_one_owner_per_session() -> None:
     redis_client = FakeLaneRedisClient()
     coordinator = RedisLaneCoordinator(redis_client)
@@ -191,3 +216,45 @@ def test_redis_lane_coordinator_marks_stale_owner_for_observability() -> None:
     assert stale.stale is True
     assert stale.age_seconds == 40.0
     assert stale.ttl_seconds == 30
+
+
+def test_redis_lane_coordinator_mirrors_owner_state_to_repository() -> None:
+    redis_client = FakeLaneRedisClient()
+    state = FakeLaneStateRepository()
+    coordinator = RedisLaneCoordinator(redis_client, state_repository=state)
+    owner = LaneOwnerToken(worker_id="worker-a", task_id="task-a")
+
+    ownership = coordinator.acquire("session-1", owner=owner, ttl_seconds=60, now=100.0)
+
+    assert ownership is not None
+    assert state.writes[0]["session_key"] == "session-1"
+    assert state.writes[0]["worker_id"] == "worker-a"
+    assert state.writes[0]["task_id"] == "task-a"
+    assert state.writes[0]["owner_token"] == "worker-a:task-a"
+    assert state.writes[0]["state"] == "owned"
+    assert state.writes[0]["ttl_seconds"] == 60
+    assert state.writes[0]["acquired_at"] == 100.0
+    renewed = coordinator.renew(ownership, now=120.0)
+    assert renewed is not None
+    assert state.writes[1]["renewed_at"] == 120.0
+    assert state.writes[1]["state"] == "owned"
+    assert coordinator.release(renewed) is True
+    assert state.releases[0]["session_key"] == "session-1"
+    assert state.releases[0]["owner_token"] == "worker-a:task-a"
+
+
+def test_redis_lane_coordinator_ignores_state_repository_failures() -> None:
+    redis_client = FakeLaneRedisClient()
+    coordinator = RedisLaneCoordinator(
+        redis_client,
+        state_repository=FakeLaneStateRepository(fail=True),
+    )
+    owner = LaneOwnerToken(worker_id="worker-a", task_id="task-a")
+
+    ownership = coordinator.acquire("session-1", owner=owner, ttl_seconds=60)
+
+    assert ownership is not None
+    renewed = coordinator.renew(ownership)
+    assert renewed is not None
+    assert coordinator.release(renewed) is True
+    assert coordinator.is_owned("session-1") is False

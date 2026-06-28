@@ -294,6 +294,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
                 settings.inbound_session_lock_renew_interval_seconds or None
             ),
             worker_id=task_worker.worker_id,
+            state_repository=primary_write,
         ),
     )
     delivery_runtime = DeliveryRuntime(

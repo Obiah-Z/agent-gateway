@@ -125,6 +125,11 @@ def test_build_application_injects_primary_write_backend_only_when_enabled(
     class FakeWriteRepository:
         def __init__(self, *, enabled: bool) -> None:
             self.enabled = enabled
+            self.lane_writes = []
+
+        def write_session_lane(self, row):
+            self.lane_writes.append(row)
+            return row
 
     fake_read = FakeConfigReadRepository()
 
@@ -166,6 +171,9 @@ def test_build_application_injects_primary_write_backend_only_when_enabled(
     assert enabled_app.metrics_store.write_backend is not None
     assert enabled_app.alert_store.write_backend is not None
     assert enabled_app.delivery_queue.write_backend is not None
+    agent_handler = enabled_app.task_worker.handlers["agent_inbound"]
+    assert isinstance(agent_handler, AgentInboundTaskHandler)
+    assert agent_handler.lane_coordinator.state_repository is enabled_app.task_store.write_backend
 
 
 def test_build_application_uses_configured_task_worker_identity(

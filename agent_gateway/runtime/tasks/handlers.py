@@ -63,6 +63,7 @@ class AgentInboundTaskHandler:
         lock_renew_interval_seconds: float | None = None,
         worker_id: str = "local-worker",
         lane_coordinator: RedisLaneCoordinator | None = None,
+        state_repository: object | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.channels = channels
@@ -71,6 +72,7 @@ class AgentInboundTaskHandler:
         self.lane_coordinator = lane_coordinator or RedisLaneCoordinator(
             redis_client,
             namespace="gateway:lock:agent_inbound",
+            state_repository=state_repository,
         )
         self.lock_ttl_seconds = max(1, int(lock_ttl_seconds))
         self.lock_renew_interval_seconds = self._resolve_renew_interval(
