@@ -133,6 +133,7 @@ class RedisLaneCoordinator:
                 owner_value=owner_value,
             )
             self._write_state(ownership, acquired_at=current, renewed_at=current, state="owned")
+            self._write_event(ownership, event="acquired", occurred_at=current)
             return ownership
         acquired = self.redis_client.acquire_lock(
             lane_key,
@@ -149,6 +150,7 @@ class RedisLaneCoordinator:
             owner_value=owner_value,
         )
         self._write_state(ownership, acquired_at=current, renewed_at=current, state="owned")
+        self._write_event(ownership, event="acquired", occurred_at=current)
         return ownership
 
     def renew(self, ownership: LaneOwnership, *, now: float | None = None) -> LaneOwnership | None:
@@ -198,6 +200,7 @@ class RedisLaneCoordinator:
             renewed_at=current,
             state="owned",
         )
+        self._write_event(renewed, event="renewed", occurred_at=current)
         return renewed
 
     def release(self, ownership: LaneOwnership) -> bool:
@@ -205,6 +208,7 @@ class RedisLaneCoordinator:
 
         if not self.enabled or not ownership.lane_key:
             self._release_state(ownership)
+            self._write_event(ownership, event="released", occurred_at=time.time())
             return True
         released = self.redis_client.release_lock(
             ownership.lane_key,
@@ -212,6 +216,7 @@ class RedisLaneCoordinator:
         )
         if released:
             self._release_state(ownership)
+            self._write_event(ownership, event="released", occurred_at=time.time())
         return released
 
     def is_owned(self, session_key: str) -> bool:
@@ -316,6 +321,38 @@ class RedisLaneCoordinator:
                 ownership.session_key,
                 owner_token=ownership.owner.value,
                 now=time.time(),
+            )
+        except Exception:
+            return
+
+    def _write_event(
+        self,
+        ownership: LaneOwnership,
+        *,
+        event: str,
+        occurred_at: float,
+    ) -> None:
+        """把 lane owner 生命周期追加到历史仓储；失败不影响 Redis 主路径。"""
+
+        writer = getattr(self.state_repository, "write_session_lane_event", None)
+        if writer is None:
+            return
+        try:
+            writer(
+                {
+                    "session_key": ownership.session_key,
+                    "lane_key": ownership.lane_key,
+                    "worker_id": ownership.owner.worker_id,
+                    "task_id": ownership.owner.task_id,
+                    "owner_token": ownership.owner.value,
+                    "event": event,
+                    "ttl_seconds": ownership.ttl_seconds,
+                    "occurred_at": occurred_at,
+                    "metadata": {
+                        "owner_value": ownership.owner_value,
+                        "source": "redis_lane_coordinator",
+                    },
+                }
             )
         except Exception:
             return

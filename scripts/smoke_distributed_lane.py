@@ -240,6 +240,8 @@ def assert_postgres_lane_result(result: dict) -> list[str]:
         failures.append("owner_token mismatch unexpectedly released the lane")
     if result.get("matched_release") is not True:
         failures.append("owner_token matched release did not update the lane")
+    if int(result.get("history_count", 0) or 0) < 2:
+        failures.append(f"lane history events were not persisted: {result.get('history_count')}")
     released = dict(result.get("released_row", {}) or {})
     if released.get("state") != "released":
         failures.append(f"released row state mismatch: {released.get('state')}")
@@ -708,6 +710,14 @@ async def run_postgres_lane_smoke(args: argparse.Namespace) -> dict:
     }
     try:
         written = writer.write_session_lane(row)
+        writer.write_session_lane_event(
+            {
+                **row,
+                "event": "acquired",
+                "occurred_at": now,
+                "metadata": {"smoke": True, "scenario": "postgres-lane", "step": "acquired"},
+            }
+        )
         owned_rows = reader.list(
             "session_lanes",
             limit=5,
@@ -726,12 +736,25 @@ async def run_postgres_lane_smoke(args: argparse.Namespace) -> dict:
             reason=release_reason,
             now=now + 2,
         )
+        writer.write_session_lane_event(
+            {
+                **row,
+                "event": "released",
+                "occurred_at": now + 2,
+                "metadata": {"smoke": True, "scenario": "postgres-lane", "step": "released"},
+            }
+        )
         released_rows = reader.list(
             "session_lanes",
             limit=5,
             filters={"state": "released", "session_key": session_key},
         )
         released_row = released_rows[0] if released_rows else {}
+        history_rows = reader.list(
+            "session_lane_events",
+            limit=10,
+            filters={"session_key": session_key},
+        )
         renewed_at = float(owned_row.get("renewed_at", 0.0) or 0.0)
         ttl_seconds = int(owned_row.get("ttl_seconds", 0) or 0)
         result = {
@@ -747,6 +770,8 @@ async def run_postgres_lane_smoke(args: argparse.Namespace) -> dict:
             "release_reason": release_reason,
             "owned_row": owned_row,
             "released_row": released_row,
+            "history_count": len(history_rows),
+            "history_events": [row.get("event") for row in history_rows],
         }
         result["failures"] = assert_postgres_lane_result(result)
         result["status"] = "ok" if not result["failures"] else "failed"
@@ -756,6 +781,11 @@ async def run_postgres_lane_smoke(args: argparse.Namespace) -> dict:
             writer.delete("session_lanes", session_key)
         except Exception:
             pass
+        for event_row in reader.list("session_lane_events", limit=20, filters={"session_key": session_key}):
+            try:
+                writer.delete("session_lane_events", str(event_row.get("id", "")))
+            except Exception:
+                pass
 
 
 def main(argv: list[str] | None = None) -> int:

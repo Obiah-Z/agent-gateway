@@ -458,6 +458,8 @@ class PostgresReadRepository(StateReadRepository):
             return self._list_generic_rows(table, limit=limit, filters=filters)
         if table == "session_lanes":
             return self._list_generic_rows(table, limit=limit, filters=filters)
+        if table == "session_lane_events":
+            return self._list_generic_rows(table, limit=limit, filters=filters)
         sql, params = self._build_list_query(table, limit=limit, filters=filters)
         return self.query(table, sql=sql, params=params)
 
@@ -632,12 +634,16 @@ class PostgresReadRepository(StateReadRepository):
                 if value:
                     clauses.append(f"{key} = %({key})s")
                     params[key] = value
-        if table == "session_lanes":
+        if table in {"session_lanes", "session_lane_events"}:
             for key in ("session_key", "lane_key", "worker_id", "task_id", "state"):
                 value = str(filters.get(key, ""))
                 if value:
                     clauses.append(f"{key} = %({key})s")
                     params[key] = value
+            event_value = str(filters.get("event", ""))
+            if event_value:
+                clauses.append("event = %(event)s")
+                params["event"] = event_value
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += f" ORDER BY {_quote_ident(self._order_column(table))} DESC LIMIT %(limit)s"
@@ -955,6 +961,7 @@ class PostgresReadRepository(StateReadRepository):
             "news_items",
             "feishu_card_states",
             "session_lanes",
+            "session_lane_events",
         }
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
@@ -983,6 +990,7 @@ class PostgresReadRepository(StateReadRepository):
             "news_items": "key",
             "feishu_card_states": "card_id",
             "session_lanes": "session_key",
+            "session_lane_events": "id",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -1011,6 +1019,7 @@ class PostgresReadRepository(StateReadRepository):
             "news_items": "updated_at",
             "feishu_card_states": "updated_at",
             "session_lanes": "updated_at",
+            "session_lane_events": "occurred_at",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -1064,6 +1073,8 @@ class PostgresWriteRepository:
             return self._append_feishu_card_state(row)
         if table == "session_lanes":
             return self._append_session_lane(row)
+        if table == "session_lane_events":
+            return self._append_session_lane_event(row)
         payload = dict(row)
         primary_key = self._primary_key(table)
         if primary_key not in payload:
@@ -1133,6 +1144,8 @@ class PostgresWriteRepository:
             return self._upsert_feishu_card_state(row)
         if table == "session_lanes":
             return self._upsert_session_lane(row)
+        if table == "session_lane_events":
+            return self._append_session_lane_event(row)
         payload = dict(row)
         primary_key = self._primary_key(table)
         if primary_key not in payload:
@@ -1176,6 +1189,8 @@ class PostgresWriteRepository:
             return self._delete_feishu_card_state(key)
         if table == "session_lanes":
             return self._delete_session_lane(key)
+        if table == "session_lane_events":
+            return self._delete_session_lane_event(key)
         sql = f"DELETE FROM {self._table_name(table)} WHERE {self._primary_key(table)} = %(id)s"
         self.query(table, sql=sql, params={"id": key})
         return True
@@ -1576,6 +1591,11 @@ class PostgresWriteRepository:
         """写入或更新分布式 session lane owner 状态。"""
 
         return self.upsert("session_lanes", row)
+
+    def write_session_lane_event(self, row: dict[str, Any]) -> dict[str, Any]:
+        """追加分布式 session lane owner 历史事件。"""
+
+        return self.append("session_lane_events", row)
 
     def release_session_lane(
         self,
@@ -2039,6 +2059,22 @@ class PostgresWriteRepository:
         )
         return True
 
+    def _append_session_lane_event(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = self._normalize_session_lane_event(row)
+        if not payload.get("id"):
+            raise ValueError("missing primary key for session_lane_events: id")
+        sql = self._build_insert_sql("session_lane_events")
+        rows = self.query("session_lane_events", sql=sql, params={"row": payload})
+        return rows[0] if rows else payload
+
+    def _delete_session_lane_event(self, key: str) -> bool:
+        self.query(
+            "session_lane_events",
+            sql="DELETE FROM session_lane_events WHERE id = %(id)s",
+            params={"id": key},
+        )
+        return True
+
     @staticmethod
     def _normalize_session_lane(row: dict[str, Any]) -> dict[str, Any]:
         now = time.time()
@@ -2056,6 +2092,30 @@ class PostgresWriteRepository:
             "acquired_at": acquired_at,
             "renewed_at": renewed_at,
             "updated_at": float(row.get("updated_at", now) or now),
+            "metadata": dict(metadata if isinstance(metadata, dict) else {}),
+        }
+
+    @staticmethod
+    def _normalize_session_lane_event(row: dict[str, Any]) -> dict[str, Any]:
+        now = time.time()
+        metadata = row.get("metadata", {})
+        occurred_at = float(row.get("occurred_at", now) or now)
+        event = str(row.get("event", "") or "")
+        session_key = str(row.get("session_key", ""))
+        owner_token = str(row.get("owner_token", ""))
+        event_id = str(row.get("id", ""))
+        if not event_id:
+            event_id = f"{session_key}:{event}:{owner_token}:{int(occurred_at * 1000)}"
+        return {
+            "id": event_id,
+            "session_key": session_key,
+            "lane_key": str(row.get("lane_key", "")),
+            "worker_id": str(row.get("worker_id", "")),
+            "task_id": str(row.get("task_id", "")),
+            "owner_token": owner_token,
+            "event": event,
+            "ttl_seconds": int(row.get("ttl_seconds", 0) or 0),
+            "occurred_at": occurred_at,
             "metadata": dict(metadata if isinstance(metadata, dict) else {}),
         }
 
@@ -2175,6 +2235,7 @@ class PostgresWriteRepository:
             "news_items",
             "feishu_card_states",
             "session_lanes",
+            "session_lane_events",
         }
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
@@ -2203,6 +2264,7 @@ class PostgresWriteRepository:
             "news_items": "key",
             "feishu_card_states": "card_id",
             "session_lanes": "session_key",
+            "session_lane_events": "id",
         }
         if table not in mapping:
             raise ValueError(f"unsupported table: {table}")
@@ -2567,5 +2629,23 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
             "metadata",
         ),
         indexes=(("state", "updated_at"), ("worker_id", "updated_at"), ("task_id",), ("renewed_at",)),
+    ),
+    PostgresTableSpec(
+        name="session_lane_events",
+        primary_key="id",
+        time_column="occurred_at",
+        columns=(
+            "id",
+            "session_key",
+            "lane_key",
+            "worker_id",
+            "task_id",
+            "owner_token",
+            "event",
+            "ttl_seconds",
+            "occurred_at",
+            "metadata",
+        ),
+        indexes=(("session_key", "occurred_at"), ("worker_id", "occurred_at"), ("event", "occurred_at"), ("task_id",)),
     ),
 )

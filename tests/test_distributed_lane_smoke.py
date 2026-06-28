@@ -201,6 +201,7 @@ def test_postgres_lane_smoke_asserts_successful_result() -> None:
         "stale_before_release": True,
         "mismatch_release": False,
         "matched_release": True,
+        "history_count": 2,
         "release_reason": "smoke postgres lane release",
         "released_row": {
             "state": "released",
@@ -222,6 +223,7 @@ def test_postgres_lane_smoke_reports_failed_invariants() -> None:
         "stale_before_release": False,
         "mismatch_release": True,
         "matched_release": False,
+        "history_count": 0,
         "release_reason": "smoke postgres lane release",
         "released_row": {"state": "owned", "metadata": {}},
     }
@@ -234,6 +236,7 @@ def test_postgres_lane_smoke_reports_failed_invariants() -> None:
     assert any("not detected as stale" in item for item in failures)
     assert any("mismatch unexpectedly released" in item for item in failures)
     assert any("matched release did not update" in item for item in failures)
+    assert any("history events were not persisted" in item for item in failures)
     assert any("released row state mismatch" in item for item in failures)
     assert any("release metadata missing reason" in item for item in failures)
     assert any("release metadata missing released_at" in item for item in failures)

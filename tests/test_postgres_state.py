@@ -32,6 +32,7 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
         "news_items",
         "feishu_card_states",
         "session_lanes",
+        "session_lane_events",
     ]
     assert POSTGRES_STATE_TABLES[0].primary_key == "id"
     assert "tool_policy" in POSTGRES_STATE_TABLES[0].columns
@@ -57,6 +58,8 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
     assert "page_index" in POSTGRES_STATE_TABLES[18].columns
     assert "owner_token" in POSTGRES_STATE_TABLES[19].columns
     assert "renewed_at" in POSTGRES_STATE_TABLES[19].columns
+    assert POSTGRES_STATE_TABLES[20].primary_key == "id"
+    assert "occurred_at" in POSTGRES_STATE_TABLES[20].columns
 
 
 def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
@@ -74,6 +77,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE TABLE IF NOT EXISTS "news_items"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "feishu_card_states"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "session_lanes"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "session_lane_events"' in sql
     assert '"metadata" JSONB NOT NULL DEFAULT' in sql
     assert '"ttl_seconds" INTEGER NOT NULL DEFAULT 0' in sql
     assert 'PRIMARY KEY ("id")' in sql
@@ -91,6 +95,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_card_states_owner_account_id_updated_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_session_lanes_state_updated_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_session_lanes_worker_id_updated_at"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_session_lane_events_session_key_occurred_at"' in sql
     assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_by"' in sql
     assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_at"' in sql
 
@@ -736,6 +741,39 @@ def test_postgres_release_session_lane_checks_owner_token(monkeypatch) -> None:
         "release_metadata": {"release_reason": "worker expired", "released_at": 3.0},
         "now": 3.0,
     }
+
+
+def test_postgres_write_session_lane_event_appends_history(monkeypatch) -> None:
+    captured = []
+
+    def fake_query(self, table, *, sql, params=None):
+        captured.append((table, sql, params))
+        return [params["row"]]
+
+    monkeypatch.setattr(PostgresWriteRepository, "query", fake_query)
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
+
+    row = repo.write_session_lane_event(
+        {
+            "session_key": "agent:feishu:user-1",
+            "lane_key": "gateway:lane:agent:feishu:user-1",
+            "worker_id": "worker-a",
+            "task_id": "task-a",
+            "owner_token": "worker-a:task-a",
+            "event": "acquired",
+            "ttl_seconds": 30,
+            "occurred_at": 10.0,
+            "metadata": {"source": "redis"},
+        }
+    )
+
+    assert row["id"].startswith("agent:feishu:user-1:acquired:worker-a:task-a:")
+    table, sql, params = captured[0]
+    assert table == "session_lane_events"
+    assert "INSERT INTO session_lane_events" in sql
+    assert params["row"]["event"] == "acquired"
+    assert params["row"]["occurred_at"] == 10.0
+    assert params["row"]["metadata"] == {"source": "redis"}
 
 
 def test_postgres_write_reserve_task_uses_atomic_update(monkeypatch) -> None:

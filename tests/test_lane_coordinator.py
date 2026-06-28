@@ -77,11 +77,18 @@ class FakeLaneStateRepository:
         self.fail = fail
         self.writes: list[dict] = []
         self.releases: list[dict] = []
+        self.events: list[dict] = []
 
     def write_session_lane(self, row: dict) -> dict:
         if self.fail:
             raise RuntimeError("state unavailable")
         self.writes.append(dict(row))
+        return row
+
+    def write_session_lane_event(self, row: dict) -> dict:
+        if self.fail:
+            raise RuntimeError("state unavailable")
+        self.events.append(dict(row))
         return row
 
     def release_session_lane(
@@ -242,13 +249,21 @@ def test_redis_lane_coordinator_mirrors_owner_state_to_repository() -> None:
     assert state.writes[0]["state"] == "owned"
     assert state.writes[0]["ttl_seconds"] == 60
     assert state.writes[0]["acquired_at"] == 100.0
+    assert state.events[0]["event"] == "acquired"
+    assert state.events[0]["session_key"] == "session-1"
+    assert state.events[0]["worker_id"] == "worker-a"
+    assert state.events[0]["occurred_at"] == 100.0
     renewed = coordinator.renew(ownership, now=120.0)
     assert renewed is not None
     assert state.writes[1]["renewed_at"] == 120.0
     assert state.writes[1]["state"] == "owned"
+    assert state.events[1]["event"] == "renewed"
+    assert state.events[1]["occurred_at"] == 120.0
     assert coordinator.release(renewed) is True
     assert state.releases[0]["session_key"] == "session-1"
     assert state.releases[0]["owner_token"] == "worker-a:task-a"
+    assert state.events[2]["event"] == "released"
+    assert state.events[2]["owner_token"] == "worker-a:task-a"
 
 
 def test_redis_lane_coordinator_ignores_state_repository_failures() -> None:
