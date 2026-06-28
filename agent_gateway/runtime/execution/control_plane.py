@@ -404,6 +404,7 @@ class GatewayControlPlane:
                 "events": {},
                 "cron": {},
                 "profiles": {},
+                "tasks": {},
             }
 
         def pick(section: str, key: str, default: int | float = 0) -> int | float:
@@ -463,6 +464,24 @@ class GatewayControlPlane:
                 "max_count": pick("profiles", "count"),
                 "max_available": pick("profiles", "available"),
                 "max_cooling_down": pick("profiles", "cooling_down"),
+            },
+            "tasks": {
+                "max_pending": pick("tasks", "pending"),
+                "max_running": pick("tasks", "running"),
+                "max_retrying": pick("tasks", "retrying"),
+                "max_failed": pick("tasks", "failed"),
+                "broker_enabled": pick("tasks", "broker_enabled"),
+                "max_broker_messages": pick("tasks", "broker_messages"),
+                "max_broker_dead_letter_messages": pick(
+                    "tasks",
+                    "broker_dead_letter_messages",
+                ),
+                "max_broker_partitions": pick("tasks", "broker_partitions"),
+                "max_broker_prefetch": pick("tasks", "broker_prefetch"),
+                "max_broker_partition_messages": pick(
+                    "tasks",
+                    "broker_max_partition_messages",
+                ),
             },
         }
 

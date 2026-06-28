@@ -28,6 +28,7 @@ class MetricSnapshot:
     cron: dict[str, Any] = field(default_factory=dict)
     events: dict[str, Any] = field(default_factory=dict)
     profiles: dict[str, Any] = field(default_factory=dict)
+    tasks: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -42,6 +43,7 @@ class MetricSnapshot:
             "cron": self.cron,
             "events": self.events,
             "profiles": self.profiles,
+            "tasks": self.tasks,
             "metadata": self.metadata,
         }
 
@@ -78,6 +80,7 @@ class MetricsStore:
         cron: dict[str, Any] | None = None,
         events: dict[str, Any] | None = None,
         profiles: dict[str, Any] | None = None,
+        tasks: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
         timestamp: float | None = None,
     ) -> dict[str, Any]:
@@ -91,6 +94,7 @@ class MetricsStore:
             cron=self._sanitize_mapping(cron or {}),
             events=self._sanitize_mapping(events or {}),
             profiles=self._sanitize_mapping(profiles or {}),
+            tasks=self._sanitize_mapping(tasks or {}),
             metadata=self._sanitize_mapping(metadata or {}),
         )
         row = snapshot.to_dict()

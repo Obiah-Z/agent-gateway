@@ -27,6 +27,7 @@ class MetricsRuntime:
         profiles: ProfileManager,
         autonomy: AutonomyRuntime | None = None,
         event_store: RuntimeEventStore | None = None,
+        task_worker: Any | None = None,
         interval_seconds: float = 60.0,
     ) -> None:
         self.metrics_store = metrics_store
@@ -35,6 +36,7 @@ class MetricsRuntime:
         self.profiles = profiles
         self.autonomy = autonomy
         self.event_store = event_store
+        self.task_worker = task_worker
         self.interval_seconds = max(1.0, float(interval_seconds))
         self.started_at = time.time()
         self.last_error = ""
@@ -72,6 +74,7 @@ class MetricsRuntime:
                 cron=self._collect_cron_metrics(),
                 events=self._collect_event_metrics(),
                 profiles=self._collect_profile_metrics(),
+                tasks=self._collect_task_metrics(),
                 metadata={"collector": "metrics-runtime"},
             )
             self.last_error = ""
@@ -182,6 +185,45 @@ class MetricsRuntime:
             "cooling_down": sum(
                 1 for row in rows if float(row.get("cooldown_remaining", 0.0) or 0.0) > 0.0
             ),
+        }
+
+    def _collect_task_metrics(self) -> dict[str, Any]:
+        """采集后台任务 worker 与入站 broker 指标。"""
+
+        if self.task_worker is None:
+            return {"configured": False}
+        try:
+            stats = self.task_worker.stats()
+        except Exception as exc:
+            return {"configured": True, "error": str(exc)}
+        queue = stats.get("queue", {}) if isinstance(stats, dict) else {}
+        broker = stats.get("broker", {}) if isinstance(stats, dict) else {}
+        if not isinstance(queue, dict):
+            queue = {}
+        if not isinstance(broker, dict):
+            broker = {}
+        queues = broker.get("queues", [])
+        max_partition_messages = 0
+        if isinstance(queues, list):
+            for row in queues:
+                if not isinstance(row, dict):
+                    continue
+                max_partition_messages = max(
+                    max_partition_messages,
+                    int(row.get("messages", 0) or 0),
+                )
+        return {
+            "configured": True,
+            "pending": int(queue.get("pending", 0) or 0),
+            "running": int(queue.get("running", 0) or 0),
+            "retrying": int(queue.get("retrying", 0) or 0),
+            "failed": int(queue.get("failed", 0) or 0),
+            "broker_enabled": bool(broker.get("enabled", False)),
+            "broker_messages": int(broker.get("messages", 0) or 0),
+            "broker_dead_letter_messages": int(broker.get("dead_letter_messages", 0) or 0),
+            "broker_partitions": int(broker.get("partitions", 0) or 0),
+            "broker_prefetch": int(broker.get("prefetch", 0) or 0),
+            "broker_max_partition_messages": max_partition_messages,
         }
 
     @staticmethod

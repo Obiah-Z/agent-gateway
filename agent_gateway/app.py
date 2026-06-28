@@ -311,6 +311,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         profiles=profile_manager,
         autonomy=autonomy_runtime,
         event_store=event_store,
+        task_worker=task_worker,
         interval_seconds=settings.metrics_interval_seconds,
     )
     alerts_runtime = AlertsRuntime(

@@ -10,6 +10,29 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
 
 
+class FakeTaskWorker:
+    def stats(self) -> dict[str, object]:
+        return {
+            "queue": {
+                "pending": 3,
+                "running": 1,
+                "retrying": 2,
+                "failed": 1,
+            },
+            "broker": {
+                "enabled": True,
+                "messages": 9,
+                "dead_letter_messages": 1,
+                "partitions": 4,
+                "prefetch": 1,
+                "queues": [
+                    {"partition": 0, "messages": 2},
+                    {"partition": 1, "messages": 7},
+                ],
+            },
+        }
+
+
 class FakeCron:
     def list_jobs(self) -> list[dict[str, object]]:
         return [
@@ -70,6 +93,7 @@ def test_metrics_runtime_collects_runtime_snapshot(tmp_path: Path) -> None:
         profiles=profiles,
         autonomy=FakeAutonomy(),  # type: ignore[arg-type]
         event_store=event_store,
+        task_worker=FakeTaskWorker(),
         interval_seconds=60,
     )
 
@@ -85,6 +109,13 @@ def test_metrics_runtime_collects_runtime_snapshot(tmp_path: Path) -> None:
     assert row["profiles"]["cooling_down"] == 1
     assert row["events"]["delivery_failed_5m"] == 1
     assert row["events"]["rejected_5m"] == 1
+    assert row["tasks"]["pending"] == 3
+    assert row["tasks"]["running"] == 1
+    assert row["tasks"]["broker_enabled"] is True
+    assert row["tasks"]["broker_messages"] == 9
+    assert row["tasks"]["broker_dead_letter_messages"] == 1
+    assert row["tasks"]["broker_partitions"] == 4
+    assert row["tasks"]["broker_max_partition_messages"] == 7
     assert metrics.latest() == row
 
 
@@ -102,4 +133,5 @@ def test_metrics_runtime_handles_optional_event_and_autonomy_sources(tmp_path: P
 
     assert row["cron"] == {"configured": False}
     assert row["events"] == {"configured": False}
+    assert row["tasks"] == {"configured": False}
     assert row["delivery"]["pending"] == 0

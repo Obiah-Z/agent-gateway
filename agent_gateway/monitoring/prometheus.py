@@ -94,6 +94,23 @@ def render_prometheus_metrics(summary: dict[str, Any]) -> str:
         },
         summary.get("profiles", {}),
     )
+    _append_section(
+        lines,
+        "tasks",
+        {
+            "max_pending": "Maximum pending background task count.",
+            "max_running": "Maximum running background task count.",
+            "max_retrying": "Maximum retrying background task count.",
+            "max_failed": "Maximum failed background task count.",
+            "broker_enabled": "Whether inbound task broker was enabled in the summary window.",
+            "max_broker_messages": "Maximum inbound broker queued message count.",
+            "max_broker_dead_letter_messages": "Maximum inbound broker dead-letter message count.",
+            "max_broker_partitions": "Maximum configured inbound broker partition count.",
+            "max_broker_prefetch": "Maximum configured inbound broker prefetch count.",
+            "max_broker_partition_messages": "Maximum queued messages in a single inbound broker partition.",
+        },
+        summary.get("tasks", {}),
+    )
     return "\n".join(lines) + "\n"
 
 

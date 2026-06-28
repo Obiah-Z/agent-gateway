@@ -13,6 +13,12 @@ def test_render_prometheus_metrics_exports_stable_gauges() -> None:
             "events": {"max_errors_5m": 1, "max_rejected_5m": 0},
             "cron": {"max_enabled": 2},
             "profiles": {"max_available": 1, "max_cooling_down": 0},
+            "tasks": {
+                "broker_enabled": 1,
+                "max_broker_messages": 9,
+                "max_broker_dead_letter_messages": 1,
+                "max_broker_partition_messages": 7,
+            },
         }
     )
 
@@ -25,3 +31,7 @@ def test_render_prometheus_metrics_exports_stable_gauges() -> None:
     assert "gateway_events_max_errors_5m 1" in text
     assert "gateway_cron_max_enabled 2" in text
     assert "gateway_profiles_max_available 1" in text
+    assert "gateway_tasks_broker_enabled 1" in text
+    assert "gateway_tasks_max_broker_messages 9" in text
+    assert "gateway_tasks_max_broker_dead_letter_messages 1" in text
+    assert "gateway_tasks_max_broker_partition_messages 7" in text

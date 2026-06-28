@@ -899,7 +899,7 @@ python scripts/build_capacity_baseline.py
 | 20.9.9 RabbitMQ 入站 broker MVP | 已完成 | 新增 `RabbitMQInboundTaskBroker`，按 `hash(session_key) % partitions` 发布轻量任务引用；消息体只包含 task_id、task_type、session_key、partition、idempotency_key 和 published_at，不包含用户正文或 payload。 | 同 session 稳定进入同一分区；RabbitMQ 不保存完整入站消息；broker 支持 ack/nack、DLQ topology、stats 和 purge。 |
 | 20.9.10 task_id 精确预占 | 已完成 | `LocalTaskQueue.reserve_task_id()` 和 PostgreSQL `reserve_task_id()` 支持按 broker 消息中的 task_id 原子预占，过滤 task_type、状态和 blocked session。 | 过期 broker 消息不会重复执行已完成任务；worker 不会因为 broker 唤醒而抢到其他 session 的任务。 |
 | 20.9.11 worker hybrid consume | 已完成 | `TaskWorkerRuntime.run_once()` 优先消费 RabbitMQ 入站分区消息，预占成功后执行 handler；无 broker 消息时回退原有 PostgreSQL/本地轮询。 | RabbitMQ 可作为分布式唤醒/分发层；broker 不可用或发布失败时任务仍保留在 TaskStore 等待轮询消费。 |
-| 20.9.12 入站 broker 观测与压测 | 部分完成 | 已将入站 RabbitMQ broker stats 暴露到 `runtime.status.tasks.broker`，Dashboard 后台任务卡片展示入站 Broker 开关、分区数、prefetch、总积压、死信和前 6 个分区积压；Prometheus、ack/nack 事件和压测场景待补。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session。 |
+| 20.9.12 入站 broker 观测与压测 | 部分完成 | 已将入站 RabbitMQ broker stats 暴露到 `runtime.status.tasks.broker`，Dashboard 后台任务卡片展示入站 Broker 开关、分区数、prefetch、总积压、死信和前 6 个分区积压；Prometheus 已输出 `gateway_tasks_*` broker 积压、死信、分区和最大分区积压指标；ack/nack 事件和压测场景待补。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session。 |
 
 推荐落地顺序：
 
