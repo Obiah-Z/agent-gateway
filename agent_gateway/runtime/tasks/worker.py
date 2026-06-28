@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+import time
 from typing import Any
 
 from agent_gateway.runtime.tasks.models import TaskInstance
@@ -256,17 +257,105 @@ class TaskWorkerRuntime:
         handler = self.handlers.get(task.task_type)
         if handler is None:
             self.queue.fail(task.id, error=f"no handler for task_type: {task.task_type}")
+            self._record_task_event(
+                "task.worker.failed",
+                task,
+                status="error",
+                message="后台任务未找到已注册 handler，已标记失败",
+                reason=f"no handler for task_type: {task.task_type}",
+            )
             return
+        started_at = time.monotonic()
+        self._record_task_event(
+            "task.worker.started",
+            task,
+            status="ok",
+            message="后台任务开始执行",
+        )
         try:
             result = handler(task)
             if asyncio.iscoroutine(result):
                 result = await result
             self.queue.ack(task.id, result_preview=str(result or ""))
+            self._record_task_event(
+                "task.worker.completed",
+                task,
+                status="ok",
+                message="后台任务执行完成",
+                duration_seconds=time.monotonic() - started_at,
+            )
         except Exception as exc:
             if self.retry_exceptions or isinstance(exc, RetryableTaskError):
                 self.queue.retry(task.id, error=str(exc))
+                self._record_task_event(
+                    "task.worker.retrying",
+                    task,
+                    status="warning",
+                    message="后台任务执行遇到可重试错误，已进入 retrying",
+                    reason=str(exc),
+                    duration_seconds=time.monotonic() - started_at,
+                )
             else:
                 self.queue.fail(task.id, error=str(exc))
+                self._record_task_event(
+                    "task.worker.failed",
+                    task,
+                    status="error",
+                    message="后台任务执行失败，已标记 failed",
+                    reason=str(exc),
+                    duration_seconds=time.monotonic() - started_at,
+                )
+
+    def _record_task_event(
+        self,
+        event_type: str,
+        task: TaskInstance,
+        *,
+        status: str,
+        message: str,
+        reason: str = "",
+        duration_seconds: float | None = None,
+    ) -> None:
+        """记录 worker 执行生命周期事件，不影响任务主路径。"""
+
+        if self.event_store is None:
+            return
+        handler = self.handlers.get(task.task_type)
+        lane_owner: dict[str, Any] = {}
+        inspector = getattr(handler, "inspect_session_lane", None)
+        if inspector is not None:
+            try:
+                lane_owner = dict(inspector(task) or {})
+            except Exception:
+                lane_owner = {}
+        metadata: dict[str, Any] = {
+            "worker_id": self.worker_id,
+            "task_id": task.id,
+            "task_type": task.task_type,
+            "source": task.source,
+            "task_status": task.status,
+            "retry_count": task.retry_count,
+            "idempotency_key": task.idempotency_key,
+            "priority": task.priority,
+            "lane_owner": lane_owner,
+        }
+        if reason:
+            metadata["reason"] = reason
+        if duration_seconds is not None:
+            metadata["duration_seconds"] = round(max(0.0, float(duration_seconds)), 6)
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="task_worker",
+                message=message,
+                correlation_id=task.id,
+                agent_id=task.agent_id,
+                session_key=task.session_key,
+                metadata=metadata,
+            )
+        except Exception:
+            return
 
     def _blocked_session_keys(self) -> set[str]:
         """收集 handler 当前要求跳过的 session key。"""

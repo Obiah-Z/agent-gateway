@@ -48,6 +48,86 @@ def test_task_worker_run_once_acknowledges_success(tmp_path: Path) -> None:
     assert stored.metadata["worker_id"] == "worker-1"
 
 
+def test_task_worker_records_lifecycle_events(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(
+        task_type="echo",
+        source="test",
+        agent_id="main",
+        session_key="session-a",
+        payload={"text": "hello"},
+        idempotency_key="idem-a",
+        priority=7,
+    )
+    events = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=events)
+    worker.register_handler("echo", lambda item: f"echo:{item.payload['text']}")
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    event_types = [row["type"] for row in events.rows]
+    assert event_types == ["task.worker.started", "task.worker.completed"]
+    started = events.rows[0]
+    completed = events.rows[1]
+    assert started["correlation_id"] == task.id
+    assert started["agent_id"] == "main"
+    assert started["session_key"] == "session-a"
+    assert started["metadata"]["worker_id"] == "worker-1"
+    assert started["metadata"]["task_type"] == "echo"
+    assert started["metadata"]["source"] == "test"
+    assert started["metadata"]["idempotency_key"] == "idem-a"
+    assert started["metadata"]["priority"] == 7
+    assert completed["status"] == "ok"
+    assert completed["metadata"]["duration_seconds"] >= 0
+
+
+def test_task_worker_records_retrying_lifecycle_event(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(task_type="unstable", source="test", session_key="session-r")
+    events = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", retry_exceptions=True, event_store=events)
+
+    def fail(_task):
+        raise RuntimeError("temporary")
+
+    worker.register_handler("unstable", fail)
+
+    handled = asyncio.run(worker.run_once())
+    stored = queue.store.get(task.id)
+
+    assert handled is True
+    assert stored.status == "retrying"
+    assert [row["type"] for row in events.rows] == ["task.worker.started", "task.worker.retrying"]
+    retrying = events.rows[-1]
+    assert retrying["status"] == "warning"
+    assert retrying["metadata"]["reason"] == "temporary"
+    assert retrying["metadata"]["retry_count"] == 0
+
+
+def test_task_worker_records_failed_lifecycle_event(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(task_type="boom", source="test", session_key="session-f")
+    events = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=events)
+
+    def fail(_task):
+        raise RuntimeError("fatal")
+
+    worker.register_handler("boom", fail)
+
+    handled = asyncio.run(worker.run_once())
+    stored = queue.store.get(task.id)
+
+    assert handled is True
+    assert stored.status == "failed"
+    assert [row["type"] for row in events.rows] == ["task.worker.started", "task.worker.failed"]
+    failed = events.rows[-1]
+    assert failed["status"] == "error"
+    assert failed["metadata"]["reason"] == "fatal"
+    assert failed["metadata"]["worker_id"] == "worker-1"
+
+
 def test_task_worker_consumes_broker_task_reference_by_id(tmp_path: Path) -> None:
     store = LocalTaskStore(tmp_path / "tasks")
     queue = LocalTaskQueue(store)
@@ -809,7 +889,11 @@ def test_task_worker_does_not_skip_when_lock_probe_fails(tmp_path: Path) -> None
 
     assert handled is True
     assert queue.store.get(task.id).status == "done"
-    assert event_store.rows == []
+    assert [row["type"] for row in event_store.rows] == [
+        "task.worker.started",
+        "task.worker.completed",
+    ]
+    assert not any(row["type"] == "agent_inbound.session_locked_skipped" for row in event_store.rows)
     assert worker.stats()["session_locks"]["skip_count"] == 0
 
 

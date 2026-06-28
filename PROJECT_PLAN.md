@@ -909,13 +909,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.17 Stale lane 受控释放 | 已完成 | 控制面新增 `release_session_lane()`，WebSocket JSON-RPC 新增 `tasks.lanes.release`；默认只允许释放 `renewed_at + ttl_seconds` 已过期的 stale lane，`force=true` 才能释放未过期记录；可选 `owner_token` 防止误释放新 owner，PostgreSQL release 会记录 release_reason/released_at metadata。 | 运维可以安全处理持久状态中残留的 stale lane；不会直接删除 Redis 锁，运行时互斥仍依赖 Redis TTL 自动接管。 |
 | 20.9.18 Stale lane 观测告警 | 已完成 | `runtime.status.tasks.persisted_lanes` 增加 `stale_count` 和 `stale_items`，健康检查新增 `tasks.session_lanes.stale` warning；Dashboard 后台任务卡片展示过期 Lane 数量和最近过期 owner。 | 不需要翻数据库即可发现持久 lane 已过期；Dashboard 和 health check 能提示需要检查或人工释放的 stale lane。 |
 | 20.9.19 PostgreSQL lane 实库 smoke | 已完成 | `scripts/smoke_distributed_lane.py` 新增 `postgres-lane` 场景，使用真实 PostgreSQL `session_lanes` 表验证 lane 写入、按 owner 查询、stale 判断、owner_token mismatch 不释放、owner_token 匹配释放和 release metadata 写入；smoke 结束会清理测试 lane。 | 可以用一条命令证明 PostgreSQL lane 状态仓储在实库 schema 上可写、可查、可治理，而不只依赖 fake repository 单元测试。 |
+| 20.9.20 Task worker 执行记录增强 | 已完成 | `TaskWorkerRuntime` 在任务执行主路径记录 `task.worker.started/completed/retrying/failed` 事件，metadata 包含 worker_id、task_id、task_type、source、agent_id、session_key、idempotency_key、priority、retry_count、duration_seconds 和 lane_owner。 | PostgreSQL/runtime events 可以串起 worker 执行生命周期，排障时能定位任务是在执行前、执行中、重试还是失败阶段。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警和实库 smoke；后续可继续做更完整的 lane owner 历史和自动恢复策略。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke 和 worker 执行生命周期事件；后续可继续做更完整的 lane owner 历史和自动恢复策略。
 
 阶段完成标准：
 
