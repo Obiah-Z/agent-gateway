@@ -1,4 +1,5 @@
 from scripts.smoke_distributed_lane import (
+    assert_broker_unavailable_result,
     assert_smoke_result,
     assert_ttl_takeover_result,
     parse_args,
@@ -106,3 +107,45 @@ def test_ttl_takeover_smoke_parses_scenario() -> None:
 
     assert args.scenario == "ttl-takeover"
     assert args.lane_ttl_seconds == 1
+
+
+def test_broker_unavailable_smoke_asserts_successful_result() -> None:
+    result = {
+        "status": "ok",
+        "publish_failed": True,
+        "worker_handled": True,
+        "task_status_after_enqueue": "pending",
+        "task_status_after_worker": "done",
+        "handler_calls": 1,
+        "broker_consume_attempts": 1,
+    }
+
+    assert assert_broker_unavailable_result(result) == []
+
+
+def test_broker_unavailable_smoke_reports_failed_invariants() -> None:
+    result = {
+        "status": "failed",
+        "publish_failed": False,
+        "worker_handled": False,
+        "task_status_after_enqueue": "failed",
+        "task_status_after_worker": "pending",
+        "handler_calls": 2,
+        "broker_consume_attempts": 0,
+    }
+
+    failures = assert_broker_unavailable_result(result)
+
+    assert any("unexpected status" in item for item in failures)
+    assert any("broker publish failure was not exercised" in item for item in failures)
+    assert any("worker did not handle fallback task" in item for item in failures)
+    assert any("task was not kept pending" in item for item in failures)
+    assert any("task was not completed" in item for item in failures)
+    assert any("handler call count mismatch" in item for item in failures)
+    assert any("worker did not attempt broker consume" in item for item in failures)
+
+
+def test_broker_unavailable_smoke_parses_scenario() -> None:
+    args = parse_args(["--scenario", "broker-unavailable"])
+
+    assert args.scenario == "broker-unavailable"

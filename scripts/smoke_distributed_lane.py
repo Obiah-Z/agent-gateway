@@ -22,7 +22,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agent_gateway.runtime.infra.redis_client import RedisClient
-from agent_gateway.runtime.tasks import LaneOwnerToken, RedisLaneCoordinator
+from agent_gateway.runtime.tasks import (
+    LaneOwnerToken,
+    LocalTaskQueue,
+    LocalTaskStore,
+    RedisLaneCoordinator,
+    TaskWorkerRuntime,
+)
 from scripts.load_test_gateway import (
     DEFAULT_REPORT_DIR,
     build_result,
@@ -35,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run distributed lane smoke checks.")
     parser.add_argument(
         "--scenario",
-        choices=("inbound", "ttl-takeover"),
+        choices=("inbound", "ttl-takeover", "broker-unavailable"),
         default="inbound",
         help="smoke scenario to run",
     )
@@ -61,6 +67,64 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
+
+
+class FailingInboundBroker:
+    """Minimal broker that simulates RabbitMQ publish/consume unavailability."""
+
+    enabled = True
+    partitions = 1
+
+    def __init__(self) -> None:
+        self.publish_attempts = 0
+        self.consume_attempts = 0
+
+    def publish(self, task) -> None:
+        del task
+        self.publish_attempts += 1
+        raise RuntimeError("simulated rabbitmq publish failure")
+
+    def consume_once(self, partition: int, handler) -> bool:
+        del partition, handler
+        self.consume_attempts += 1
+        return False
+
+    def stats(self) -> dict:
+        return {
+            "backend": "failing-inbound-broker",
+            "enabled": True,
+            "messages": 0,
+            "dead_letter_messages": 0,
+            "publish_attempts": self.publish_attempts,
+            "consume_attempts": self.consume_attempts,
+        }
+
+
+def assert_broker_unavailable_result(result: dict) -> list[str]:
+    """Validate broker-unavailable fallback smoke result."""
+
+    failures: list[str] = []
+    if result.get("status") != "ok":
+        failures.append(f"unexpected status: {result.get('status')}")
+    if result.get("publish_failed") is not True:
+        failures.append("broker publish failure was not exercised")
+    if result.get("worker_handled") is not True:
+        failures.append("worker did not handle fallback task")
+    if result.get("task_status_after_enqueue") != "pending":
+        failures.append(
+            "task was not kept pending after broker publish failure: "
+            f"{result.get('task_status_after_enqueue')}"
+        )
+    if result.get("task_status_after_worker") != "done":
+        failures.append(
+            "task was not completed by polling fallback: "
+            f"{result.get('task_status_after_worker')}"
+        )
+    if result.get("handler_calls") != 1:
+        failures.append(f"handler call count mismatch: {result.get('handler_calls')}")
+    if result.get("broker_consume_attempts", 0) < 1:
+        failures.append("worker did not attempt broker consume before polling fallback")
+    return failures
 
 
 def assert_ttl_takeover_result(result: dict) -> list[str]:
@@ -235,19 +299,73 @@ async def run_ttl_takeover_smoke(args: argparse.Namespace) -> dict:
     return result
 
 
+async def run_broker_unavailable_smoke(args: argparse.Namespace) -> dict:
+    broker = FailingInboundBroker()
+    task_dir = args.work_dir / f"broker-unavailable-{int(time.time())}"
+    store = LocalTaskStore(task_dir)
+    queue = LocalTaskQueue(store, broker=broker)
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="smoke",
+        session_key="smoke-session-broker-unavailable",
+        payload={"text": "broker unavailable fallback"},
+        metadata={"smoke": "broker-unavailable"},
+    )
+    after_enqueue = store.get(task.id)
+    handler_calls = 0
+
+    def handler(item) -> str:
+        nonlocal handler_calls
+        handler_calls += 1
+        return f"handled:{item.id}"
+
+    worker = TaskWorkerRuntime(queue, worker_id="smoke-worker-broker-fallback")
+    worker.register_handler("agent_inbound", handler)
+    handled = await worker.run_once()
+    after_worker = store.get(task.id)
+    result = {
+        "status": "ok",
+        "scenario": "broker-unavailable",
+        "task_id": task.id,
+        "publish_failed": broker.publish_attempts == 1,
+        "worker_handled": handled,
+        "task_status_after_enqueue": getattr(after_enqueue, "status", ""),
+        "task_status_after_worker": getattr(after_worker, "status", ""),
+        "result_preview": getattr(after_worker, "result_preview", ""),
+        "handler_calls": handler_calls,
+        "broker_publish_attempts": broker.publish_attempts,
+        "broker_consume_attempts": broker.consume_attempts,
+        "broker_stats": broker.stats(),
+        "queue_stats": queue.stats(),
+    }
+    result["failures"] = assert_broker_unavailable_result(result)
+    result["status"] = "ok" if not result["failures"] else "failed"
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    redis = RedisClient(
-        enabled=True,
-        url=args.redis_url,
-        socket_timeout_seconds=max(0.05, args.redis_socket_timeout_seconds),
-    )
-    redis_health = redis.health().to_dict()
-    if not redis_health.get("ok"):
-        print(json.dumps({"status": "failed", "reason": "redis unavailable", "redis": redis_health}, ensure_ascii=False))
-        return 2
+    if args.scenario in {"inbound", "ttl-takeover"}:
+        redis = RedisClient(
+            enabled=True,
+            url=args.redis_url,
+            socket_timeout_seconds=max(0.05, args.redis_socket_timeout_seconds),
+        )
+        redis_health = redis.health().to_dict()
+        if not redis_health.get("ok"):
+            print(
+                json.dumps(
+                    {"status": "failed", "reason": "redis unavailable", "redis": redis_health},
+                    ensure_ascii=False,
+                )
+            )
+            return 2
 
     try:
+        if args.scenario == "broker-unavailable":
+            broker_result = asyncio.run(run_broker_unavailable_smoke(args))
+            print(json.dumps(broker_result, ensure_ascii=False))
+            return 0 if not broker_result.get("failures") else 1
         if args.scenario == "ttl-takeover":
             takeover_result = asyncio.run(run_ttl_takeover_smoke(args))
             print(json.dumps(takeover_result, ensure_ascii=False))
