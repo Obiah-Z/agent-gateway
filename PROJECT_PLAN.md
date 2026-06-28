@@ -231,7 +231,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 17：会话与记忆治理
 
-状态：待实现。
+状态：进行中。
 
 目标：
 
@@ -868,10 +868,11 @@ python scripts/build_capacity_baseline.py
 当前边界：
 
 - `ChannelRuntime` lane 只保护入站落任务前的入口阶段。
-- `TaskWorkerRuntime` 当前按 task type 抢任务，不按 `session_key` 建 lane。
-- PostgreSQL `FOR UPDATE SKIP LOCKED` 能避免同一 task 被重复抢占，但不能避免同一 session 的不同 task 被多个 worker 同时执行。
-- `AgentInboundTaskHandler` 当前没有 Redis lock、PostgreSQL advisory lock 或 session-aware reserve。
-- 多 worker 下同一用户连续发多条消息，仍可能出现会话历史并发写入或上下文顺序不稳定。
+- `TaskWorkerRuntime` 已支持 session-aware reserve，可在 reserve 前跳过已被 Redis 锁保护的 session。
+- PostgreSQL `FOR UPDATE SKIP LOCKED` 能避免同一 task 被重复抢占，并已支持 `blocked_session_keys` 排除热点 session。
+- `AgentInboundTaskHandler` 已具备 Redis session lock、token-safe release、长任务续租和锁冲突 retry。
+- 当前能力已经能防止同 session 并发执行，但语义仍是“锁”，还没有完整的 lane ownership、worker heartbeat、lane 状态记录、接管和迁移模型。
+- 最终目标是把 Redis lock 演进成分布式 per-session lane：RabbitMQ 负责可靠排队，Redis/PostgreSQL 负责 lane 归属和状态，worker 池负责执行。
 
 技术选型文档：
 
@@ -888,7 +889,12 @@ python scripts/build_capacity_baseline.py
 | 20.9.5 观测与控制面 | 已完成 | `runtime.status.tasks.session_locks` 暴露被锁 session 数、累计跳过次数和最近样例；Dashboard 中文展示后台任务锁观测；事件流记录 `agent_inbound.session_locked_skipped`。 | 排查入站延迟时能区分模型慢、worker 少、锁冲突和 session 热点。 |
 | 20.9.6 故障注入与压测 | 已完成 | 增加同 session 多消息、多 worker 抢占、Redis 探测异常、续租失败、锁跳过事件去重等自动化测试。 | 能证明同 session 不并发执行；Redis 故障时降级策略明确。 |
 | 20.9.7 RabbitMQ session 分区评估 | 已完成 | 已输出 [RabbitMQ 入站 Session 分区评估](doc/RabbitMQ入站Session分区评估.md)，评估 `hash(session_key) % N` 分区队列、轻量引用消息体、prefetch=1、hybrid worker 和迁移风险。 | 结论是暂不替换当前 Redis lock + PostgreSQL task 主链路，RabbitMQ 入站分区作为中期演进方向。 |
-| 20.9.8 per-session task lane 设计 | 待实现 | 设计分布式 lane ownership、worker heartbeat、超时接管、lane 迁移和热点治理。 | 输出可实施方案，为后续从 Redis lock 演进到真正 per-session lane 做准备。 |
+| 20.9.8 per-session task lane 设计 | 进行中 | 设计并逐步实现分布式 lane ownership、worker heartbeat、超时接管、lane 迁移和热点治理。 | 从 Redis lock 演进到可观测、可续租、可接管的 per-session lane。 |
+| 20.9.8.1 最终 lane 目标落盘 | 已完成 | 根据最终形态说明，明确 RabbitMQ 负责可靠排队，Redis/PostgreSQL 负责 lane 归属与状态，worker 池执行，同 session 串行、不同 session 并行。 | PROJECT_PLAN 明确最终架构，不再把 RabbitMQ 分区和 lane ownership 混为一层。 |
+| 20.9.8.2 RedisLaneCoordinator MVP | 已完成 | 抽象 lane ownership API：acquire、renew、release、inspect，owner token 使用 `worker_id + task_id`，兼容当前 Redis lock。 | 单元测试证明同 session 只能一个 owner，续租/释放均 token-safe。 |
+| 20.9.8.3 AgentInboundTaskHandler 接入 lane coordinator | 已完成 | handler 内部已从直接调用 Redis lock 迁移到 `RedisLaneCoordinator`，保留现有 key namespace、错误消息和事件行为。 | 现有 20.9.2-20.9.6 测试继续通过。 |
+| 20.9.8.4 Worker heartbeat 与 lane metadata | 待实现 | lane ownership value 增加 worker_id、task_id、acquired_at、renewed_at，支持 worker heartbeat 和 Dashboard inspect。 | runtime.status 能看到 active lane owner 和最近续租时间。 |
+| 20.9.8.5 超时接管与迁移策略 | 待实现 | 设计并验证 owner TTL 过期后的接管、retry 任务重入、worker 崩溃恢复和热点 session 标记。 | 故障注入能证明 worker 崩溃后 lane 可由其他 worker 接管。 |
 
 推荐落地顺序：
 

@@ -7,6 +7,7 @@ from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.domain.models import InboundMessage
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
+from agent_gateway.runtime.tasks.lane import LaneOwnership, LaneOwnerToken, RedisLaneCoordinator
 from agent_gateway.runtime.tasks.models import TaskInstance
 from agent_gateway.runtime.tasks.worker import RetryableTaskError
 
@@ -61,11 +62,16 @@ class AgentInboundTaskHandler:
         lock_ttl_seconds: int = 300,
         lock_renew_interval_seconds: float | None = None,
         worker_id: str = "local-worker",
+        lane_coordinator: RedisLaneCoordinator | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.channels = channels
         self.delivery_runtime = delivery_runtime
         self.redis_client = redis_client
+        self.lane_coordinator = lane_coordinator or RedisLaneCoordinator(
+            redis_client,
+            namespace="gateway:lock:agent_inbound",
+        )
         self.lock_ttl_seconds = max(1, int(lock_ttl_seconds))
         self.lock_renew_interval_seconds = self._resolve_renew_interval(
             lock_renew_interval_seconds,
@@ -76,23 +82,22 @@ class AgentInboundTaskHandler:
     async def __call__(self, task: TaskInstance) -> str:
         """按原 dispatcher 链路执行入站消息并投递最终回复。"""
 
-        lock_key = self._lock_key(task)
-        lock_value = f"{self.worker_id}:{task.id}"
-        acquired = False
+        owner = LaneOwnerToken(worker_id=self.worker_id, task_id=task.id)
+        ownership: LaneOwnership | None = None
         renew_task: asyncio.Task[None] | None = None
-        if self.redis_client is not None and self.redis_client.enabled and lock_key:
+        if self.lane_coordinator.enabled and task.session_key.strip():
             try:
-                acquired = self.redis_client.acquire_lock(
-                    lock_key,
-                    value=lock_value,
+                ownership = self.lane_coordinator.acquire(
+                    task.session_key,
+                    owner=owner,
                     ttl_seconds=self.lock_ttl_seconds,
                 )
             except Exception as exc:
                 raise RetryableTaskError(f"agent inbound session lock unavailable: {exc}") from exc
-            if not acquired:
+            if ownership is None:
                 raise RetryableTaskError(f"agent inbound session locked: {task.session_key}")
             renew_task = asyncio.create_task(
-                self._renew_lock_until_cancelled(lock_key, lock_value),
+                self._renew_lock_until_cancelled(ownership),
                 name=f"agent-inbound-lock-renew:{task.id}",
             )
         try:
@@ -109,38 +114,32 @@ class AgentInboundTaskHandler:
                     await renew_task
                 except asyncio.CancelledError:
                     pass
-            if acquired and self.redis_client is not None and lock_key:
+            if ownership is not None:
                 try:
-                    self.redis_client.release_lock(lock_key, value=lock_value)
+                    self.lane_coordinator.release(ownership)
                 except Exception:
                     pass
 
     def is_session_locked(self, task: TaskInstance) -> bool:
         """检查任务 session 当前是否已被其他 worker 持锁。"""
 
-        if self.redis_client is None or not self.redis_client.enabled:
-            return False
-        lock_key = self._lock_key(task)
-        if not lock_key:
+        if not self.lane_coordinator.enabled:
             return False
         try:
-            return self.redis_client.lock_exists(lock_key)
+            return self.lane_coordinator.is_owned(task.session_key)
         except Exception:
             # Redis 不可用时不在 reserve 阶段跳过，执行阶段会进入 retrying。
             return False
 
-    async def _renew_lock_until_cancelled(self, lock_key: str, lock_value: str) -> None:
+    async def _renew_lock_until_cancelled(self, ownership: LaneOwnership) -> None:
         """定期续租当前任务持有的 session 锁，覆盖长模型调用场景。"""
 
-        assert self.redis_client is not None
         while True:
             await asyncio.sleep(self.lock_renew_interval_seconds)
             try:
                 renewed = await asyncio.to_thread(
-                    self.redis_client.renew_lock,
-                    lock_key,
-                    value=lock_value,
-                    ttl_seconds=self.lock_ttl_seconds,
+                    self.lane_coordinator.renew,
+                    ownership,
                 )
             except Exception:
                 # 续租失败时不直接中断已在执行的 Agent 回合，避免重复副作用；
