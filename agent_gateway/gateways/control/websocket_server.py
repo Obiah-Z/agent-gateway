@@ -152,6 +152,7 @@ class GatewayServer:
             "tasks.lanes.recovery": self._m_tasks_lanes_recovery,
             "tasks.lanes.recovery.plan": self._m_tasks_lanes_recovery_plan,
             "tasks.lanes.recovery.execute": self._m_tasks_lanes_recovery_execute,
+            "tasks.lanes.recovery.events": self._m_tasks_lanes_recovery_events,
             "tasks.lanes.release": self._m_tasks_lanes_release,
             "tasks.get": self._m_tasks_get,
             "tasks.cancel": self._m_tasks_cancel,
@@ -820,6 +821,18 @@ class GatewayServer:
         return self.control_plane.execute_session_lane_recovery(
             limit=int(params.get("limit", 50)),
             execute=bool(params.get("execute", False)),
+        )
+
+    async def _m_tasks_lanes_recovery_events(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 session lane 恢复审计事件 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.lane_recovery_events(
+            limit=int(params.get("limit", 50)),
+            session_key=str(params.get("session_key", "")),
+            worker_id=str(params.get("worker_id", "")),
+            event_type=str(params.get("type", "")),
+            status=str(params.get("status", "")),
         )
 
     async def _m_tasks_lanes_release(self, params: dict[str, Any]) -> dict[str, Any]:

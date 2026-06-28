@@ -399,6 +399,66 @@ class GatewayControlPlane:
             },
         }
 
+    def lane_recovery_events(
+        self,
+        *,
+        limit: int = 50,
+        session_key: str = "",
+        worker_id: str = "",
+        event_type: str = "",
+        status: str = "",
+    ) -> dict[str, Any]:
+        """回看 session lane recovery 审计事件。"""
+
+        safe_limit = max(1, min(int(limit), 200))
+        lookup_limit = max(safe_limit, min(safe_limit * 5, 500))
+        requested_type = str(event_type or "").strip()
+        if requested_type and not requested_type.startswith("session_lane.recovery."):
+            return {
+                "items": [],
+                "count": 0,
+                "configured": self.event_store is not None or self.state_repository is not None,
+                "limit": safe_limit,
+                "filters": {
+                    "session_key": session_key,
+                    "worker_id": worker_id,
+                    "event_type": requested_type,
+                    "status": status,
+                },
+            }
+        events = self.tail_events(
+            limit=lookup_limit,
+            event_type=requested_type,
+            component="session_lane_recovery",
+            status=status,
+        )
+        filtered: list[dict[str, Any]] = []
+        for row in list(events.get("items", []) or []):
+            row_type = str(row.get("type", ""))
+            if not row_type.startswith("session_lane.recovery."):
+                continue
+            if session_key and str(row.get("session_key", "")) != session_key:
+                continue
+            metadata = row.get("metadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if worker_id and str(metadata.get("worker_id", "")) != worker_id:
+                continue
+            filtered.append(row)
+        items = filtered[-safe_limit:]
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": bool(events.get("configured")),
+            "limit": safe_limit,
+            "filters": {
+                "session_key": session_key,
+                "worker_id": worker_id,
+                "event_type": requested_type,
+                "status": status,
+            },
+        }
+
     def recent_errors(
         self,
         *,
@@ -1463,6 +1523,8 @@ class GatewayControlPlane:
         recovery = self.session_lane_recovery_suggestions(limit=50)
         recovery_rows = list(recovery.get("items", []) or [])
         recovery_plan = self.plan_session_lane_recovery(limit=50)
+        recovery_events = self.lane_recovery_events(limit=50)
+        recovery_event_rows = list(recovery_events.get("items", []) or [])
         recovery_execute_preview = self.execute_session_lane_recovery(
             limit=50,
             execute=False,
@@ -1491,6 +1553,8 @@ class GatewayControlPlane:
                 "released_count": recovery_execute_preview.get("released_count", 0),
                 "failed_count": recovery_execute_preview.get("failed_count", 0),
             },
+            "recovery_event_count": len(recovery_event_rows),
+            "recovery_events": recovery_event_rows[:6],
         }
 
     @staticmethod

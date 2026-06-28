@@ -1017,11 +1017,22 @@ def test_gateway_server_executes_session_lane_recovery_only_when_confirmed(tmp_p
     executed = asyncio.run(
         server._m_tasks_lanes_recovery_execute({"limit": 10, "execute": True})
     )
+    events = asyncio.run(
+        server._m_tasks_lanes_recovery_events(
+            {
+                "limit": 10,
+                "session_key": "agent:feishu:user-1",
+                "worker_id": "worker-a",
+            }
+        )
+    )
 
     assert dry_run["executed"] is False
     assert dry_run["released_count"] == 0
     assert executed["executed"] is True
     assert executed["released_count"] == 1
+    assert events["count"] == 1
+    assert events["items"][0]["type"] == "session_lane.recovery.released"
     assert repository.releases[0]["owner_token"] == "worker-a:task-a"
     assert control.event_store is not None
     assert (

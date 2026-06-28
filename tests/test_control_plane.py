@@ -536,6 +536,18 @@ def test_control_plane_uses_state_repository_for_read_views(tmp_path: Path) -> N
             "duration_seconds": 0.12,
         },
     )
+    event_store.record(
+        "session_lane.recovery.released",
+        status="ok",
+        component="session_lane_recovery",
+        message="released",
+        session_key="session-worker",
+        metadata={
+            "worker_id": "worker-a",
+            "task_id": "task-worker-1",
+            "owner_token": "worker-a:task-worker-1",
+        },
+    )
     memory_store = MemoryStore(settings.workspace_root)
     memory_store.write_memory("remember me", category="test")
     task_store = LocalTaskStore(tmp_path / "tasks")
@@ -565,16 +577,24 @@ def test_control_plane_uses_state_repository_for_read_views(tmp_path: Path) -> N
 
     events = control.tail_events(limit=5)
     executions = control.task_executions(limit=5, session_key="session-worker", worker_id="worker-a")
+    recovery_events = control.lane_recovery_events(
+        limit=5,
+        session_key="session-worker",
+        worker_id="worker-a",
+    )
     errors = control.recent_errors(limit=5)
     memories = control.recent_memories(limit=5)
     tasks = control.get_task(task.id)
 
     assert events["configured"] is True
-    assert events["count"] == 2
+    assert events["count"] == 3
     assert executions["configured"] is True
     assert executions["count"] == 1
     assert executions["items"][0]["type"] == "task.worker.completed"
     assert executions["items"][0]["metadata"]["worker_id"] == "worker-a"
+    assert recovery_events["configured"] is True
+    assert recovery_events["count"] == 1
+    assert recovery_events["items"][0]["type"] == "session_lane.recovery.released"
     assert errors["configured"] is True
     assert errors["count"] == 1
     assert memories["configured"] is True
@@ -1352,6 +1372,13 @@ def test_control_plane_recovery_execute_releases_stale_lanes(tmp_path: Path) -> 
     completed_events = control.event_store.tail(limit=10, event_type="session_lane.recovery.completed")
     assert released_events[0]["session_key"] == "agent:feishu:user-1"
     assert completed_events[0]["metadata"]["released_count"] == 1
+    recovery_events = control.lane_recovery_events(
+        limit=10,
+        session_key="agent:feishu:user-1",
+        worker_id="worker-a",
+    )
+    assert recovery_events["count"] == 1
+    assert recovery_events["items"][0]["type"] == "session_lane.recovery.released"
 
 
 def test_control_plane_releases_only_stale_session_lane_by_default(tmp_path: Path) -> None:

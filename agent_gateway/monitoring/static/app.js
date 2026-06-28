@@ -920,6 +920,9 @@ function renderRuntime(runtime) {
   const laneRecoveryPlan = persistedLanes.recovery_plan || {};
   const laneRecoveryActions = Array.isArray(laneRecoveryPlan.actions) ? laneRecoveryPlan.actions : [];
   const laneRecoveryExecution = persistedLanes.recovery_execution || {};
+  const laneRecoveryEvents = Array.isArray(persistedLanes.recovery_events)
+    ? persistedLanes.recovery_events
+    : [];
   const taskBroker = tasks.broker || tasks.queue?.broker || {};
   const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
   const visibleBrokerQueues = brokerQueues.slice(0, 6);
@@ -983,6 +986,7 @@ function renderRuntime(runtime) {
         `恢复建议 ${persistedLanes.recovery_suggestion_count ?? 0}`,
         `预检动作 ${laneRecoveryPlan.action_count ?? 0}`,
         `批量释放 ${laneRecoveryExecution.executed ? "已执行" : "未执行"}`,
+        `恢复审计 ${persistedLanes.recovery_event_count ?? 0}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
@@ -1062,6 +1066,12 @@ function renderRuntime(runtime) {
           laneRecoveryExecution.executed
             ? `已释放 ${laneRecoveryExecution.released_count ?? 0} / 失败 ${laneRecoveryExecution.failed_count ?? 0}`
             : "未执行，需通过控制面显式传入 execute=true",
+        ],
+        [
+          "恢复审计",
+          laneRecoveryEvents
+            .map((row) => `${row.status || "--"}:${row.type || "--"}:${row.session_key || "--"}`)
+            .join(" | ") || "无",
         ],
       ],
     },
