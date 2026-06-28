@@ -91,6 +91,7 @@ class GatewaySettings:
     inbound_max_queue_size: int = 200
     inbound_max_lane_queue_size: int = 20
     inbound_long_task_notice_seconds: float = 15.0
+    inbound_task_queue_enabled: bool = False
     background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor")
     heartbeat_interval_seconds: float = 1800.0
     heartbeat_active_start: int = 9
@@ -262,6 +263,7 @@ class GatewaySettings:
                 0.0,
                 float(os.getenv("GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS", "15")),
             ),
+            inbound_task_queue_enabled=env_bool("GATEWAY_INBOUND_TASK_QUEUE_ENABLED", False),
             background_inbound_commands=parse_csv_tuple(
                 os.getenv(
                     "GATEWAY_BACKGROUND_INBOUND_COMMANDS",

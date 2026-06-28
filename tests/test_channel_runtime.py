@@ -709,6 +709,77 @@ def test_channel_runtime_uses_configured_background_commands(tmp_path) -> None:
     assert dispatcher.dispatch_calls == 1
 
 
+def test_channel_runtime_can_persist_non_cli_inbound_to_task_queue(tmp_path) -> None:
+    dispatcher = BackgroundTaskDispatcher()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        task_queue=task_queue,
+        inbound_task_queue_enabled=True,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="hello from feishu",
+                sender_id="user-1",
+                channel="feishu",
+                account_id="bot-a",
+                peer_id="user-1",
+                metadata={"receive_id_type": "open_id"},
+            )
+        )
+        while not task_queue.store.list(statuses=["pending"]):
+            await asyncio.sleep(0)
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    queued = task_queue.store.list(statuses=["pending"])
+    assert len(queued) == 1
+    assert queued[0].task_type == "agent_inbound"
+    assert queued[0].source == "feishu"
+    assert queued[0].payload["text"] == "hello from feishu"
+    assert queued[0].payload["metadata"]["receive_id_type"] == "open_id"
+    assert queued[0].metadata["mode"] == "persistent_inbound"
+    assert dispatcher.dispatch_calls == 0
+
+
+def test_channel_runtime_keeps_cli_inbound_synchronous_when_task_queue_enabled(tmp_path) -> None:
+    dispatcher = BackgroundTaskDispatcher()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        task_queue=task_queue,
+        inbound_task_queue_enabled=True,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        await runtime.ingest_external(
+            InboundMessage(
+                text="hello from cli",
+                sender_id="cli-user",
+                channel="cli",
+                account_id="cli-local",
+                peer_id="cli-user",
+            )
+        )
+        while dispatcher.dispatch_calls <= 0:
+            await asyncio.sleep(0)
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    assert task_queue.store.list(statuses=["pending"]) == []
+    assert dispatcher.dispatch_calls == 1
+
+
 def test_channel_runtime_does_not_send_long_task_notice_for_fast_task() -> None:
     dispatcher = BackpressureDispatcher()
     dispatcher.release.set()

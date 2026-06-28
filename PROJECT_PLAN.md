@@ -353,6 +353,7 @@ delivery-worker
 | 20.6 分布式可靠队列升级 | 已完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
 | 20.7 生产部署编排 | 进行中 | 已完成 Dockerfile、Docker Compose、基础依赖编排、数据卷和部署说明；后续补启动前检查、systemd、备份恢复、反向代理和 HTTPS。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
 | 20.8 统一观测与压测 | 进行中 | 先定义压测指标口径、场景边界和报告格式，再增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
+| 20.9 分布式入站任务顺序与互斥 | 待实现 | 在 `agent_inbound` 入站任务队列化基础上，补齐同 session 互斥执行、近似顺序执行、worker 抢占治理，并为后续 per-session lane 演进打基础。 | 多 worker / 多实例消费入站任务时，同一 session 不并发执行，失败可重试，顺序风险可观测。 |
 
 #### 开展顺序建议
 
@@ -362,12 +363,14 @@ delivery-worker
 4. 然后做 20.4：PostgreSQL 接管长期状态，支撑 Dashboard 查询、审计、归档和治理。
 5. 再做 20.5：补齐 PostgreSQL schema 初始化和本地数据回填，确保主存储切换不是只停留在代码路径。
 6. 然后做 20.6：当任务和状态稳定后，再升级可靠投递队列，避免同时改动执行链路和出站链路。
-7. 最后做 20.7 和 20.8：补齐部署、观测和压测，用指标验证高可用和高性能目标是否真实达成。
+7. 然后做 20.7 和 20.8：补齐部署、观测和压测，用指标验证高可用和高性能目标是否真实达成。
+8. 最后推进 20.9：在入站任务队列化后补齐同 session 互斥、顺序治理和 per-session lane 演进路径。
 
 #### 完成标准
 
 - 支持至少两个 gateway 实例同时运行，入站事件不重复处理。
 - 支持多个 agent worker 并发消费任务，长任务不阻塞实时消息入口。
+- 支持多个 agent worker 消费入站任务时，同一 session 不会并发执行。
 - 支持 delivery worker 水平扩展，投递失败可重试、可死信、可人工处理。
 - 关键状态不依赖单机 JSONL，Dashboard 可以分页查询任务、事件、错误和记忆。
 - Redis、PostgreSQL、队列和反向代理都有健康检查、配置说明和降级策略。
@@ -390,7 +393,7 @@ delivery-worker
 | 20.7.3 systemd 部署方式 | 已完成 | 新增 `deploy/systemd/agent-gateway.service`、`deploy/systemd/agent-gateway.env.example` 和 `deploy/systemd.md`，包含环境文件、doctor 预检查、重启策略、日志查看和升级流程。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
 | 20.7.4 数据卷与备份恢复 | 待实现 | 补齐 `workspace/`、`data/`、PostgreSQL、RabbitMQ、Redis 和 `.env` 的备份/恢复命令。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
 | 20.7.5 反向代理与 HTTPS | 待实现 | 增加 Nginx 或 Caddy 示例，支持飞书 Webhook HTTPS 暴露，并限制 Dashboard 访问范围。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
-| 20.7.6 部署文档整合 | 待实现 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
+| 20.7.6 部署文档整合 | 已完成 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
 
 ##### 20.7.1 Docker Compose 基础编排结果
 
@@ -598,6 +601,7 @@ sudo systemctl start agent-gateway
 | 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 和 `feishu-send-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型或发送真实飞书消息；飞书 Webhook 入站压测仍待补齐。 | 已能低并发验证真实模型、上下文装配、AgentLoopRunner 延迟和飞书出站发送延迟；后续补真实飞书入站链路。 |
 | 20.8.5 Prometheus metrics endpoint | 已完成 | Dashboard HTTP 服务新增 `/metrics`，输出 Prometheus text exposition，覆盖 metrics 可用性、窗口样本数、投递积压、入站 lane、事件错误、Cron 和模型 profile 指标。 | Prometheus 可 scrape，指标名稳定。 |
 | 20.8.6 容量基线报告 | 已完成 | 新增 `scripts/build_capacity_baseline.py`，可汇总 load-test JSON，按场景生成容量基线 Markdown，包含吞吐、P95、错误率、积压和瓶颈判断。 | `workspace/reports/capacity-baseline.md` 下有可复现 Markdown 报告。 |
+| 20.8.7 边界测试矩阵 | 待实现 | 将 20.8 的压测从“单场景验证”升级为“边界定位矩阵”，按本地闭环、队列链路、真实模型、飞书链路、故障注入和资源上限分层执行。 | 能明确说明系统在不同并发、不同后端和不同故障条件下的容量边界与退化方式。 |
 
 ##### 20.8.2 压测脚本 MVP 结果
 
@@ -809,6 +813,97 @@ python scripts/build_capacity_baseline.py
 - 容量基线报告只汇总已有 JSON，不负责自动执行所有压测命令。
 - 真实模型和飞书场景需要显式 `--allow-real-external`，不建议纳入默认自动基线。
 - 报告是单次或少量样本的容量快照，不等同 SLA；严谨结论需要多轮重复压测和固定机器负载。
+
+##### 20.8.7 边界测试矩阵建议
+
+目标不是把数字跑到最大，而是找出系统在哪一步开始退化。
+
+测试分层：
+
+| 层级 | 目的 | 推荐场景 |
+| --- | --- | --- |
+| 本地闭环 | 看网关自身调度和 lane 并发极限 | `mock-local` |
+| 队列链路 | 看可靠投递、ack、retry、DLQ 和 worker 吞吐 | `delivery-local`、`delivery-rabbitmq` |
+| 真实模型 | 看 AgentLoopRunner、上下文装配和外部模型 API 延迟 | `model-real` |
+| 真实飞书 | 看通道发送、Webhook、长连接和回包延迟 | `feishu-send-real`，后续补 `feishu-webhook-real` |
+| 故障注入 | 看失败场景的退化是否可控 | 模型超时、RabbitMQ 不可用、PostgreSQL 不可用、Redis 不可用、飞书验签失败 |
+| 资源上限 | 看 CPU / 内存 / 磁盘 / 队列积压的临界点 | 逐步提高并发并观察 `P95`、错误率和积压 |
+
+建议执行顺序：
+
+1. 先跑 `mock-local` 找到纯调度瓶颈。
+2. 再跑 `delivery-local` 和 `delivery-rabbitmq` 对比本地队列和 broker 队列的损耗。
+3. 再跑 `model-real` 看真实模型的上限。
+4. 再跑 `feishu-send-real` 看外部通道投递边界。
+5. 最后做故障注入和资源上限测试，确认系统是否能稳定降级而不是直接崩溃。
+
+建议输出结论：
+
+- 哪个场景先出现 `P95` 激增。
+- 哪个组件先出现队列积压。
+- 哪个外部依赖先触发失败率上升。
+- 在什么并发点开始出现明显退化。
+- 哪些错误可以重试恢复，哪些错误需要人工介入。
+
+#### Phase 20.9 分布式入站任务顺序与互斥
+
+状态：待实现。
+
+目标：
+
+- 在 `GATEWAY_INBOUND_TASK_QUEUE_ENABLED=true` 后，保证非 CLI 入站消息进入 `agent_inbound` 任务队列后，多 worker / 多实例消费时不会并发执行同一 session。
+- 把当前 `ChannelRuntime` 的进程内 lane 思路，逐步迁移到任务执行层，形成可分布式演进的 per-session lane。
+- 先解决同 session 互斥执行，再解决更强的顺序执行和 lane ownership。
+
+当前入站策略：
+
+```text
+默认实时路径：
+外部入站 -> ChannelRuntime -> preroute lane -> Dispatcher -> AgentLoopRunner
+
+任务化路径：
+外部入站 -> ChannelRuntime -> preroute lane -> agent_inbound task -> TaskWorkerRuntime -> AgentInboundTaskHandler -> Dispatcher -> AgentLoopRunner
+```
+
+当前边界：
+
+- `ChannelRuntime` lane 只保护入站落任务前的入口阶段。
+- `TaskWorkerRuntime` 当前按 task type 抢任务，不按 `session_key` 建 lane。
+- PostgreSQL `FOR UPDATE SKIP LOCKED` 能避免同一 task 被重复抢占，但不能避免同一 session 的不同 task 被多个 worker 同时执行。
+- `AgentInboundTaskHandler` 当前没有 Redis lock、PostgreSQL advisory lock 或 session-aware reserve。
+- 多 worker 下同一用户连续发多条消息，仍可能出现会话历史并发写入或上下文顺序不稳定。
+
+技术选型文档：
+
+- [分布式入站任务顺序与互斥技术选型](doc/分布式入站任务顺序与互斥技术选型.md)
+
+子阶段规划：
+
+| 子阶段 | 状态 | 主要内容 | 完成标准 |
+| --- | --- | --- | --- |
+| 20.9.1 当前入站任务链路审计 | 已完成 | 已梳理默认实时路径、任务化路径、`ChannelRuntime` lane、`TaskWorkerRuntime` reserve 和 `AgentInboundTaskHandler` 执行边界。 | 明确当前只做到入站任务化，还没有 task worker 层的 session 互斥和顺序保证。 |
+| 20.9.2 Redis session lock MVP | 待实现 | 为 `agent_inbound` 任务执行增加 Redis 分布式锁，lock key 基于 `session_key`；获取不到锁时短延迟 retry。 | 多 worker 同时消费时，同一 session 同一时间最多一个任务进入 AgentLoopRunner。 |
+| 20.9.3 锁安全与续租 | 待实现 | 锁 value 使用 `worker_id + task_id`，释放时校验 value；补 TTL 配置、执行超时和长任务续租策略。 | worker 崩溃可自动释放锁，长模型调用不会因锁过期导致误并发。 |
+| 20.9.4 session-aware reserve | 待实现 | reserve 任务时尽量跳过已锁 session，减少拿到任务后再 retry 的抖动；记录锁冲突次数和重排次数。 | 热点 session 不会导致大量任务反复 running/retrying，不同 session 仍可并行推进。 |
+| 20.9.5 观测与控制面 | 待实现 | `runtime.status`、Dashboard 和事件流展示 `agent_inbound` 锁等待、锁冲突、session backlog、最老等待时间。 | 排查入站延迟时能区分模型慢、worker 少、锁冲突和 session 热点。 |
+| 20.9.6 故障注入与压测 | 待实现 | 增加同 session 多消息、多 worker 抢占、Redis 不可用、worker 崩溃、锁过期等测试。 | 能证明同 session 不并发执行；Redis 故障时降级策略明确。 |
+| 20.9.7 RabbitMQ session 分区评估 | 待实现 | 评估 `hash(session_key) % N` 分区队列，把同 session 固定路由到同一分区 worker。 | 明确是否进入 RabbitMQ 入站分区队列实现，或继续 Redis lock + PostgreSQL task。 |
+| 20.9.8 per-session task lane 设计 | 待实现 | 设计分布式 lane ownership、worker heartbeat、超时接管、lane 迁移和热点治理。 | 输出可实施方案，为后续从 Redis lock 演进到真正 per-session lane 做准备。 |
+
+推荐落地顺序：
+
+1. 先做 Redis session lock，解决最危险的同 session 并发执行。
+2. 再做锁安全与续租，避免长模型调用期间锁过期。
+3. 再做 session-aware reserve，减少锁冲突带来的 retry 抖动。
+4. 再补 Dashboard / 事件流观测。
+5. 最后评估 RabbitMQ session 分区和真正的分布式 per-session lane。
+
+阶段完成标准：
+
+- 开启 `GATEWAY_INBOUND_TASK_QUEUE_ENABLED=true` 且运行多个 worker 时，同一 session 不会并发执行多个 `agent_inbound`。
+- Redis 可用时优先使用分布式锁；Redis 不可用时有明确降级策略和 warning event。
+- Dashboard 能看到入站任务积压、锁等待和热点 session。
+- 压测报告能说明同 session 多消息场景下的吞吐、P95 和顺序风险。
 
 #### 当前实现说明
 

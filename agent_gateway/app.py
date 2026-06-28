@@ -392,6 +392,7 @@ async def serve(app: GatewayApplication) -> None:
         max_lane_queue_size=app.settings.inbound_max_lane_queue_size,
         long_task_notice_seconds=app.settings.inbound_long_task_notice_seconds,
         task_queue=app.task_queue,
+        inbound_task_queue_enabled=app.settings.inbound_task_queue_enabled,
         background_inbound_commands=app.settings.background_inbound_commands,
     )
     app.control_plane.channel_runtime = channel_runtime

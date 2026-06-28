@@ -86,6 +86,7 @@ class ChannelRuntime:
         max_lane_queue_size: int = 20,
         long_task_notice_seconds: float = 15.0,
         task_queue: LocalTaskQueue | None = None,
+        inbound_task_queue_enabled: bool = False,
         background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor"),
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
@@ -97,7 +98,8 @@ class ChannelRuntime:
         self.max_queue_size = max(1, int(max_queue_size))  # 全局入口队列最大积压。
         self.max_lane_queue_size = max(1, int(max_lane_queue_size))  # 单条 lane 最大积压。
         self.long_task_notice_seconds = max(0.0, float(long_task_notice_seconds))
-        self.task_queue = task_queue  # 明确命令式长任务会先入队，再由 worker 后台执行。
+        self.task_queue = task_queue  # 可承载明确长任务命令，也可承载可配置的普通入站任务。
+        self.inbound_task_queue_enabled = inbound_task_queue_enabled
         self.background_inbound_commands = tuple(
             command.strip()
             for command in background_inbound_commands
@@ -475,6 +477,9 @@ class ChannelRuntime:
         if await self._maybe_enqueue_background_inbound(inbound):
             await self._flush_cli_delivery_if_needed(inbound)
             return
+        if await self._maybe_enqueue_persistent_inbound(inbound):
+            await self._flush_cli_delivery_if_needed(inbound)
+            return
         # dispatcher 内部会完成路由解析、Agent Loop 执行和回复对象构造。
         result = await self.dispatcher.dispatch_inbound(inbound)
         # 普通回复仍先入可靠投递队列，再由 DeliveryRuntime 发送。
@@ -503,6 +508,43 @@ class ChannelRuntime:
             },
         )
         await self._deliver_background_task_accepted(inbound, task.id)
+        return True
+
+    async def _maybe_enqueue_persistent_inbound(self, inbound: InboundMessage) -> bool:
+        """按配置把普通非 CLI 入站转入持久化任务队列。
+
+        CLI 需要同步等待回复，仍保留直接 dispatch；飞书/Telegram/Webhook 等外部入站可
+        先落任务队列，再由 `agent_inbound` worker 消费，降低进程重启和瞬时高峰导致的
+        入站丢失风险。
+        """
+
+        if self.task_queue is None or not self.inbound_task_queue_enabled:
+            return False
+        if inbound.channel == "cli":
+            return False
+        task = await asyncio.to_thread(
+            self.task_queue.enqueue,
+            task_type="agent_inbound",
+            source=inbound.channel or "inbound",
+            agent_id=str(inbound.metadata.get("agent_id", "")),
+            session_key=build_preroute_lane_key(inbound),
+            priority=100,
+            payload=inbound_to_task_payload(inbound),
+            metadata={
+                "channel": inbound.channel,
+                "account_id": inbound.account_id,
+                "peer_id": inbound.peer_id,
+                "sender_id": inbound.sender_id,
+                "mode": "persistent_inbound",
+            },
+        )
+        print(
+            "[channel_runtime] inbound persisted as task:"
+            f" task_id={task.id}"
+            f" channel={inbound.channel}"
+            f" account={inbound.account_id}"
+            f" peer={inbound.peer_id}"
+        )
         return True
 
     def _is_background_inbound_command(self, text: str) -> bool:
