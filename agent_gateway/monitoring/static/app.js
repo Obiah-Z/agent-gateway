@@ -913,6 +913,7 @@ function renderRuntime(runtime) {
   const persistedLanes = tasks.persisted_lanes || {};
   const persistedLaneItems = Array.isArray(persistedLanes.items) ? persistedLanes.items : [];
   const staleLaneItems = Array.isArray(persistedLanes.stale_items) ? persistedLanes.stale_items : [];
+  const laneHistoryItems = Array.isArray(persistedLanes.history_items) ? persistedLanes.history_items : [];
   const taskBroker = tasks.broker || tasks.queue?.broker || {};
   const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
   const visibleBrokerQueues = brokerQueues.slice(0, 6);
@@ -972,6 +973,7 @@ function renderRuntime(runtime) {
         `被锁会话 ${sessionLocks.blocked_session_count ?? 0}`,
         `持久Lane ${persistedLanes.count ?? 0}`,
         `过期Lane ${persistedLanes.stale_count ?? 0}`,
+        `Lane历史 ${persistedLanes.history_count ?? 0}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
@@ -1020,6 +1022,12 @@ function renderRuntime(runtime) {
           "过期 owner",
           staleLaneItems
             .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}`)
+            .join(" | ") || "无",
+        ],
+        [
+          "最近 Lane 历史",
+          laneHistoryItems
+            .map((row) => `${row.event || "--"}:${row.worker_id || "--"}:${row.session_key || "--"}`)
             .join(" | ") || "无",
         ],
       ],

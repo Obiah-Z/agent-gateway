@@ -718,6 +718,41 @@ class GatewayControlPlane:
             "filters": filters,
         }
 
+    def list_session_lane_history(
+        self,
+        *,
+        limit: int = 50,
+        session_key: str = "",
+        worker_id: str = "",
+        task_id: str = "",
+        event: str = "",
+    ) -> dict[str, Any]:
+        """列出持久化 session lane owner 历史事件。"""
+
+        safe_limit = max(1, min(int(limit), 200))
+        filters = {
+            "session_key": str(session_key or ""),
+            "worker_id": str(worker_id or ""),
+            "task_id": str(task_id or ""),
+            "event": str(event or ""),
+        }
+        if self.state_repository is None:
+            return {
+                "configured": False,
+                "count": 0,
+                "items": [],
+                "limit": safe_limit,
+                "filters": filters,
+            }
+        rows = self._state_repo_list("session_lane_events", limit=safe_limit, filters=filters)
+        return {
+            "configured": True,
+            "count": len(rows),
+            "items": rows[:safe_limit],
+            "limit": safe_limit,
+            "filters": filters,
+        }
+
     def release_session_lane(
         self,
         *,
@@ -1171,12 +1206,16 @@ class GatewayControlPlane:
         lanes = self.list_session_lanes(state="owned", limit=50)
         rows = list(lanes.get("items", []) or [])
         stale_rows = [row for row in rows if self._is_session_lane_stale(row)]
+        history = self.list_session_lane_history(limit=50)
+        history_rows = list(history.get("items", []) or [])
         return {
             "configured": bool(lanes.get("configured")),
             "count": len(rows),
             "items": rows[:6],
             "stale_count": len(stale_rows),
             "stale_items": stale_rows[:6],
+            "history_count": len(history_rows),
+            "history_items": history_rows[:6],
         }
 
     @staticmethod

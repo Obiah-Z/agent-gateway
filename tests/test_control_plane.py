@@ -124,14 +124,30 @@ class FakeLaneStateRepository:
                 "renewed_at": 2.0,
             }
         ]
+        self.events = [
+            {
+                "id": "lane-event-1",
+                "session_key": "agent:feishu:user-1",
+                "lane_key": "gateway:lock:agent:feishu:user-1",
+                "worker_id": "worker-a",
+                "task_id": "task-a",
+                "owner_token": "worker-a:task-a",
+                "event": "acquired",
+                "ttl_seconds": 30,
+                "occurred_at": 1.0,
+            }
+        ]
 
     def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
         del cursor
         self.calls.append((table, limit, dict(filters or {})))
-        if table != "session_lanes":
+        if table == "session_lanes":
+            rows = list(self.rows)
+        elif table == "session_lane_events":
+            rows = list(self.events)
+        else:
             return []
         filters = dict(filters or {})
-        rows = list(self.rows)
         for key, value in filters.items():
             if value:
                 rows = [row for row in rows if str(row.get(key, "")) == str(value)]
@@ -1067,8 +1083,10 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["tasks"]["persisted_lanes"]["configured"] is True
     assert status["tasks"]["persisted_lanes"]["count"] == 1
     assert status["tasks"]["persisted_lanes"]["stale_count"] == 1
+    assert status["tasks"]["persisted_lanes"]["history_count"] == 1
     assert status["tasks"]["persisted_lanes"]["items"][0]["worker_id"] == "worker-a"
     assert status["tasks"]["persisted_lanes"]["stale_items"][0]["session_key"] == "agent:feishu:user-1"
+    assert status["tasks"]["persisted_lanes"]["history_items"][0]["event"] == "acquired"
     assert status["cron"]["count"] == 1
     assert health["ok"] is False
     assert health["status"] == "degraded"
@@ -1110,6 +1128,40 @@ def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:
             "session_key": "agent:feishu:user-1",
             "worker_id": "worker-a",
             "task_id": "task-a",
+        },
+    )
+
+
+def test_control_plane_lists_session_lane_history_with_filters(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+    )
+
+    result = control.list_session_lane_history(
+        limit=10,
+        session_key="agent:feishu:user-1",
+        worker_id="worker-a",
+        event="acquired",
+    )
+
+    assert result["configured"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["event"] == "acquired"
+    assert repository.calls[0] == (
+        "session_lane_events",
+        10,
+        {
+            "session_key": "agent:feishu:user-1",
+            "worker_id": "worker-a",
+            "task_id": "",
+            "event": "acquired",
         },
     )
 
