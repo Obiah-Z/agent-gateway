@@ -28,8 +28,15 @@ from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker, RabbitMQInboundTaskBroker
+from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.state.queue import DeliveryQueue
-from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
+from agent_gateway.runtime.tasks import (
+    LaneOwnerToken,
+    LocalTaskQueue,
+    LocalTaskStore,
+    RedisLaneCoordinator,
+    TaskWorkerRuntime,
+)
 from agent_gateway.runtime.tasks.worker import RetryableTaskError
 
 
@@ -226,7 +233,8 @@ class LocalLoadTestLaneCoordinator:
         self.acquire_conflicts = 0
         self.acquire_attempts = 0
 
-    async def acquire(self, session_key: str, task_id: str) -> bool:
+    async def acquire(self, session_key: str, task_id: str, *, worker_id: str = "load-worker") -> bool:
+        del worker_id
         async with self._lock:
             self.acquire_attempts += 1
             if session_key in self._active_by_session:
@@ -250,6 +258,105 @@ class LocalLoadTestLaneCoordinator:
                 self._active_counts[session_key] = current
             else:
                 self._active_counts.pop(session_key, None)
+
+    def is_owned(self, session_key: str) -> bool:
+        return session_key in self._active_by_session
+
+    def inspect(self, session_key: str) -> dict[str, Any]:
+        task_id = self._active_by_session.get(session_key, "")
+        return {
+            "session_key": session_key,
+            "owned": bool(task_id),
+            "task_id": task_id,
+            "backend": "local",
+        }
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "mode": "local",
+            "max_active_lanes": self.max_active_lanes,
+            "max_same_session_concurrency": self.max_same_session_concurrency,
+            "lane_acquire_attempts": self.acquire_attempts,
+            "lane_acquire_conflicts": self.acquire_conflicts,
+            "redis_health": {},
+        }
+
+
+class RedisLoadTestLaneCoordinator:
+    """Redis-backed lane ownership probe for inbound load tests."""
+
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        socket_timeout_seconds: float,
+        ttl_seconds: int,
+        namespace: str,
+    ) -> None:
+        self.redis = RedisClient(
+            enabled=True,
+            url=redis_url,
+            socket_timeout_seconds=socket_timeout_seconds,
+        )
+        self.coordinator = RedisLaneCoordinator(self.redis, namespace=namespace)
+        self.ttl_seconds = max(1, int(ttl_seconds))
+        self._active_counts: dict[str, int] = {}
+        self._ownership_by_task: dict[str, Any] = {}
+        self._lock = asyncio.Lock()
+        self.max_active_lanes = 0
+        self.max_same_session_concurrency = 0
+        self.acquire_conflicts = 0
+        self.acquire_attempts = 0
+        self.redis_health = self.redis.health().to_dict()
+
+    async def acquire(self, session_key: str, task_id: str, *, worker_id: str = "load-worker") -> bool:
+        self.acquire_attempts += 1
+        ownership = await asyncio.to_thread(
+            self.coordinator.acquire,
+            session_key,
+            owner=LaneOwnerToken(worker_id=worker_id, task_id=task_id),
+            ttl_seconds=self.ttl_seconds,
+        )
+        if ownership is None:
+            self.acquire_conflicts += 1
+            return False
+        async with self._lock:
+            self._ownership_by_task[task_id] = ownership
+            self._active_counts[session_key] = self._active_counts.get(session_key, 0) + 1
+            self.max_active_lanes = max(self.max_active_lanes, len(self._ownership_by_task))
+            self.max_same_session_concurrency = max(
+                self.max_same_session_concurrency,
+                self._active_counts[session_key],
+            )
+        return True
+
+    async def release(self, session_key: str, task_id: str) -> None:
+        ownership = None
+        async with self._lock:
+            ownership = self._ownership_by_task.pop(task_id, None)
+            current = max(0, self._active_counts.get(session_key, 0) - 1)
+            if current:
+                self._active_counts[session_key] = current
+            else:
+                self._active_counts.pop(session_key, None)
+        if ownership is not None:
+            await asyncio.to_thread(self.coordinator.release, ownership)
+
+    def is_owned(self, session_key: str) -> bool:
+        return self.coordinator.is_owned(session_key)
+
+    def inspect(self, session_key: str) -> dict[str, Any]:
+        return self.coordinator.inspect(session_key).to_dict()
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "mode": "redis",
+            "max_active_lanes": self.max_active_lanes,
+            "max_same_session_concurrency": self.max_same_session_concurrency,
+            "lane_acquire_attempts": self.acquire_attempts,
+            "lane_acquire_conflicts": self.acquire_conflicts,
+            "redis_health": self.redis_health,
+        }
 
 
 def build_gateway_application() -> Any:
@@ -587,6 +694,10 @@ async def run_inbound_rabbitmq(
     rabbitmq_prefetch: int,
     session_count: int,
     lane_mode: str,
+    redis_url: str,
+    redis_socket_timeout_seconds: float,
+    lane_ttl_seconds: int,
+    lane_namespace: str,
     connect_timeout_seconds: float,
 ) -> tuple[list[RequestSample], float, dict[str, Any]]:
     """Run RabbitMQ-backed inbound task publishing and worker consumption."""
@@ -615,16 +726,27 @@ async def run_inbound_rabbitmq(
     worker_count = max(1, concurrency)
     effective_session_count = max(1, session_count)
     normalized_lane_mode = lane_mode.strip().lower() or "local"
-    lane_coordinator = (
-        LocalLoadTestLaneCoordinator()
-        if normalized_lane_mode in {"local", "inmemory", "memory"}
-        else None
-    )
+    lane_coordinator = None
+    if normalized_lane_mode in {"local", "inmemory", "memory"}:
+        lane_coordinator = LocalLoadTestLaneCoordinator()
+    elif normalized_lane_mode == "redis":
+        lane_coordinator = RedisLoadTestLaneCoordinator(
+            redis_url=redis_url,
+            socket_timeout_seconds=max(0.05, redis_socket_timeout_seconds),
+            ttl_seconds=max(1, lane_ttl_seconds),
+            namespace=lane_namespace,
+        )
+    elif normalized_lane_mode != "off":
+        raise ValueError(f"unsupported inbound lane mode: {lane_mode}")
 
-    async def inbound_handler(task) -> str:
+    async def inbound_handler(task, *, worker_id: str = "load-worker") -> str:
         acquired = False
         if lane_coordinator is not None:
-            acquired = await lane_coordinator.acquire(task.session_key or task.id, task.id)
+            acquired = await lane_coordinator.acquire(
+                task.session_key or task.id,
+                task.id,
+                worker_id=worker_id,
+            )
             if not acquired:
                 raise RetryableTaskError("session lane is currently owned by another task")
         try:
@@ -640,6 +762,10 @@ async def run_inbound_rabbitmq(
         finally:
             if acquired and lane_coordinator is not None:
                 await lane_coordinator.release(task.session_key or task.id, task.id)
+
+    if lane_coordinator is not None:
+        inbound_handler.is_session_locked = lambda task: lane_coordinator.is_owned(task.session_key or task.id)  # type: ignore[attr-defined]
+        inbound_handler.inspect_session_lane = lambda task: lane_coordinator.inspect(task.session_key or task.id)  # type: ignore[attr-defined]
 
     enqueue_started = time.perf_counter()
     for index in range(1, requests + 1):
@@ -698,21 +824,34 @@ async def run_inbound_rabbitmq(
         worker_store.write_backend = backend
         worker_queue = LocalTaskQueue(worker_store, broker=worker_broker)
         worker = TaskWorkerRuntime(worker_queue, worker_id=f"load-worker-{index + 1}")
-        worker.register_handler("agent_inbound", inbound_handler)
+
+        async def worker_handler(task, *, _worker_id: str = worker.worker_id) -> str:
+            return await inbound_handler(task, worker_id=_worker_id)
+
+        if lane_coordinator is not None:
+            worker_handler.is_session_locked = inbound_handler.is_session_locked  # type: ignore[attr-defined]
+            worker_handler.inspect_session_lane = inbound_handler.inspect_session_lane  # type: ignore[attr-defined]
+        worker.register_handler("agent_inbound", worker_handler)
         workers.append(worker)
         worker_brokers.append(worker_broker)
 
     started = time.perf_counter()
     broker_stats_after_consume: dict[str, Any] = {}
+    deadline = started + max(5.0, requests * max(0.001, agent_delay_ms / 1000) * 4 + 10.0)
     while True:
         done_count = sum(1 for sample in samples if sample.ok)
         broker_stats_after_consume = broker.stats()
         broker_messages = int(broker_stats_after_consume.get("messages", 0) or 0)
         if done_count >= requests and broker_messages == 0:
             break
+        if time.perf_counter() > deadline:
+            raise TimeoutError(
+                f"inbound-rabbitmq load test timed out: processed={done_count}/{requests}, "
+                f"broker_messages={broker_messages}, lane_mode={normalized_lane_mode}"
+            )
         handled = await asyncio.gather(*[worker.run_once() for worker in workers])
         if not any(handled):
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.001)
     wall_seconds = time.perf_counter() - started
     broker_stats_after_consume = broker.stats()
     purged_after = {"messages": 0, "dead_letter_messages": 0}
@@ -736,6 +875,14 @@ async def run_inbound_rabbitmq(
         broker.partition_for(f"load-session-{index:04d}")
         for index in range(effective_session_count)
     }
+    lane_summary = lane_coordinator.summary() if lane_coordinator is not None else {
+        "mode": "off",
+        "max_active_lanes": 0,
+        "max_same_session_concurrency": 0,
+        "lane_acquire_attempts": 0,
+        "lane_acquire_conflicts": 0,
+        "redis_health": {},
+    }
     context = {
         "enqueue_seconds": round(enqueue_seconds, 3),
         "processed": sum(1 for sample in samples if sample.ok),
@@ -747,13 +894,14 @@ async def run_inbound_rabbitmq(
         "inbound_session_count": effective_session_count,
         "inbound_partitions": max(1, rabbitmq_partitions),
         "inbound_prefetch": max(1, rabbitmq_prefetch),
-        "lane_mode": "local" if lane_coordinator is not None else "off",
-        "max_active_lanes": lane_coordinator.max_active_lanes if lane_coordinator is not None else 0,
-        "max_same_session_concurrency": (
-            lane_coordinator.max_same_session_concurrency if lane_coordinator is not None else 0
-        ),
-        "lane_acquire_attempts": lane_coordinator.acquire_attempts if lane_coordinator is not None else 0,
-        "lane_acquire_conflicts": lane_coordinator.acquire_conflicts if lane_coordinator is not None else 0,
+        "lane_mode": lane_summary["mode"],
+        "lane_namespace": lane_namespace if lane_summary["mode"] == "redis" else "",
+        "lane_ttl_seconds": max(1, lane_ttl_seconds) if lane_summary["mode"] == "redis" else 0,
+        "max_active_lanes": lane_summary["max_active_lanes"],
+        "max_same_session_concurrency": lane_summary["max_same_session_concurrency"],
+        "lane_acquire_attempts": lane_summary["lane_acquire_attempts"],
+        "lane_acquire_conflicts": lane_summary["lane_acquire_conflicts"],
+        "redis_health": lane_summary["redis_health"],
         "partitions_seen": len(partitions_seen),
         "broker_purged_before": purged_before,
         "broker_purged_after": purged_after,
@@ -1137,10 +1285,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--inbound-session-count", type=int, default=32)
     parser.add_argument(
         "--inbound-lane-mode",
-        choices=("local", "off"),
+        choices=("local", "redis", "off"),
         default="local",
         help="inbound-rabbitmq lane ownership verification mode",
     )
+    parser.add_argument("--redis-url", default="redis://127.0.0.1:6379/0")
+    parser.add_argument("--redis-socket-timeout-seconds", type=float, default=1.0)
+    parser.add_argument("--inbound-lane-ttl-seconds", type=int, default=30)
+    parser.add_argument("--inbound-lane-namespace", default="gateway:load-test:lane")
     parser.add_argument("--allow-real-external", action="store_true")
     parser.add_argument("--agent-id", default="main")
     parser.add_argument("--session-prefix", default="load-test")
@@ -1217,6 +1369,10 @@ def main(argv: list[str] | None = None) -> int:
                 rabbitmq_prefetch=max(1, args.inbound_rabbitmq_prefetch),
                 session_count=max(1, args.inbound_session_count),
                 lane_mode=args.inbound_lane_mode,
+                redis_url=args.redis_url,
+                redis_socket_timeout_seconds=max(0.05, args.redis_socket_timeout_seconds),
+                lane_ttl_seconds=max(1, args.inbound_lane_ttl_seconds),
+                lane_namespace=args.inbound_lane_namespace,
                 connect_timeout_seconds=max(0.2, args.rabbitmq_connect_timeout_seconds),
             )
         )

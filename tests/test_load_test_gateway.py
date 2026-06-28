@@ -149,6 +149,57 @@ class FakeInboundRabbitMQBroker:
         return sum(session_key.encode("utf-8")) % self.partitions
 
 
+class FakeRedisLoadTestLaneCoordinator:
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        socket_timeout_seconds: float,
+        ttl_seconds: int,
+        namespace: str,
+    ) -> None:
+        self.redis_url = redis_url
+        self.socket_timeout_seconds = socket_timeout_seconds
+        self.ttl_seconds = ttl_seconds
+        self.namespace = namespace
+        self.active: dict[str, str] = {}
+        self.max_active_lanes = 0
+        self.max_same_session_concurrency = 0
+        self.acquire_attempts = 0
+        self.acquire_conflicts = 0
+
+    async def acquire(self, session_key: str, task_id: str, *, worker_id: str = "load-worker") -> bool:
+        del worker_id
+        self.acquire_attempts += 1
+        if session_key in self.active:
+            self.acquire_conflicts += 1
+            return False
+        self.active[session_key] = task_id
+        self.max_active_lanes = max(self.max_active_lanes, len(self.active))
+        self.max_same_session_concurrency = max(self.max_same_session_concurrency, 1)
+        return True
+
+    async def release(self, session_key: str, task_id: str) -> None:
+        if self.active.get(session_key) == task_id:
+            self.active.pop(session_key, None)
+
+    def is_owned(self, session_key: str) -> bool:
+        return session_key in self.active
+
+    def inspect(self, session_key: str) -> dict:
+        return {"session_key": session_key, "owned": session_key in self.active}
+
+    def summary(self) -> dict:
+        return {
+            "mode": "redis",
+            "max_active_lanes": self.max_active_lanes,
+            "max_same_session_concurrency": self.max_same_session_concurrency,
+            "lane_acquire_attempts": self.acquire_attempts,
+            "lane_acquire_conflicts": self.acquire_conflicts,
+            "redis_health": {"enabled": True, "ok": True, "backend": "fake"},
+        }
+
+
 class FakeRunner:
     async def run_turn(self, agent_id, session_key, user_text, *, channel="", correlation_id=""):
         return SimpleNamespace(text="pong", stop_reason="end_turn", tool_calls=[])
@@ -335,6 +386,10 @@ def test_inbound_rabbitmq_load_test_uses_broker_partition_path(tmp_path, monkeyp
             rabbitmq_prefetch=1,
             session_count=3,
             lane_mode="local",
+            redis_url="redis://127.0.0.1:6379/0",
+            redis_socket_timeout_seconds=0.2,
+            lane_ttl_seconds=30,
+            lane_namespace="gateway:test:lane",
             connect_timeout_seconds=0.2,
         )
     )
@@ -387,6 +442,10 @@ def test_inbound_rabbitmq_load_test_can_disable_lane_probe(tmp_path, monkeypatch
             rabbitmq_prefetch=1,
             session_count=1,
             lane_mode="off",
+            redis_url="redis://127.0.0.1:6379/0",
+            redis_socket_timeout_seconds=0.2,
+            lane_ttl_seconds=30,
+            lane_namespace="gateway:test:lane",
             connect_timeout_seconds=0.2,
         )
     )
@@ -395,6 +454,43 @@ def test_inbound_rabbitmq_load_test_can_disable_lane_probe(tmp_path, monkeypatch
     assert context["lane_mode"] == "off"
     assert context["max_active_lanes"] == 0
     assert context["max_same_session_concurrency"] == 0
+
+
+def test_inbound_rabbitmq_load_test_can_use_redis_lane_mode(tmp_path, monkeypatch) -> None:
+    FakeInboundRabbitMQBroker.queues = {}
+    FakeInboundRabbitMQBroker.dead = []
+    monkeypatch.setattr(load_test_gateway, "RabbitMQInboundTaskBroker", FakeInboundRabbitMQBroker)
+    monkeypatch.setattr(load_test_gateway, "RedisLoadTestLaneCoordinator", FakeRedisLoadTestLaneCoordinator)
+
+    samples, _wall_seconds, context = asyncio.run(
+        run_inbound_rabbitmq(
+            requests=4,
+            concurrency=2,
+            agent_delay_ms=0,
+            work_dir=tmp_path / "work",
+            rabbitmq_url="amqp://example",
+            rabbitmq_exchange="inbound-ex",
+            rabbitmq_queue_prefix="inbound-q",
+            rabbitmq_dead_letter_exchange="inbound-dlx",
+            rabbitmq_dead_letter_queue="inbound-dlq",
+            rabbitmq_partitions=2,
+            rabbitmq_prefetch=1,
+            session_count=2,
+            lane_mode="redis",
+            redis_url="redis://example:6379/0",
+            redis_socket_timeout_seconds=0.2,
+            lane_ttl_seconds=15,
+            lane_namespace="gateway:test:lane",
+            connect_timeout_seconds=0.2,
+        )
+    )
+
+    assert sum(1 for sample in samples if sample.ok) == 4
+    assert context["lane_mode"] == "redis"
+    assert context["lane_namespace"] == "gateway:test:lane"
+    assert context["lane_ttl_seconds"] == 15
+    assert context["redis_health"]["backend"] == "fake"
+    assert context["max_same_session_concurrency"] == 1
 
 
 def test_model_real_requires_explicit_external_opt_in() -> None:
