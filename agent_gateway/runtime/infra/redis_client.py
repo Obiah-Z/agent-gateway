@@ -107,6 +107,37 @@ class RedisClient:
             )
         )
 
+    def acquire_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
+        """获取带 token 的 Redis 分布式锁。"""
+
+        if not self.enabled:
+            return True
+        if not key:
+            return True
+        return bool(
+            self._get_client().set(
+                key,
+                value,
+                nx=True,
+                ex=max(1, ttl_seconds),
+            )
+        )
+
+    def release_lock(self, key: str, *, value: str) -> bool:
+        """仅在 value 匹配时释放锁，避免误删其他 worker 的锁。"""
+
+        if not self.enabled:
+            return True
+        if not key:
+            return True
+        script = """
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("DEL", KEYS[1])
+        end
+        return 0
+        """
+        return bool(self._get_client().eval(script, 1, key, value))
+
     def check_fixed_window_rate_limit(
         self,
         key_prefix: str,

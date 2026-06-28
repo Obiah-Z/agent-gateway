@@ -266,7 +266,14 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     task_worker.register_handler("heartbeat", autonomy_runtime.heartbeat.run_task_instance)
     task_worker.register_handler(
         "agent_inbound",
-        AgentInboundTaskHandler(dispatcher, channel_manager, delivery_runtime=None),
+        AgentInboundTaskHandler(
+            dispatcher,
+            channel_manager,
+            delivery_runtime=None,
+            redis_client=redis_client,
+            lock_ttl_seconds=settings.inbound_session_lock_ttl_seconds,
+            worker_id=task_worker.worker_id,
+        ),
     )
     delivery_runtime = DeliveryRuntime(
         delivery_queue,

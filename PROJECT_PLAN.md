@@ -882,7 +882,7 @@ python scripts/build_capacity_baseline.py
 | 子阶段 | 状态 | 主要内容 | 完成标准 |
 | --- | --- | --- | --- |
 | 20.9.1 当前入站任务链路审计 | 已完成 | 已梳理默认实时路径、任务化路径、`ChannelRuntime` lane、`TaskWorkerRuntime` reserve 和 `AgentInboundTaskHandler` 执行边界。 | 明确当前只做到入站任务化，还没有 task worker 层的 session 互斥和顺序保证。 |
-| 20.9.2 Redis session lock MVP | 待实现 | 为 `agent_inbound` 任务执行增加 Redis 分布式锁，lock key 基于 `session_key`；获取不到锁时短延迟 retry。 | 多 worker 同时消费时，同一 session 同一时间最多一个任务进入 AgentLoopRunner。 |
+| 20.9.2 Redis session lock MVP | 已完成 | 为 `agent_inbound` 任务执行增加 Redis 分布式锁，lock key 基于 `session_key`；获取不到锁或 Redis 锁不可用时进入 retrying。 | 多 worker 同时消费时，同一 session 同一时间最多一个任务进入 AgentLoopRunner。 |
 | 20.9.3 锁安全与续租 | 待实现 | 锁 value 使用 `worker_id + task_id`，释放时校验 value；补 TTL 配置、执行超时和长任务续租策略。 | worker 崩溃可自动释放锁，长模型调用不会因锁过期导致误并发。 |
 | 20.9.4 session-aware reserve | 待实现 | reserve 任务时尽量跳过已锁 session，减少拿到任务后再 retry 的抖动；记录锁冲突次数和重排次数。 | 热点 session 不会导致大量任务反复 running/retrying，不同 session 仍可并行推进。 |
 | 20.9.5 观测与控制面 | 待实现 | `runtime.status`、Dashboard 和事件流展示 `agent_inbound` 锁等待、锁冲突、session backlog、最老等待时间。 | 排查入站延迟时能区分模型慢、worker 少、锁冲突和 session 热点。 |

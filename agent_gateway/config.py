@@ -92,6 +92,7 @@ class GatewaySettings:
     inbound_max_lane_queue_size: int = 20
     inbound_long_task_notice_seconds: float = 15.0
     inbound_task_queue_enabled: bool = False
+    inbound_session_lock_ttl_seconds: int = 300
     background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor")
     heartbeat_interval_seconds: float = 1800.0
     heartbeat_active_start: int = 9
@@ -264,6 +265,10 @@ class GatewaySettings:
                 float(os.getenv("GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS", "15")),
             ),
             inbound_task_queue_enabled=env_bool("GATEWAY_INBOUND_TASK_QUEUE_ENABLED", False),
+            inbound_session_lock_ttl_seconds=max(
+                1,
+                int(os.getenv("GATEWAY_INBOUND_SESSION_LOCK_TTL_SECONDS", "300")),
+            ),
             background_inbound_commands=parse_csv_tuple(
                 os.getenv(
                     "GATEWAY_BACKGROUND_INBOUND_COMMANDS",

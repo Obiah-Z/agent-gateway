@@ -32,6 +32,13 @@ class FakeSetRedisClient(RedisClient):
                 values[key] = value
                 return True
 
+            def eval(self, script: str, numkeys: int, key: str, value: str) -> int:
+                del script, numkeys
+                if values.get(key) == value:
+                    values.pop(key, None)
+                    return 1
+                return 0
+
             def incr(self, key: str) -> int:
                 counters[key] = counters.get(key, 0) + 1
                 return counters[key]
@@ -72,6 +79,16 @@ def test_redis_mark_once_uses_set_nx_ex() -> None:
 
     assert client.mark_once("key-1", ttl_seconds=60) is True
     assert client.mark_once("key-1", ttl_seconds=60) is False
+
+
+def test_redis_lock_requires_matching_token_to_release() -> None:
+    client = FakeSetRedisClient()
+
+    assert client.acquire_lock("lock-1", value="worker-a", ttl_seconds=60) is True
+    assert client.acquire_lock("lock-1", value="worker-b", ttl_seconds=60) is False
+    assert client.release_lock("lock-1", value="worker-b") is False
+    assert client.release_lock("lock-1", value="worker-a") is True
+    assert client.acquire_lock("lock-1", value="worker-b", ttl_seconds=60) is True
 
 
 def test_redis_fixed_window_rate_limit_counts_per_window() -> None:

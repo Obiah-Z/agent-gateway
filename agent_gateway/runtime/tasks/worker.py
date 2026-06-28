@@ -11,6 +11,10 @@ from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 TaskHandler = Callable[[TaskInstance], Awaitable[str | None] | str | None]
 
 
+class RetryableTaskError(RuntimeError):
+    """任务遇到临时条件失败，应进入 retrying 而不是 failed。"""
+
+
 class TaskWorkerRuntime:
     """本地后台任务 worker 运行时。
 
@@ -120,7 +124,7 @@ class TaskWorkerRuntime:
                 result = await result
             self.queue.ack(task.id, result_preview=str(result or ""))
         except Exception as exc:
-            if self.retry_exceptions:
+            if self.retry_exceptions or isinstance(exc, RetryableTaskError):
                 self.queue.retry(task.id, error=str(exc))
             else:
                 self.queue.fail(task.id, error=str(exc))
