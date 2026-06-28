@@ -261,7 +261,11 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         state_read_repository=state_bundle.read,
         state_write_repository=primary_write,
     )
-    task_worker = TaskWorkerRuntime(task_queue, worker_id="local-worker")
+    task_worker = TaskWorkerRuntime(
+        task_queue,
+        worker_id="local-worker",
+        event_store=event_store,
+    )
     task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)
     task_worker.register_handler("heartbeat", autonomy_runtime.heartbeat.run_task_instance)
     task_worker.register_handler(

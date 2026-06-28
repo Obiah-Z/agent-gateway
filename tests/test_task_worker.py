@@ -143,6 +143,16 @@ class FakeLockRedisClient(RedisClient):
         return key in self.existing_locks
 
 
+class FakeEventStore:
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def record(self, event_type: str, **kwargs) -> dict:
+        row = {"type": event_type, **kwargs}
+        self.rows.append(row)
+        return row
+
+
 def test_task_worker_executes_agent_inbound_task(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     task = queue.enqueue(
@@ -192,7 +202,8 @@ def test_agent_inbound_task_uses_redis_session_lock(tmp_path: Path) -> None:
     )
     redis_client = FakeLockRedisClient()
     dispatcher = FakeInboundDispatcher()
-    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    event_store = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=event_store)
     worker.register_handler(
         "agent_inbound",
         AgentInboundTaskHandler(
@@ -374,7 +385,8 @@ def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
         existing_locks={"gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"}
     )
     dispatcher = FakeInboundDispatcher()
-    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    event_store = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=event_store)
     worker.register_handler(
         "agent_inbound",
         AgentInboundTaskHandler(
@@ -393,3 +405,36 @@ def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
     assert stored_locked.status == "pending"
     assert stored_available.status == "done"
     assert dispatcher.dispatched[0].text == "available"
+    stats = worker.stats()
+    assert stats["session_locks"]["blocked_session_count"] == 1
+    assert stats["session_locks"]["skip_count"] == 1
+    assert stats["session_locks"]["last_blocked_sessions"] == [
+        {
+            "task_id": locked.id,
+            "task_type": "agent_inbound",
+            "source": "feishu",
+            "agent_id": "",
+            "session_key": "inbound:feishu:bot-a:user-1",
+            "status": "pending",
+            "retry_count": 0,
+        }
+    ]
+    assert event_store.rows == [
+        {
+            "type": "agent_inbound.session_locked_skipped",
+            "status": "warning",
+            "component": "task_worker",
+            "message": "入站任务 session 已被其他 worker 持锁，本轮 reserve 跳过",
+            "correlation_id": locked.id,
+            "agent_id": "",
+            "session_key": "inbound:feishu:bot-a:user-1",
+            "metadata": {
+                "worker_id": "worker-1",
+                "task_id": locked.id,
+                "task_type": "agent_inbound",
+                "source": "feishu",
+                "task_status": "pending",
+                "retry_count": 0,
+            },
+        }
+    ]

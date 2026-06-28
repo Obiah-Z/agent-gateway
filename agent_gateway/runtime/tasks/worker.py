@@ -30,16 +30,21 @@ class TaskWorkerRuntime:
         concurrency: int = 2,
         poll_interval: float = 1.0,
         retry_exceptions: bool = False,
+        event_store: Any | None = None,
     ) -> None:
         self.queue = queue
         self.worker_id = worker_id
         self.concurrency = max(1, concurrency)
         self.poll_interval = max(0.05, poll_interval)
         self.retry_exceptions = retry_exceptions
+        self.event_store = event_store
         self.handlers: dict[str, TaskHandler] = {}
         self._tasks: list[asyncio.Task[None]] = []
         self._stopped = False
         self._running = False
+        self._session_lock_skip_count = 0
+        self._last_blocked_sessions: list[dict[str, Any]] = []
+        self._last_recorded_blocked_signature = ""
 
     def register_handler(self, task_type: str, handler: TaskHandler) -> None:
         """注册某类任务的执行函数。"""
@@ -79,10 +84,11 @@ class TaskWorkerRuntime:
 
         if not self.handlers:
             return False
+        blocked_session_keys = self._blocked_session_keys()
         task = self.queue.reserve(
             worker_id=self.worker_id,
             task_types=self.handlers.keys(),
-            blocked_session_keys=self._blocked_session_keys(),
+            blocked_session_keys=blocked_session_keys,
         )
         if task is None:
             return False
@@ -98,6 +104,11 @@ class TaskWorkerRuntime:
             "concurrency": self.concurrency,
             "registered_task_types": sorted(self.handlers),
             "queue": self.queue.stats(),
+            "session_locks": {
+                "blocked_session_count": len(self._last_blocked_sessions),
+                "skip_count": self._session_lock_skip_count,
+                "last_blocked_sessions": list(self._last_blocked_sessions),
+            },
         }
 
     async def _loop(self, index: int) -> None:
@@ -134,6 +145,7 @@ class TaskWorkerRuntime:
         """收集 handler 当前要求跳过的 session key。"""
 
         blocked: set[str] = set()
+        samples: list[dict[str, Any]] = []
         for task in self.queue.store.list(statuses=["pending", "retrying"], limit=500):
             if not task.session_key:
                 continue
@@ -144,6 +156,54 @@ class TaskWorkerRuntime:
             try:
                 if checker(task):
                     blocked.add(task.session_key)
+                    if len(samples) < 6:
+                        samples.append(
+                            {
+                                "task_id": task.id,
+                                "task_type": task.task_type,
+                                "source": task.source,
+                                "agent_id": task.agent_id,
+                                "session_key": task.session_key,
+                                "status": task.status,
+                                "retry_count": task.retry_count,
+                            }
+                        )
             except Exception:
                 continue
+        if blocked:
+            self._session_lock_skip_count += len(blocked)
+            signature = "|".join(f"{item['task_id']}:{item['session_key']}" for item in samples)
+            if signature != self._last_recorded_blocked_signature:
+                self._record_session_lock_skip(samples)
+                self._last_recorded_blocked_signature = signature
+        else:
+            self._last_recorded_blocked_signature = ""
+        self._last_blocked_sessions = samples
         return blocked
+
+    def _record_session_lock_skip(self, samples: list[dict[str, Any]]) -> None:
+        """把 reserve 阶段跳过的被锁 session 写入运行事件。"""
+
+        if self.event_store is None:
+            return
+        for sample in samples:
+            try:
+                self.event_store.record(
+                    "agent_inbound.session_locked_skipped",
+                    status="warning",
+                    component="task_worker",
+                    message="入站任务 session 已被其他 worker 持锁，本轮 reserve 跳过",
+                    correlation_id=str(sample.get("task_id", "")),
+                    agent_id=str(sample.get("agent_id", "")),
+                    session_key=str(sample.get("session_key", "")),
+                    metadata={
+                        "worker_id": self.worker_id,
+                        "task_id": sample.get("task_id", ""),
+                        "task_type": sample.get("task_type", ""),
+                        "source": sample.get("source", ""),
+                        "task_status": sample.get("status", ""),
+                        "retry_count": sample.get("retry_count", 0),
+                    },
+                )
+            except Exception:
+                continue

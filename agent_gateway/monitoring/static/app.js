@@ -903,6 +903,8 @@ function renderRuntime(runtime) {
   const proactive = features.proactive_target || {};
   const paths = runtime.paths || {};
   const inbound = runtime.inbound || {};
+  const tasks = runtime.tasks || {};
+  const sessionLocks = tasks.session_locks || {};
   const sections = [
     {
       icon: "AG",
@@ -935,6 +937,32 @@ function renderRuntime(runtime) {
         ["活跃 lane", `${inbound.active_lanes ?? 0}`],
         ["运行任务", `${inbound.running_tasks ?? 0}`],
         ["最老等待", formatSecondsLabel(inbound.oldest_wait_seconds)],
+      ],
+    },
+    {
+      icon: "TW",
+      title: "后台任务",
+      value: `${tasks.queue?.pending ?? 0}/${tasks.queue?.running ?? 0}`,
+      status: Number(sessionLocks.blocked_session_count || 0) > 0 ? "warning" : "ok",
+      summary: "待执行 / 运行中任务",
+      chips: [
+        `worker ${tasks.running ? "运行中" : "未运行"}`,
+        `并发 ${tasks.concurrency ?? 0}`,
+        `被锁会话 ${sessionLocks.blocked_session_count ?? 0}`,
+        `累计跳过 ${sessionLocks.skip_count ?? 0}`,
+      ],
+      rows: [
+        ["worker ID", tasks.worker_id || "--"],
+        ["注册任务", (tasks.registered_task_types || []).join(", ") || "无"],
+        ["待执行", `${tasks.queue?.pending ?? 0}`],
+        ["重试中", `${tasks.queue?.retrying ?? 0}`],
+        ["被锁会话", `${sessionLocks.blocked_session_count ?? 0}`],
+        [
+          "最近跳过",
+          (sessionLocks.last_blocked_sessions || [])
+            .map((row) => `${row.task_type}:${row.session_key}`)
+            .join(" | ") || "无",
+        ],
       ],
     },
     {

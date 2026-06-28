@@ -84,6 +84,9 @@ def test_monitoring_runtime_snapshot_uses_compact_cards_and_details() -> None:
     assert "document.createElement(\"details\")" in app_js
     assert ".runtime-icon" in styles
     assert ".runtime-chips" in styles
+    assert "被锁会话" in app_js
+    assert "累计跳过" in app_js
+    assert "最近跳过" in app_js
 
 
 def test_monitoring_dashboard_includes_metrics_trend_view() -> None:

@@ -885,7 +885,7 @@ python scripts/build_capacity_baseline.py
 | 20.9.2 Redis session lock MVP | 已完成 | 为 `agent_inbound` 任务执行增加 Redis 分布式锁，lock key 基于 `session_key`；获取不到锁或 Redis 锁不可用时进入 retrying。 | 多 worker 同时消费时，同一 session 同一时间最多一个任务进入 AgentLoopRunner。 |
 | 20.9.3 锁安全与续租 | 已完成 | 锁 value 使用 `worker_id + task_id`，释放和续租均校验 value；补 TTL 与续租间隔配置，任务执行期间后台续租。 | worker 崩溃可自动释放锁，长模型调用不会因锁过期导致误并发。 |
 | 20.9.4 session-aware reserve | 已完成 | `TaskWorkerRuntime` 在 reserve 前收集已被 Redis 锁保护的 session，`LocalTaskQueue` 和 PostgreSQL 原子 reserve 均支持跳过 blocked session，减少拿到任务后再 retry 的抖动。 | 热点 session 不会导致大量任务反复 running/retrying，不同 session 仍可并行推进。 |
-| 20.9.5 观测与控制面 | 待实现 | `runtime.status`、Dashboard 和事件流展示 `agent_inbound` 锁等待、锁冲突、session backlog、最老等待时间。 | 排查入站延迟时能区分模型慢、worker 少、锁冲突和 session 热点。 |
+| 20.9.5 观测与控制面 | 已完成 | `runtime.status.tasks.session_locks` 暴露被锁 session 数、累计跳过次数和最近样例；Dashboard 中文展示后台任务锁观测；事件流记录 `agent_inbound.session_locked_skipped`。 | 排查入站延迟时能区分模型慢、worker 少、锁冲突和 session 热点。 |
 | 20.9.6 故障注入与压测 | 待实现 | 增加同 session 多消息、多 worker 抢占、Redis 不可用、worker 崩溃、锁过期等测试。 | 能证明同 session 不并发执行；Redis 故障时降级策略明确。 |
 | 20.9.7 RabbitMQ session 分区评估 | 待实现 | 评估 `hash(session_key) % N` 分区队列，把同 session 固定路由到同一分区 worker。 | 明确是否进入 RabbitMQ 入站分区队列实现，或继续 Redis lock + PostgreSQL task。 |
 | 20.9.8 per-session task lane 设计 | 待实现 | 设计分布式 lane ownership、worker heartbeat、超时接管、lane 迁移和热点治理。 | 输出可实施方案，为后续从 Redis lock 演进到真正 per-session lane 做准备。 |
