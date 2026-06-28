@@ -45,6 +45,7 @@ class TaskWorkerRuntime:
         self._session_lock_skip_count = 0
         self._last_blocked_sessions: list[dict[str, Any]] = []
         self._last_recorded_blocked_signature = ""
+        self._next_broker_partition = 0
 
     def register_handler(self, task_type: str, handler: TaskHandler) -> None:
         """注册某类任务的执行函数。"""
@@ -84,6 +85,9 @@ class TaskWorkerRuntime:
 
         if not self.handlers:
             return False
+        broker_handled = await self._run_once_from_broker()
+        if broker_handled:
+            return True
         blocked_session_keys = self._blocked_session_keys()
         task = self.queue.reserve(
             worker_id=self.worker_id,
@@ -110,6 +114,50 @@ class TaskWorkerRuntime:
                 "last_blocked_sessions": list(self._last_blocked_sessions),
             },
         }
+
+    async def _run_once_from_broker(self) -> bool:
+        """优先从 RabbitMQ 等外部分发队列消费一条任务引用。"""
+
+        broker = getattr(self.queue, "broker", None)
+        if broker is None or not getattr(broker, "enabled", False):
+            return False
+        partitions = max(1, int(getattr(broker, "partitions", 1)))
+        start = self._next_broker_partition % partitions
+        for offset in range(partitions):
+            partition = (start + offset) % partitions
+            consumed = await asyncio.to_thread(
+                broker.consume_once,
+                partition,
+                self._handle_broker_payload_sync,
+            )
+            self._next_broker_partition = (partition + 1) % partitions
+            if consumed:
+                return True
+        return False
+
+    def _handle_broker_payload_sync(self, payload: dict[str, Any]) -> bool:
+        """同步 broker handler：预占指定任务并在线程内执行异步 handler。"""
+
+        task_id = str(payload.get("task_id", ""))
+        task_type = str(payload.get("task_type", ""))
+        if not task_id:
+            return True
+        if task_type and task_type not in self.handlers:
+            return False
+        blocked_session_keys = self._blocked_session_keys()
+        task = self.queue.reserve_task_id(
+            task_id,
+            worker_id=self.worker_id,
+            task_types=self.handlers.keys(),
+            blocked_session_keys=blocked_session_keys,
+        )
+        if task is None:
+            stored = self.queue.store.get(task_id)
+            if stored is None or stored.status in {"done", "failed", "cancelled", "running"}:
+                return True
+            return False
+        asyncio.run(self._execute(task))
+        return True
 
     async def _loop(self, index: int) -> None:
         """单个 worker 协程循环。"""

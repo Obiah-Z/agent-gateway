@@ -252,7 +252,7 @@ cd ~/Desktop/claw0/gateway
 
 ### Phase 18：多 Agent 协作与任务实例状态机
 
-状态：待实现。
+状态：进行中。
 
 目标：
 
@@ -871,8 +871,9 @@ python scripts/build_capacity_baseline.py
 - `TaskWorkerRuntime` 已支持 session-aware reserve，可在 reserve 前跳过已被 Redis 锁保护的 session。
 - PostgreSQL `FOR UPDATE SKIP LOCKED` 能避免同一 task 被重复抢占，并已支持 `blocked_session_keys` 排除热点 session。
 - `AgentInboundTaskHandler` 已具备 Redis session lock、token-safe release、长任务续租和锁冲突 retry。
-- 当前能力已经能防止同 session 并发执行，但语义仍是“锁”，还没有完整的 lane ownership、worker heartbeat、lane 状态记录、接管和迁移模型。
-- 最终目标是把 Redis lock 演进成分布式 per-session lane：RabbitMQ 负责可靠排队，Redis/PostgreSQL 负责 lane 归属和状态，worker 池负责执行。
+- 当前能力已经能防止同 session 并发执行，并已具备 lane ownership、worker metadata、续租、inspect 和 TTL 接管能力。
+- RabbitMQ 入站 broker 已开始接入，当前形态是：TaskStore/PostgreSQL 作为事实状态，RabbitMQ 只承载 `task_id` 等轻量引用并按 `session_key` 分区，worker 优先消费 broker 消息，失败时保留本地/数据库轮询兜底。
+- 最终目标是形成完整分布式 per-session lane：RabbitMQ 负责可靠排队，Redis/PostgreSQL 负责 lane 归属和状态，worker 池负责执行，Dashboard 负责队列、分区、lane owner 和延迟观测。
 
 技术选型文档：
 
@@ -895,19 +896,23 @@ python scripts/build_capacity_baseline.py
 | 20.9.8.3 AgentInboundTaskHandler 接入 lane coordinator | 已完成 | handler 内部已从直接调用 Redis lock 迁移到 `RedisLaneCoordinator`，保留现有 key namespace、错误消息和事件行为。 | 现有 20.9.2-20.9.6 测试继续通过。 |
 | 20.9.8.4 Worker heartbeat 与 lane metadata | 已完成 | lane ownership value 已增加 worker_id、task_id、acquired_at、renewed_at，续租会刷新 renewed_at；worker blocked session 样例和事件 metadata 已包含 lane owner inspect 信息。 | runtime.status 能看到 active lane owner 和最近续租时间。 |
 | 20.9.8.5 超时接管与迁移策略 | 已完成 | 已输出 [分布式 Lane 接管与迁移策略](doc/分布式Lane接管与迁移策略.md)，并验证 owner TTL 过期后的接管、worker 崩溃未 release 后的 pending task 重入。 | 故障注入证明 worker 崩溃后 lane 可由其他 worker 接管。 |
+| 20.9.9 RabbitMQ 入站 broker MVP | 已完成 | 新增 `RabbitMQInboundTaskBroker`，按 `hash(session_key) % partitions` 发布轻量任务引用；消息体只包含 task_id、task_type、session_key、partition、idempotency_key 和 published_at，不包含用户正文或 payload。 | 同 session 稳定进入同一分区；RabbitMQ 不保存完整入站消息；broker 支持 ack/nack、DLQ topology、stats 和 purge。 |
+| 20.9.10 task_id 精确预占 | 已完成 | `LocalTaskQueue.reserve_task_id()` 和 PostgreSQL `reserve_task_id()` 支持按 broker 消息中的 task_id 原子预占，过滤 task_type、状态和 blocked session。 | 过期 broker 消息不会重复执行已完成任务；worker 不会因为 broker 唤醒而抢到其他 session 的任务。 |
+| 20.9.11 worker hybrid consume | 已完成 | `TaskWorkerRuntime.run_once()` 优先消费 RabbitMQ 入站分区消息，预占成功后执行 handler；无 broker 消息时回退原有 PostgreSQL/本地轮询。 | RabbitMQ 可作为分布式唤醒/分发层；broker 不可用或发布失败时任务仍保留在 TaskStore 等待轮询消费。 |
+| 20.9.12 入站 broker 观测与压测 | 待实现 | 将入站 RabbitMQ 分区深度、消费 ack/nack、requeue、DLQ、端到端延迟接入 Dashboard、Prometheus 和压测脚本。 | 能用压测报告说明不同 partition/worker/concurrency 下的入站吞吐、积压和热点 session。 |
 
 推荐落地顺序：
 
-1. 先做 Redis session lock，解决最危险的同 session 并发执行。
-2. 再做锁安全与续租，避免长模型调用期间锁过期。
-3. 再做 session-aware reserve，减少锁冲突带来的 retry 抖动。
-4. 再补 Dashboard / 事件流观测。
-5. 最后评估 RabbitMQ session 分区和真正的分布式 per-session lane。
+1. 先完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
+2. 再补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
+3. 再做故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
+4. 最后评估是否需要把 lane state 从 Redis lock 进一步升级为 PostgreSQL 持久 lane 表。
 
 阶段完成标准：
 
 - 开启 `GATEWAY_INBOUND_TASK_QUEUE_ENABLED=true` 且运行多个 worker 时，同一 session 不会并发执行多个 `agent_inbound`。
-- Redis 可用时优先使用分布式锁；Redis 不可用时有明确降级策略和 warning event。
+- Redis 可用时优先使用分布式 lane ownership；Redis 不可用时有明确降级策略和 warning event。
+- RabbitMQ 入站 broker 开启后，入站任务先落 TaskStore，再发布轻量 task_id 引用；发布失败不会丢任务，worker 仍可通过轮询兜底。
 - Dashboard 能看到入站任务积压、锁等待和热点 session。
 - 压测报告能说明同 session 多消息场景下的吞吐、P95 和顺序风险。
 

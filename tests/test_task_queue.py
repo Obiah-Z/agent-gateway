@@ -4,6 +4,17 @@ from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore
 from agent_gateway.runtime.tasks.models import TaskInstance
 
 
+class FakeTaskBroker:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.published: list[TaskInstance] = []
+
+    def publish(self, task: TaskInstance) -> None:
+        if self.fail:
+            raise RuntimeError("broker unavailable")
+        self.published.append(task)
+
+
 def test_local_task_queue_enqueues_and_reserves_by_priority(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     slow = queue.enqueue(task_type="cron", source="scheduler", priority=100)
@@ -16,6 +27,30 @@ def test_local_task_queue_enqueues_and_reserves_by_priority(tmp_path: Path) -> N
     assert reserved.status == "running"
     assert reserved.metadata["worker_id"] == "worker-1"
     assert queue.store.get(slow.id).status == "pending"
+
+
+def test_local_task_queue_publishes_to_broker_after_store_write(tmp_path: Path) -> None:
+    broker = FakeTaskBroker()
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"), broker=broker)
+
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        payload={"text": "hello"},
+    )
+
+    assert queue.store.get(task.id).status == "pending"
+    assert [item.id for item in broker.published] == [task.id]
+
+
+def test_local_task_queue_keeps_task_pending_when_broker_publish_fails(tmp_path: Path) -> None:
+    broker = FakeTaskBroker(fail=True)
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"), broker=broker)
+
+    task = queue.enqueue(task_type="agent_inbound", source="feishu")
+
+    assert queue.store.get(task.id).status == "pending"
+    assert broker.published == []
 
 
 def test_local_task_queue_filters_reserve_by_task_type(tmp_path: Path) -> None:

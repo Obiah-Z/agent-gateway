@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Iterable
+from typing import Any, Iterable
 
 from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
 from agent_gateway.runtime.tasks.store import LocalTaskStore
@@ -14,8 +14,9 @@ class LocalTaskQueue:
     后续 Redis Streams、RabbitMQ 或 PostgreSQL backend 应保持同样接口。
     """
 
-    def __init__(self, store: LocalTaskStore) -> None:
+    def __init__(self, store: LocalTaskStore, *, broker: Any | None = None) -> None:
         self.store = store
+        self.broker = broker
 
     def enqueue(
         self,
@@ -41,7 +42,13 @@ class LocalTaskQueue:
             payload=payload or {},
             metadata=metadata or {},
         )
-        return self.store.create(task)
+        created = self.store.create(task)
+        if self.broker is not None:
+            try:
+                self.broker.publish(created)
+            except Exception:
+                pass
+        return created
 
     def reserve(
         self,
@@ -223,10 +230,10 @@ class LocalTaskQueue:
 
         return self.store.cancel(task_id, now=now)
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, Any]:
         """返回任务队列状态计数。"""
 
-        counts: dict[str, int] = {
+        counts: dict[str, Any] = {
             "pending": 0,
             "running": 0,
             "retrying": 0,
@@ -236,4 +243,12 @@ class LocalTaskQueue:
         }
         for task in self.store.list(limit=10_000):
             counts[task.status] = counts.get(task.status, 0) + 1
+        broker = getattr(self, "broker", None)
+        if broker is not None:
+            stats_method = getattr(broker, "stats", None)
+            if stats_method is not None:
+                try:
+                    counts["broker"] = stats_method()
+                except Exception as exc:
+                    counts["broker"] = {"error": str(exc)}
         return counts

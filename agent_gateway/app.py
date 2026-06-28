@@ -47,7 +47,7 @@ from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.diagnostics import render_doctor_text, run_doctor
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
-from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
+from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker, RabbitMQInboundTaskBroker
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
@@ -242,7 +242,20 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
             connect_timeout_seconds=settings.rabbitmq_connect_timeout_seconds,
             enabled=True,
         )
-    task_queue = LocalTaskQueue(task_store)
+    task_broker = None
+    if settings.inbound_broker == "rabbitmq":
+        task_broker = RabbitMQInboundTaskBroker(
+            url=settings.inbound_rabbitmq_url,
+            exchange=settings.inbound_rabbitmq_exchange,
+            queue_prefix=settings.inbound_rabbitmq_queue_prefix,
+            dead_letter_exchange=settings.inbound_rabbitmq_dead_letter_exchange,
+            dead_letter_queue=settings.inbound_rabbitmq_dead_letter_queue,
+            partitions=settings.inbound_rabbitmq_partitions,
+            prefetch=settings.inbound_rabbitmq_prefetch,
+            connect_timeout_seconds=settings.inbound_rabbitmq_connect_timeout_seconds,
+            enabled=True,
+        )
+    task_queue = LocalTaskQueue(task_store, broker=task_broker)
     dispatcher = GatewayDispatcher(
         agents,
         bindings,

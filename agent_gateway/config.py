@@ -73,6 +73,15 @@ class GatewaySettings:
     rabbitmq_dead_letter_exchange: str = "agent_gateway.delivery.dlx"
     rabbitmq_dead_letter_queue: str = "agent_gateway.delivery.dead"
     rabbitmq_connect_timeout_seconds: float = 2.0
+    inbound_broker: str = "none"
+    inbound_rabbitmq_url: str = "amqp://admin:admin123@127.0.0.1:5672/"
+    inbound_rabbitmq_exchange: str = "agent_gateway.inbound"
+    inbound_rabbitmq_queue_prefix: str = "agent_gateway.inbound.partition"
+    inbound_rabbitmq_dead_letter_exchange: str = "agent_gateway.inbound.dlx"
+    inbound_rabbitmq_dead_letter_queue: str = "agent_gateway.inbound.dead"
+    inbound_rabbitmq_partitions: int = 8
+    inbound_rabbitmq_prefetch: int = 1
+    inbound_rabbitmq_connect_timeout_seconds: float = 2.0
     host: str = "127.0.0.1"
     port: int = 8765
     workspace_root: Path = DEFAULT_WORKSPACE_ROOT
@@ -228,6 +237,39 @@ class GatewaySettings:
             rabbitmq_connect_timeout_seconds=max(
                 0.2,
                 float(os.getenv("GATEWAY_RABBITMQ_CONNECT_TIMEOUT_SECONDS", "2.0")),
+            ),
+            inbound_broker=os.getenv("GATEWAY_INBOUND_BROKER", "none").strip().lower() or "none",
+            inbound_rabbitmq_url=os.getenv(
+                "GATEWAY_INBOUND_RABBITMQ_URL",
+                os.getenv("GATEWAY_RABBITMQ_URL", "amqp://admin:admin123@127.0.0.1:5672/"),
+            ),
+            inbound_rabbitmq_exchange=os.getenv(
+                "GATEWAY_INBOUND_RABBITMQ_EXCHANGE",
+                "agent_gateway.inbound",
+            ),
+            inbound_rabbitmq_queue_prefix=os.getenv(
+                "GATEWAY_INBOUND_RABBITMQ_QUEUE_PREFIX",
+                "agent_gateway.inbound.partition",
+            ),
+            inbound_rabbitmq_dead_letter_exchange=os.getenv(
+                "GATEWAY_INBOUND_RABBITMQ_DEAD_LETTER_EXCHANGE",
+                "agent_gateway.inbound.dlx",
+            ),
+            inbound_rabbitmq_dead_letter_queue=os.getenv(
+                "GATEWAY_INBOUND_RABBITMQ_DEAD_LETTER_QUEUE",
+                "agent_gateway.inbound.dead",
+            ),
+            inbound_rabbitmq_partitions=max(
+                1,
+                int(os.getenv("GATEWAY_INBOUND_RABBITMQ_PARTITIONS", "8")),
+            ),
+            inbound_rabbitmq_prefetch=max(
+                1,
+                int(os.getenv("GATEWAY_INBOUND_RABBITMQ_PREFETCH", "1")),
+            ),
+            inbound_rabbitmq_connect_timeout_seconds=max(
+                0.2,
+                float(os.getenv("GATEWAY_INBOUND_RABBITMQ_CONNECT_TIMEOUT_SECONDS", "2.0")),
             ),
             host=os.getenv("GATEWAY_HOST", "127.0.0.1"),
             port=int(os.getenv("GATEWAY_PORT", "8765")),

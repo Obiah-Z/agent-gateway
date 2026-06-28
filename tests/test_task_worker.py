@@ -10,6 +10,29 @@ from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
 
 
+class FakeInboundTaskBroker:
+    def __init__(self, payloads: list[dict]) -> None:
+        self.enabled = True
+        self.partitions = 2
+        self.payloads = list(payloads)
+        self.acked: list[str] = []
+        self.nacked: list[str] = []
+
+    def consume_once(self, partition: int, handler) -> bool:
+        del partition
+        if not self.payloads:
+            return False
+        payload = self.payloads.pop(0)
+        if handler(payload):
+            self.acked.append(str(payload.get("task_id", "")))
+        else:
+            self.nacked.append(str(payload.get("task_id", "")))
+        return True
+
+    def stats(self) -> dict:
+        return {"backend": "fake", "messages": len(self.payloads)}
+
+
 def test_task_worker_run_once_acknowledges_success(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     task = queue.enqueue(task_type="echo", source="test", payload={"text": "hello"})
@@ -23,6 +46,26 @@ def test_task_worker_run_once_acknowledges_success(tmp_path: Path) -> None:
     assert stored.status == "done"
     assert stored.result_preview == "echo:hello"
     assert stored.metadata["worker_id"] == "worker-1"
+
+
+def test_task_worker_consumes_broker_task_reference_by_id(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    queue = LocalTaskQueue(store)
+    skipped = queue.enqueue(task_type="echo", source="test", priority=1, payload={"text": "skip"})
+    target = queue.enqueue(task_type="echo", source="test", priority=100, payload={"text": "target"})
+    broker = FakeInboundTaskBroker([{"task_id": target.id, "task_type": "echo"}])
+    queue.broker = broker
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    worker.register_handler("echo", lambda item: f"echo:{item.payload['text']}")
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert broker.acked == [target.id]
+    assert broker.nacked == []
+    assert store.get(target.id).status == "done"
+    assert store.get(target.id).result_preview == "echo:target"
+    assert store.get(skipped.id).status == "pending"
 
 
 def test_task_worker_run_once_returns_false_without_available_task(tmp_path: Path) -> None:
