@@ -855,6 +855,49 @@ def test_gateway_server_exposes_session_lane_list(tmp_path) -> None:
     )
 
 
+def test_gateway_server_exposes_lane_doctor(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+    )
+    settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    repository = FakeLaneStateRepository()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")]),
+        channels=channels,
+        autonomy=FakeAutonomy(),
+        state_repository=repository,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(server._m_tasks_lanes_doctor({"limit": 3}))
+
+    assert result["limit"] == 3
+    assert result["summary"]["owned_lanes"] == 1
+    assert "checks" in result
+    assert any(row["name"] == "session_lanes" for row in result["checks"])
+
+
 def test_gateway_server_exposes_session_lane_history(tmp_path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",

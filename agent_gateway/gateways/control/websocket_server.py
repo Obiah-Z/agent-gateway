@@ -147,6 +147,7 @@ class GatewayServer:
             "delivery.republish": self._m_delivery_republish,
             "tasks.list": self._m_tasks_list,
             "tasks.executions": self._m_tasks_executions,
+            "tasks.lanes.doctor": self._m_tasks_lanes_doctor,
             "tasks.lanes": self._m_tasks_lanes,
             "tasks.lanes.history": self._m_tasks_lanes_history,
             "tasks.lanes.recovery": self._m_tasks_lanes_recovery,
@@ -773,6 +774,12 @@ class GatewayServer:
             limit=int(params.get("limit", 50)),
             include_payload=bool(params.get("include_payload", False)),
         )
+
+    async def _m_tasks_lanes_doctor(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面分布式 lane 只读诊断 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.lane_doctor(limit=int(params.get("limit", 20)))
 
     async def _m_tasks_lanes(self, params: dict[str, Any]) -> dict[str, Any]:
         """处理控制面 session lane 状态 RPC 请求。"""

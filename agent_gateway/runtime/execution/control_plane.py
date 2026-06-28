@@ -459,6 +459,107 @@ class GatewayControlPlane:
             },
         }
 
+    def lane_doctor(self, *, limit: int = 20) -> dict[str, Any]:
+        """构建分布式 lane 只读诊断报告。
+
+        该方法只读取运行态、健康检查、lane 状态和 worker 事件，不消费队列、
+        不释放 lane，也不写入恢复审计事件，适合 CLI、Dashboard 和外部巡检复用。
+        """
+
+        safe_limit = max(1, min(int(limit), 200))
+        runtime = self.runtime_status()
+        health = self.health_check()
+        tasks = runtime.get("tasks", {})
+        tasks = tasks if isinstance(tasks, dict) else {}
+        persisted_lanes = tasks.get("persisted_lanes", {})
+        persisted_lanes = persisted_lanes if isinstance(persisted_lanes, dict) else {}
+        queue_stats = tasks.get("queue", {})
+        queue_stats = queue_stats if isinstance(queue_stats, dict) else {}
+        task_broker = tasks.get("broker") or queue_stats.get("broker", {})
+        task_broker = task_broker if isinstance(task_broker, dict) else {}
+        session_locks = tasks.get("session_locks", {})
+        session_locks = session_locks if isinstance(session_locks, dict) else {}
+        lanes = self.list_session_lanes(state="owned", limit=safe_limit)
+        lane_items = list(lanes.get("items", []) or [])
+        stale_lanes = list(persisted_lanes.get("stale_items", []) or [])[:safe_limit]
+        if not persisted_lanes.get("configured") and lanes.get("configured"):
+            stale_lanes = [row for row in lane_items if self._is_session_lane_stale(row)][:safe_limit]
+        recovery_plan = self.plan_session_lane_recovery(limit=safe_limit)
+        recovery_events = self.lane_recovery_events(limit=safe_limit)
+        task_executions = self.task_executions(limit=safe_limit)
+        redis = runtime.get("redis", {})
+        redis = redis if isinstance(redis, dict) else {}
+        postgres = runtime.get("postgres", {})
+        postgres = postgres if isinstance(postgres, dict) else {}
+        checks: list[dict[str, Any]] = [
+            {
+                "name": "health",
+                "status": health.get("status", "unknown"),
+                "ok": bool(health.get("ok")),
+            },
+            {
+                "name": "redis",
+                "status": "ok" if redis.get("ok") else "warning",
+                "enabled": bool(redis.get("enabled")),
+                "ok": bool(redis.get("ok")),
+            },
+            {
+                "name": "postgres",
+                "status": "ok" if postgres.get("ok") else "warning",
+                "enabled": bool(postgres.get("enabled")),
+                "ok": bool(postgres.get("ok")),
+            },
+            {
+                "name": "inbound_broker",
+                "status": "ok"
+                if int(task_broker.get("dead_letter_messages", 0) or 0) == 0
+                else "warning",
+                "enabled": bool(task_broker.get("enabled")),
+                "messages": int(task_broker.get("messages", 0) or 0),
+                "dead_letter_messages": int(task_broker.get("dead_letter_messages", 0) or 0),
+            },
+            {
+                "name": "session_lanes",
+                "status": "ok" if int(persisted_lanes.get("stale_count", len(stale_lanes)) or 0) == 0 else "warning",
+                "owned": int(persisted_lanes.get("count", len(lane_items)) or 0),
+                "stale": int(persisted_lanes.get("stale_count", len(stale_lanes)) or 0),
+            },
+            {
+                "name": "session_locks",
+                "status": "ok"
+                if int(session_locks.get("blocked_session_count", 0) or 0) == 0
+                else "warning",
+                "blocked_session_count": int(session_locks.get("blocked_session_count", 0) or 0),
+                "skip_count": int(session_locks.get("skip_count", 0) or 0),
+            },
+        ]
+        warning_count = sum(1 for row in checks if row.get("status") == "warning")
+        ok = bool(health.get("ok")) and warning_count == 0
+        return {
+            "ok": ok,
+            "status": "ok" if ok else "warning",
+            "limit": safe_limit,
+            "checks": checks,
+            "summary": {
+                "warnings": warning_count,
+                "owned_lanes": int(persisted_lanes.get("count", len(lane_items)) or 0),
+                "stale_lanes": int(persisted_lanes.get("stale_count", len(stale_lanes)) or 0),
+                "recovery_actions": int(recovery_plan.get("action_count", 0) or 0),
+                "broker_messages": int(task_broker.get("messages", 0) or 0),
+                "broker_dead_letters": int(task_broker.get("dead_letter_messages", 0) or 0),
+            },
+            "lanes": lanes,
+            "stale_lanes": stale_lanes,
+            "recovery_plan": recovery_plan,
+            "recovery_events": recovery_events,
+            "task_executions": task_executions,
+            "runtime": {
+                "tasks": tasks,
+                "redis": redis,
+                "postgres": postgres,
+            },
+        }
+
     def recent_errors(
         self,
         *,

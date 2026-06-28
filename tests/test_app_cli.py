@@ -309,31 +309,14 @@ def test_delivery_republish_cli_republishes_without_serving(monkeypatch, capsys)
 
 def test_lane_doctor_cli_prints_json_without_serving(monkeypatch, capsys) -> None:
     class FakeControlPlane:
-        def runtime_status(self):
+        def lane_doctor(self, *, limit: int):
             return {
-                "tasks": {
-                    "persisted_lanes": {"count": 1, "stale_count": 0, "stale_items": []},
-                    "broker": {"enabled": True, "messages": 0, "dead_letter_messages": 0},
-                    "session_locks": {"blocked_session_count": 0, "skip_count": 0},
-                },
-                "redis": {"enabled": True, "ok": True},
-                "postgres": {"enabled": True, "ok": True},
+                "ok": True,
+                "status": "ok",
+                "limit": limit,
+                "summary": {"owned_lanes": 1},
+                "checks": [],
             }
-
-        def health_check(self):
-            return {"ok": True, "status": "ok", "checks": []}
-
-        def list_session_lanes(self, *, state: str, limit: int):
-            return {"configured": True, "state": state, "count": 1, "items": [], "limit": limit}
-
-        def plan_session_lane_recovery(self, *, limit: int):
-            return {"configured": True, "dry_run": True, "action_count": 0, "items": [], "limit": limit}
-
-        def lane_recovery_events(self, *, limit: int):
-            return {"configured": True, "count": 0, "items": [], "limit": limit}
-
-        def task_executions(self, *, limit: int):
-            return {"configured": True, "count": 0, "items": [], "limit": limit}
 
     class FakeBuiltApp:
         control_plane = FakeControlPlane()
@@ -351,31 +334,23 @@ def test_lane_doctor_cli_prints_json_without_serving(monkeypatch, capsys) -> Non
 
 def test_lane_doctor_cli_prints_text(monkeypatch, capsys) -> None:
     class FakeControlPlane:
-        def runtime_status(self):
+        def lane_doctor(self, *, limit: int):
             return {
-                "tasks": {
-                    "persisted_lanes": {"count": 1, "stale_count": 1, "stale_items": [{"session_key": "s"}]},
-                    "broker": {"enabled": True, "messages": 2, "dead_letter_messages": 1},
-                    "session_locks": {"blocked_session_count": 1, "skip_count": 3},
+                "ok": False,
+                "status": "warning",
+                "limit": limit,
+                "summary": {
+                    "owned_lanes": 1,
+                    "stale_lanes": 1,
+                    "recovery_actions": 1,
+                    "broker_messages": 2,
+                    "broker_dead_letters": 1,
                 },
-                "redis": {"enabled": True, "ok": True},
-                "postgres": {"enabled": True, "ok": True},
+                "checks": [
+                    {"name": "session_lanes", "status": "warning", "owned": 1, "stale": 1},
+                ],
+                "recovery_plan": {"action_count": 1},
             }
-
-        def health_check(self):
-            return {"ok": False, "status": "degraded", "checks": []}
-
-        def list_session_lanes(self, *, state: str, limit: int):
-            return {"configured": True, "state": state, "count": 1, "items": [], "limit": limit}
-
-        def plan_session_lane_recovery(self, *, limit: int):
-            return {"configured": True, "dry_run": True, "action_count": 1, "items": [], "limit": limit}
-
-        def lane_recovery_events(self, *, limit: int):
-            return {"configured": True, "count": 0, "items": [], "limit": limit}
-
-        def task_executions(self, *, limit: int):
-            return {"configured": True, "count": 0, "items": [], "limit": limit}
 
     class FakeBuiltApp:
         control_plane = FakeControlPlane()
