@@ -921,13 +921,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.29 分布式 Lane 运维 Runbook | 已完成 | 新增 [分布式 Lane 运维 Runbook](doc/分布式Lane运维Runbook.md)，整理推荐配置、启动前检查、smoke 验收、Dashboard 排查顺序、控制面 JSON-RPC、stale lane 恢复流程、PostgreSQL/Redis/RabbitMQ 排障命令、常见故障和禁止操作。 | 新机器或故障现场可按文档完成 lane 状态检查、恢复预检、受控释放、审计回看和中间件联合排障。 |
 | 20.9.30 Lane Doctor 只读诊断命令 | 已完成 | 新增 `agent-gateway lane-doctor`，汇总 health、runtime status、入站 broker 积压、Redis/PostgreSQL 状态、持久 lane、stale lane、recovery plan、recovery events 和最近 task worker 事件；支持 `--json` 与 `--limit`。 | 运维可用一条只读命令完成分布式 lane 首轮诊断，不启动服务、不消费队列、不释放 lane、不修改 Redis/PostgreSQL 恢复状态。 |
 | 20.9.31 Lane Doctor 控制面入口 | 已完成 | 将 lane doctor 聚合逻辑下沉到 `GatewayControlPlane.lane_doctor()`，CLI 复用控制面方法，并新增 WebSocket JSON-RPC `tasks.lanes.doctor`。 | Dashboard、CLI 和外部运维脚本可复用同一套只读诊断结果，避免诊断逻辑散落在 CLI 层。 |
+| 20.9.32 Dashboard Lane Doctor 摘要卡片 | 已完成 | Dashboard 刷新时并行调用 `tasks.lanes.doctor`，在后台任务区顶部展示分布式 Lane 诊断状态、过期 Lane、恢复动作、Broker 积压、死信和检查项。 | 运维面板能直接看到 lane 首轮诊断结果，不需要先打开 CLI 或手动调用 JSON-RPC。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检、显式确认后的受控批量释放、lane recovery 审计事件、审计视图、运维 Runbook、lane-doctor 只读诊断命令和控制面 `tasks.lanes.doctor` 入口；后续可继续做更完整的自动恢复策略。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检、显式确认后的受控批量释放、lane recovery 审计事件、审计视图、运维 Runbook、lane-doctor 只读诊断命令、控制面 `tasks.lanes.doctor` 入口和 Dashboard 诊断摘要卡片；后续可继续做更完整的自动恢复策略。
 
 阶段完成标准：
 

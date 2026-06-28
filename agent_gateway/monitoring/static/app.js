@@ -701,7 +701,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, taskExecutions, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, taskExecutions, laneDoctor, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -716,6 +716,7 @@ async function refreshAll() {
       rpc("memory.recent", { limit: 20 }),
       rpc("tasks.list", { status: "all", limit: 40 }),
       rpc("tasks.executions", { limit: 24 }),
+      rpc("tasks.lanes.doctor", { limit: 12 }),
       rpc("metrics.summary", { limit: 60 }),
       rpc("metrics.tail", { limit: 24 }),
       rpc("alerts.active"),
@@ -732,7 +733,7 @@ async function refreshAll() {
     renderEvents(events);
     renderErrors(errors);
     renderMemories(memories);
-    renderTasks(tasks, taskExecutions);
+    renderTasks(tasks, taskExecutions, laneDoctor);
     renderDelivery(deliveryList);
     renderCron(cronJobs);
   } catch (error) {
@@ -1951,10 +1952,12 @@ function renderMemories(payload) {
   appendCollapseToggle(dom.memoryList, "memories", items.length, () => renderMemories(payload));
 }
 
-function renderTasks(payload, executionsPayload = {}) {
+function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
   clearNode(dom.tasksList);
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const executions = Array.isArray(executionsPayload?.items) ? executionsPayload.items.slice().reverse() : [];
+  const doctorSummary = laneDoctor?.summary || {};
+  const doctorChecks = Array.isArray(laneDoctor?.checks) ? laneDoctor.checks : [];
   const counts = items.reduce((acc, item) => {
     const status = normalizeStatus(item.status || "pending");
     acc[status] = (acc[status] || 0) + 1;
@@ -1963,10 +1966,53 @@ function renderTasks(payload, executionsPayload = {}) {
   dom.tasksSummary.textContent = items.length
     ? `${items.length} 条任务 · ${executions.length} 条执行事件 · ${counts.running || 0} 执行中 / ${counts.failed || 0} 失败`
     : "暂无任务";
-  dom.tasksList.className = items.length || executions.length ? "task-list" : "task-list empty";
-  if (!items.length && !executions.length) {
+  dom.tasksList.className = items.length || executions.length || doctorChecks.length ? "task-list" : "task-list empty";
+  if (!items.length && !executions.length && !doctorChecks.length) {
     dom.tasksList.textContent = "最近没有后台任务。Cron、Heartbeat 或长任务 Skill 入队后会显示在这里。";
     return;
+  }
+  if (doctorChecks.length) {
+    const status = normalizeStatus(laneDoctor.status || (laneDoctor.ok ? "ok" : "warning"));
+    const block = document.createElement("section");
+    block.className = `task-item task-${status}`;
+    const head = document.createElement("div");
+    head.className = "task-head";
+    head.appendChild(badge(status));
+    const title = document.createElement("div");
+    appendText(title, "strong", "分布式 Lane 诊断", "task-title");
+    appendText(
+      title,
+      "small",
+      [
+        `过期 Lane ${doctorSummary.stale_lanes ?? 0}`,
+        `恢复动作 ${doctorSummary.recovery_actions ?? 0}`,
+        `Broker 积压 ${doctorSummary.broker_messages ?? 0}`,
+        `死信 ${doctorSummary.broker_dead_letters ?? 0}`,
+      ].join(" · "),
+      "task-meta",
+    );
+    head.appendChild(title);
+    block.appendChild(head);
+    const visibleChecks = slicePanelItems(doctorChecks, "lane-doctor-checks");
+    for (const check of visibleChecks) {
+      const row = document.createElement("div");
+      row.className = `trace-event trace-event-${normalizeStatus(check.status)}`;
+      appendText(row, "strong", check.name || "unknown");
+      appendText(
+        row,
+        "small",
+        Object.entries(check)
+          .filter(([key]) => !["name", "status"].includes(key))
+          .map(([key, value]) => `${key}=${value}`)
+          .join(" · ") || "无额外指标",
+        "task-meta",
+      );
+      block.appendChild(row);
+    }
+    appendCollapseToggle(block, "lane-doctor-checks", doctorChecks.length, () => {
+      renderTasks(payload, executionsPayload, laneDoctor);
+    });
+    dom.tasksList.appendChild(block);
   }
   if (executions.length) {
     const block = document.createElement("section");
@@ -2000,7 +2046,9 @@ function renderTasks(payload, executionsPayload = {}) {
       );
       block.appendChild(row);
     }
-    appendCollapseToggle(block, "task-executions", executions.length, () => renderTasks(payload, executionsPayload));
+    appendCollapseToggle(block, "task-executions", executions.length, () => {
+      renderTasks(payload, executionsPayload, laneDoctor);
+    });
     dom.tasksList.appendChild(block);
   }
   const visibleItems = slicePanelItems(items, "tasks");
@@ -2050,7 +2098,9 @@ function renderTasks(payload, executionsPayload = {}) {
     }
     dom.tasksList.appendChild(card);
   }
-  appendCollapseToggle(dom.tasksList, "tasks", items.length, () => renderTasks(payload, executionsPayload));
+  appendCollapseToggle(dom.tasksList, "tasks", items.length, () => {
+    renderTasks(payload, executionsPayload, laneDoctor);
+  });
 }
 
 function taskTitle(task) {
