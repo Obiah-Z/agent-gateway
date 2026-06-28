@@ -70,6 +70,29 @@ class FakeDeliveryRuntime:
         self.flush_calls += 1
 
 
+class FakeLaneStateRepository:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+        del cursor
+        self.calls.append((table, limit, dict(filters or {})))
+        if table != "session_lanes":
+            return []
+        return [
+            {
+                "session_key": "agent:feishu:user-1",
+                "worker_id": "worker-a",
+                "task_id": "task-a",
+                "state": "owned",
+            }
+        ]
+
+    def get(self, table: str, key: str):
+        del table, key
+        return None
+
+
 class DisconnectingWebSocket:
     def __init__(self) -> None:
         self._sent = False
@@ -701,3 +724,56 @@ def test_gateway_server_exposes_runtime_status_and_health_check(tmp_path) -> Non
     assert status["delivery"]["pending"] == 0
     assert health["status"] == "degraded"
     assert any(row["name"] == "server.running" for row in health["checks"])
+
+
+def test_gateway_server_exposes_session_lane_list(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    agents = AgentManager()
+    bindings = BindingTable()
+    channels = ChannelManager()
+    repository = FakeLaneStateRepository()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([]),
+        channels=channels,
+        state_repository=repository,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(
+        server._m_tasks_lanes(
+            {
+                "state": "owned",
+                "limit": 10,
+                "session_key": "agent:feishu:user-1",
+                "worker_id": "worker-a",
+            }
+        )
+    )
+
+    assert result["configured"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["worker_id"] == "worker-a"
+    assert repository.calls[0] == (
+        "session_lanes",
+        10,
+        {
+            "state": "owned",
+            "session_key": "agent:feishu:user-1",
+            "worker_id": "worker-a",
+            "task_id": "",
+        },
+    )

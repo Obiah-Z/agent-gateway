@@ -109,11 +109,14 @@ class FakeRedisClient:
 
 
 class FakeLaneStateRepository:
+    def __init__(self) -> None:
+        self.calls = []
+
     def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
-        del cursor, limit
+        del cursor
+        self.calls.append((table, limit, dict(filters or {})))
         if table != "session_lanes":
             return []
-        assert filters == {"state": "owned"}
         return [
             {
                 "session_key": "agent:feishu:user-1",
@@ -1014,6 +1017,41 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert health["ok"] is True
     assert health["status"] == "ok"
     assert all(row["status"] == "ok" for row in health["checks"])
+
+
+def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+    )
+
+    result = control.list_session_lanes(
+        state="released",
+        limit=20,
+        session_key="agent:feishu:user-1",
+        worker_id="worker-a",
+        task_id="task-a",
+    )
+
+    assert result["configured"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["session_key"] == "agent:feishu:user-1"
+    assert repository.calls[0] == (
+        "session_lanes",
+        20,
+        {
+            "state": "released",
+            "session_key": "agent:feishu:user-1",
+            "worker_id": "worker-a",
+            "task_id": "task-a",
+        },
+    )
 
 
 def test_control_plane_health_check_reports_redis_failure(tmp_path: Path) -> None:

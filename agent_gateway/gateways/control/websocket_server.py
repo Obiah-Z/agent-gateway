@@ -146,6 +146,7 @@ class GatewayServer:
             "delivery.flush": self._m_delivery_flush,
             "delivery.republish": self._m_delivery_republish,
             "tasks.list": self._m_tasks_list,
+            "tasks.lanes": self._m_tasks_lanes,
             "tasks.get": self._m_tasks_get,
             "tasks.cancel": self._m_tasks_cancel,
             "tasks.retry": self._m_tasks_retry,
@@ -751,6 +752,18 @@ class GatewayServer:
             status=params.get("status", "all"),
             limit=int(params.get("limit", 50)),
             include_payload=bool(params.get("include_payload", False)),
+        )
+
+    async def _m_tasks_lanes(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 session lane 状态 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.list_session_lanes(
+            state=str(params.get("state", "owned")),
+            limit=int(params.get("limit", 50)),
+            session_key=str(params.get("session_key", "")),
+            worker_id=str(params.get("worker_id", "")),
+            task_id=str(params.get("task_id", "")),
         )
 
     async def _m_tasks_get(self, params: dict[str, Any]) -> dict[str, Any]:

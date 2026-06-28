@@ -618,6 +618,42 @@ class GatewayControlPlane:
             "limit": safe_limit,
         }
 
+    def list_session_lanes(
+        self,
+        *,
+        state: str = "owned",
+        limit: int = 50,
+        session_key: str = "",
+        worker_id: str = "",
+        task_id: str = "",
+    ) -> dict[str, Any]:
+        """列出持久化 session lane owner 状态。"""
+
+        safe_limit = max(1, min(int(limit), 200))
+        if self.state_repository is None:
+            return {
+                "configured": False,
+                "state": state or "owned",
+                "count": 0,
+                "items": [],
+                "limit": safe_limit,
+            }
+        filters = {
+            "state": str(state or "owned"),
+            "session_key": str(session_key or ""),
+            "worker_id": str(worker_id or ""),
+            "task_id": str(task_id or ""),
+        }
+        rows = self._state_repo_list("session_lanes", limit=safe_limit, filters=filters)
+        return {
+            "configured": True,
+            "state": filters["state"],
+            "count": len(rows),
+            "items": rows[:safe_limit],
+            "limit": safe_limit,
+            "filters": filters,
+        }
+
     def get_task(self, task_id: str, *, include_payload: bool = True) -> dict[str, Any]:
         """读取单条后台任务详情。"""
 
@@ -965,15 +1001,10 @@ class GatewayControlPlane:
     def _session_lane_status(self) -> dict[str, Any]:
         """读取 PostgreSQL 中最近的 session lane owner 状态。"""
 
-        if self.state_repository is None:
-            return {"configured": False, "count": 0, "items": []}
-        rows = self._state_repo_list(
-            "session_lanes",
-            limit=50,
-            filters={"state": "owned"},
-        )
+        lanes = self.list_session_lanes(state="owned", limit=50)
+        rows = list(lanes.get("items", []) or [])
         return {
-            "configured": True,
+            "configured": bool(lanes.get("configured")),
             "count": len(rows),
             "items": rows[:6],
         }
