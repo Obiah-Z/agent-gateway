@@ -352,7 +352,7 @@ delivery-worker
 | 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明、状态迁移审计，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计；Prompt、Skill、Cron 配置等运行资产继续文件化。 |
 | 20.6 分布式可靠队列升级 | 已完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
 | 20.7 生产部署编排 | 已完成 | 已完成 Dockerfile、Docker Compose、基础依赖编排、启动前检查、systemd、备份恢复、反向代理 HTTPS、多角色 Compose overlay 和部署说明。 | 新机器可按文档启动完整依赖和 Gateway 服务，并可验证多角色分布式 lane 部署形态。 |
-| 20.8 统一观测与压测 | 进行中 | 先定义压测指标口径、场景边界和报告格式，再增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
+| 20.8 统一观测与压测 | 已完成 | 已定义压测指标口径、场景边界和报告格式，并补齐 Prometheus metrics endpoint、压测脚本、容量基线、边界矩阵、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
 | 20.9 分布式入站任务顺序与互斥 | 已完成 | 已在 `agent_inbound` 入站任务队列化基础上，补齐 RabbitMQ 分区入站 broker、Redis/PostgreSQL session lane ownership、worker 抢占治理、TTL 接管、运行观测、恢复工具和 readiness smoke。 | 多 worker / 多实例消费入站任务时，同一 session 不并发执行，失败可重试，顺序风险可观测，并可用 readiness smoke 验证部署条件。 |
 
 #### 当前推进建议
@@ -540,7 +540,7 @@ sudo systemctl start agent-gateway
 
 #### Phase 20.8 统一观测与压测
 
-状态：进行中。
+状态：已完成。
 
 目标：
 
@@ -645,7 +645,7 @@ sudo systemctl start agent-gateway
 | 20.8.4 真实链路压测 | 部分完成 | 已新增 `model-real` 和 `feishu-send-real` 场景，必须显式 `--allow-real-external` 才会调用真实模型或发送真实飞书消息；飞书 Webhook 入站压测仍待补齐。 | 已能低并发验证真实模型、上下文装配、AgentLoopRunner 延迟和飞书出站发送延迟；后续补真实飞书入站链路。 |
 | 20.8.5 Prometheus metrics endpoint | 已完成 | Dashboard HTTP 服务新增 `/metrics`，输出 Prometheus text exposition，覆盖 metrics 可用性、窗口样本数、投递积压、入站 lane、事件错误、Cron 和模型 profile 指标。 | Prometheus 可 scrape，指标名稳定。 |
 | 20.8.6 容量基线报告 | 已完成 | 新增 `scripts/build_capacity_baseline.py`，可汇总 load-test JSON，按场景生成容量基线 Markdown，包含吞吐、P95、错误率、积压和瓶颈判断。 | `workspace/reports/capacity-baseline.md` 下有可复现 Markdown 报告。 |
-| 20.8.7 边界测试矩阵 | 待实现 | 将 20.8 的压测从“单场景验证”升级为“边界定位矩阵”，按本地闭环、队列链路、真实模型、飞书链路、故障注入和资源上限分层执行。 | 能明确说明系统在不同并发、不同后端和不同故障条件下的容量边界与退化方式。 |
+| 20.8.7 边界测试矩阵 | 已完成 | 新增 `scripts/run_capacity_matrix.py`，把本地闭环、投递队列、RabbitMQ 入站、Redis lane、真实模型和飞书发送整理为可 dry-run / 可执行的矩阵入口；默认只执行安全场景，真实外部调用必须显式开启。 | 能明确说明系统在不同并发、不同后端和不同故障条件下的容量边界与退化方式。 |
 
 ##### 20.8.2 压测脚本 MVP 结果
 

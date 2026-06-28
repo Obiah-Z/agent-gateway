@@ -515,6 +515,7 @@ cd ~/Desktop/claw0/gateway
 
 - [项目架构说明](doc/项目架构说明.md)
 - [消息闭环实现说明](doc/消息闭环实现说明.md)
+- [20.8 压测执行清单](doc/20.8%20压测执行清单.md)
 - [Docker Compose 部署说明](deploy/docker-compose.md)
 - [Docker Compose 多角色部署说明](deploy/multi-role-compose.md)
 - [备份与恢复指南](deploy/backup-restore.md)
