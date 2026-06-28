@@ -26,11 +26,12 @@ from agent_gateway.gateways.messaging.base import Channel, ChannelAccount
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
+from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
 from agent_gateway.runtime.state.queue import DeliveryQueue
 
 
 DEFAULT_REPORT_DIR = Path("workspace/reports/load-tests")
-SUPPORTED_SCENARIOS = {"delivery-local", "mock-local"}
+SUPPORTED_SCENARIOS = {"delivery-local", "delivery-rabbitmq", "mock-local"}
 
 
 @dataclass(slots=True)
@@ -62,6 +63,74 @@ class LoadTestChannel(Channel):
             time.sleep(self.delay_ms / 1000)
         self.sent.append(outbound)
         return True
+
+
+class InMemoryDeliveryBackend:
+    """Minimal delivery_entries backend for broker load tests."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, Any]] = {}
+
+    def list(self, table: str, *, limit: int = 50, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        if table != "delivery_entries":
+            return []
+        state = str((filters or {}).get("state", ""))
+        rows = [row for row in self.rows.values() if not state or row.get("state") == state]
+        rows.sort(key=lambda row: float(row.get("enqueued_at", 0.0) or 0.0))
+        return [dict(row) for row in rows[:limit]]
+
+    def get(self, table: str, key: str) -> dict[str, Any] | None:
+        if table != "delivery_entries":
+            return None
+        row = self.rows.get(key)
+        return dict(row) if row is not None else None
+
+    def upsert(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
+        if table != "delivery_entries":
+            return row
+        payload = dict(row)
+        self.rows[str(payload["id"])] = payload
+        return payload
+
+    def delete(self, table: str, key: str) -> bool:
+        if table != "delivery_entries":
+            return False
+        return self.rows.pop(key, None) is not None
+
+    def write_delivery_entry(self, entry: Any, *, state: str = "pending") -> dict[str, Any]:
+        payload = entry.to_dict() if hasattr(entry, "to_dict") else dict(entry)
+        payload["state"] = state
+        payload["updated_at"] = time.time()
+        self.rows[str(payload["id"])] = payload
+        return payload
+
+    def delete_delivery_entry(self, delivery_id: str) -> bool:
+        return self.rows.pop(delivery_id, None) is not None
+
+    def reserve_delivery(
+        self,
+        *,
+        worker_id: str,
+        now: float | None = None,
+        delivery_id: str = "",
+    ) -> dict[str, Any] | None:
+        current = time.time() if now is None else float(now)
+        candidates = [
+            row
+            for row in self.rows.values()
+            if row.get("state") in {"pending", "retrying"}
+            and (not delivery_id or row.get("id") == delivery_id)
+            and float(row.get("next_retry_at", 0.0) or 0.0) <= current
+        ]
+        candidates.sort(key=lambda row: float(row.get("enqueued_at", 0.0) or 0.0))
+        if not candidates:
+            return None
+        row = candidates[0]
+        row["state"] = "running"
+        row["locked_by"] = worker_id
+        row["locked_at"] = current
+        row["updated_at"] = current
+        return dict(row)
 
 
 def percentile(values: list[float], percent: float) -> float:
@@ -225,6 +294,100 @@ async def run_delivery_local(
     return samples, wall_seconds, context
 
 
+async def run_delivery_rabbitmq(
+    *,
+    requests: int,
+    concurrency: int,
+    delivery_delay_ms: float,
+    work_dir: Path,
+    rabbitmq_url: str,
+    rabbitmq_exchange: str,
+    rabbitmq_queue: str,
+    rabbitmq_dead_letter_exchange: str,
+    rabbitmq_dead_letter_queue: str,
+    connect_timeout_seconds: float,
+) -> tuple[list[RequestSample], float, dict[str, Any]]:
+    """Run RabbitMQ-backed delivery publishing and consumption."""
+
+    queue_dir = work_dir / f"delivery-rabbitmq-{uuid.uuid4().hex[:8]}"
+    queue = DeliveryQueue(queue_dir)
+    backend = InMemoryDeliveryBackend()
+    queue.read_backend = backend
+    queue.write_backend = backend
+    broker = RabbitMQDeliveryBroker(
+        url=rabbitmq_url,
+        exchange=rabbitmq_exchange,
+        queue=rabbitmq_queue,
+        dead_letter_exchange=rabbitmq_dead_letter_exchange,
+        dead_letter_queue=rabbitmq_dead_letter_queue,
+        connect_timeout_seconds=connect_timeout_seconds,
+        enabled=True,
+    )
+    queue.broker = broker
+    manager = ChannelManager()
+    channel = LoadTestChannel(delay_ms=delivery_delay_ms)
+    manager.register(channel, ChannelAccount(channel="load", account_id="load-local"))
+    runtime = DeliveryRuntime(queue, manager)
+    samples: list[RequestSample] = []
+
+    enqueue_started = time.perf_counter()
+    for index in range(1, requests + 1):
+        request_id = f"rabbitmq-{index:06d}-{uuid.uuid4().hex[:8]}"
+        started = time.perf_counter()
+        delivery_id = queue.enqueue(
+            "load",
+            "load-peer",
+            f"rabbitmq load test message {index}",
+            {
+                "account_id": "load-local",
+                "kind": "load-test",
+                "request_id": request_id,
+                "correlation_id": request_id,
+            },
+        )
+        samples.append(
+            RequestSample(
+                request_id=delivery_id,
+                ok=True,
+                error="",
+                e2e_ms=0.0,
+                agent_turn_ms=0.0,
+                delivery_ms=(time.perf_counter() - started) * 1000,
+            )
+        )
+    broker_stats_after_publish = queue.broker_stats()
+    max_delivery_backlog = len(queue.pending_entries())
+    enqueue_seconds = time.perf_counter() - enqueue_started
+
+    started = time.perf_counter()
+    while len(channel.sent) < requests:
+        tasks = [runtime.flush_once() for _ in range(max(1, concurrency))]
+        await asyncio.gather(*tasks)
+    wall_seconds = time.perf_counter() - started
+    broker_stats_after_consume = queue.broker_stats()
+    broker.close()
+
+    delivery_finished_ms = wall_seconds * 1000
+    if samples:
+        per_message_ms = delivery_finished_ms / len(samples)
+        for sample in samples:
+            sample.e2e_ms = per_message_ms
+            sample.delivery_ms = per_message_ms
+
+    context = {
+        "enqueue_seconds": round(enqueue_seconds, 3),
+        "sent": len(channel.sent),
+        "max_delivery_backlog": max_delivery_backlog,
+        "queue_dir": str(queue_dir),
+        "uses_real_delivery_queue": True,
+        "uses_rabbitmq": True,
+        "effective_delivery_workers": max(1, concurrency),
+        "broker_after_publish": broker_stats_after_publish,
+        "broker_after_consume": broker_stats_after_consume,
+    }
+    return samples, wall_seconds, context
+
+
 def git_commit() -> str:
     """Return current short git commit for report reproducibility."""
 
@@ -277,6 +440,7 @@ def build_result(
             "uses_real_model": False,
             "uses_real_feishu": False,
             "uses_real_delivery_queue": bool(context.get("uses_real_delivery_queue", False)),
+            "uses_rabbitmq": bool(context.get("uses_rabbitmq", False)),
         },
         "summary": {
             "success": len(successful),
@@ -315,6 +479,12 @@ def render_markdown(result: dict[str, Any]) -> str:
         suggestion = "下一步接入 delivery-rabbitmq 场景，对比 RabbitMQ 分发和本地轮询差异。"
         middleware = "使用本地文件 DeliveryQueue，不访问 Redis/PostgreSQL/RabbitMQ"
         runtime_role = "delivery-local script"
+    if scenario["name"] == "delivery-rabbitmq":
+        bottleneck = "delivery-rabbitmq 基线主要反映 RabbitMQ 分发和 DeliveryRuntime broker consume 吞吐"
+        evidence = "该场景使用真实 RabbitMQ broker、DeliveryQueue、DeliveryRuntime 和内存事实状态 backend，不调用真实模型或飞书。"
+        suggestion = "对比 delivery-local 报告，观察 RabbitMQ 引用分发、ack 和多 worker flush 的成本。"
+        middleware = "使用 RabbitMQ；事实状态使用脚本内内存 backend，不访问真实 PostgreSQL"
+        runtime_role = "delivery-rabbitmq script"
     if summary["error_rate"] > 0:
         bottleneck = "存在请求失败，优先检查脚本错误和本地资源"
     return "\n".join(
@@ -335,6 +505,7 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"- 请求数：{scenario['requests']}",
             f"- 是否真实模型：{scenario['uses_real_model']}",
             f"- 是否真实飞书：{scenario['uses_real_feishu']}",
+            f"- 是否真实 RabbitMQ：{scenario['uses_rabbitmq']}",
             "",
             "## 结果摘要",
             f"- 成功数 / 失败数 / 错误率：{summary['success']} / {summary['failed']} / {summary['error_rate']}",
@@ -388,6 +559,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agent-delay-ms", type=float, default=10.0)
     parser.add_argument("--delivery-delay-ms", type=float, default=2.0)
     parser.add_argument("--work-dir", type=Path, default=Path(".load-test-tmp"))
+    parser.add_argument("--rabbitmq-url", default="amqp://admin:admin123@127.0.0.1:5672/")
+    parser.add_argument("--rabbitmq-exchange", default="agent_gateway.delivery.load_test")
+    parser.add_argument("--rabbitmq-queue", default="agent_gateway.delivery.load_test.outbound")
+    parser.add_argument("--rabbitmq-dead-letter-exchange", default="agent_gateway.delivery.load_test.dlx")
+    parser.add_argument("--rabbitmq-dead-letter-queue", default="agent_gateway.delivery.load_test.dead")
+    parser.add_argument("--rabbitmq-connect-timeout-seconds", type=float, default=2.0)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
@@ -398,7 +575,22 @@ def main(argv: list[str] | None = None) -> int:
     requests = max(1, args.requests)
     concurrency = max(1, args.concurrency)
     context: dict[str, Any] = {}
-    if args.scenario == "delivery-local":
+    if args.scenario == "delivery-rabbitmq":
+        samples, wall_seconds, context = asyncio.run(
+            run_delivery_rabbitmq(
+                requests=requests,
+                concurrency=concurrency,
+                delivery_delay_ms=max(0.0, args.delivery_delay_ms),
+                work_dir=args.work_dir,
+                rabbitmq_url=args.rabbitmq_url,
+                rabbitmq_exchange=args.rabbitmq_exchange,
+                rabbitmq_queue=args.rabbitmq_queue,
+                rabbitmq_dead_letter_exchange=args.rabbitmq_dead_letter_exchange,
+                rabbitmq_dead_letter_queue=args.rabbitmq_dead_letter_queue,
+                connect_timeout_seconds=max(0.2, args.rabbitmq_connect_timeout_seconds),
+            )
+        )
+    elif args.scenario == "delivery-local":
         samples, wall_seconds, context = asyncio.run(
             run_delivery_local(
                 requests=requests,

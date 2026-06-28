@@ -1,14 +1,59 @@
 import asyncio
 import json
 
+import scripts.load_test_gateway as load_test_gateway
 from scripts.load_test_gateway import (
     build_result,
     percentile,
     run_delivery_local,
+    run_delivery_rabbitmq,
     render_markdown,
     run_mock_local,
     write_reports,
 )
+
+
+class FakeRabbitMQBroker:
+    def __init__(self, **kwargs) -> None:
+        self.messages: list[dict] = []
+        self.dead: list[dict] = []
+        self.enabled = kwargs.get("enabled", False)
+
+    def publish(self, entry) -> None:
+        if not self.enabled:
+            return
+        self.messages.append({"delivery_id": entry.id})
+
+    def ack(self, delivery_id: str) -> None:
+        return None
+
+    def retry(self, entry) -> None:
+        return None
+
+    def dead_letter(self, entry) -> None:
+        self.dead.append({"delivery_id": entry.id})
+
+    def discard(self, delivery_id: str) -> None:
+        return None
+
+    def stats(self):
+        return {
+            "backend": "fake-rabbitmq",
+            "enabled": self.enabled,
+            "messages": len(self.messages),
+            "dead_letter_messages": len(self.dead),
+        }
+
+    def consume_once(self, handler):
+        if not self.messages:
+            return False
+        payload = self.messages.pop(0)
+        if not handler(payload):
+            self.messages.append(payload)
+        return True
+
+    def close(self) -> None:
+        return None
 
 
 def test_percentile_uses_nearest_rank() -> None:
@@ -80,3 +125,40 @@ def test_delivery_local_load_test_uses_real_delivery_queue(tmp_path) -> None:
     assert result["scenario"]["uses_real_delivery_queue"] is True
     assert context["sent"] == 4
     assert "delivery-local 基线" in render_markdown(result)
+
+
+def test_delivery_rabbitmq_load_test_uses_broker_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(load_test_gateway, "RabbitMQDeliveryBroker", FakeRabbitMQBroker)
+
+    samples, wall_seconds, context = asyncio.run(
+        run_delivery_rabbitmq(
+            requests=4,
+            concurrency=2,
+            delivery_delay_ms=0,
+            work_dir=tmp_path / "work",
+            rabbitmq_url="amqp://example",
+            rabbitmq_exchange="ex",
+            rabbitmq_queue="q",
+            rabbitmq_dead_letter_exchange="dlx",
+            rabbitmq_dead_letter_queue="dlq",
+            connect_timeout_seconds=0.2,
+        )
+    )
+    result = build_result(
+        scenario="delivery-rabbitmq",
+        requests=4,
+        concurrency=2,
+        wall_seconds=wall_seconds,
+        samples=samples,
+        agent_delay_ms=0,
+        delivery_delay_ms=0,
+        context=context,
+    )
+
+    assert result["summary"]["success"] == 4
+    assert result["scenario"]["uses_rabbitmq"] is True
+    assert result["scenario"]["uses_real_delivery_queue"] is True
+    assert context["sent"] == 4
+    assert context["broker_after_publish"]["messages"] == 4
+    assert context["broker_after_consume"]["messages"] == 0
+    assert "delivery-rabbitmq 基线" in render_markdown(result)

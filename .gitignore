@@ -21,3 +21,5 @@ workspace/delivery-queue/
 Thumbs.db
 
 /PROJECT_PLAN.md
+
+/workspace/reports/load-tests
