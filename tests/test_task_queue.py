@@ -134,6 +134,61 @@ def test_local_task_queue_skips_blocked_session_keys(tmp_path: Path) -> None:
     assert queue.store.get(available.id).status == "running"
 
 
+def test_local_task_queue_reserves_specific_task_id(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    first = queue.enqueue(task_type="agent_inbound", source="feishu", priority=10)
+    second = queue.enqueue(task_type="agent_inbound", source="feishu", priority=100)
+
+    reserved = queue.reserve_task_id(second.id, worker_id="worker-1", task_types=["agent_inbound"])
+
+    assert reserved is not None
+    assert reserved.id == second.id
+    assert reserved.status == "running"
+    assert reserved.metadata["worker_id"] == "worker-1"
+    assert queue.store.get(first.id).status == "pending"
+
+
+def test_local_task_queue_does_not_reserve_completed_task_id(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(task_type="agent_inbound", source="feishu")
+    queue.ack(task.id, result_preview="already done")
+
+    reserved = queue.reserve_task_id(task.id, worker_id="worker-1", task_types=["agent_inbound"])
+
+    assert reserved is None
+    assert queue.store.get(task.id).status == "done"
+
+
+def test_local_task_queue_reserve_task_id_honors_filters(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    wrong_type = queue.enqueue(task_type="cron", source="scheduler")
+    blocked = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-a",
+    )
+
+    assert (
+        queue.reserve_task_id(
+            wrong_type.id,
+            worker_id="worker-1",
+            task_types=["agent_inbound"],
+        )
+        is None
+    )
+    assert (
+        queue.reserve_task_id(
+            blocked.id,
+            worker_id="worker-1",
+            task_types=["agent_inbound"],
+            blocked_session_keys=["session-a"],
+        )
+        is None
+    )
+    assert queue.store.get(wrong_type.id).status == "pending"
+    assert queue.store.get(blocked.id).status == "pending"
+
+
 def test_local_task_queue_ack_retry_fail_and_cancel(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     done = queue.enqueue(task_type="cron", source="scheduler")

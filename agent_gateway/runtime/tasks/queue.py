@@ -82,6 +82,47 @@ class LocalTaskQueue:
         self.store.create(task)
         return self.store.mark_running(task.id, now=now)
 
+    def reserve_task_id(
+        self,
+        task_id: str,
+        *,
+        worker_id: str,
+        task_types: Iterable[str] | None = None,
+        blocked_session_keys: Iterable[str] | None = None,
+        now: float | None = None,
+    ) -> TaskInstance | None:
+        """按任务 ID 精确预占任务。
+
+        RabbitMQ 入站消息只携带 task_id，消费端必须回到 TaskStore 做状态校验，
+        防止过期 broker 消息重复执行已经完成或取消的任务。
+        """
+
+        type_list = list(task_types or [])
+        blocked_sessions = {str(item) for item in (blocked_session_keys or []) if str(item)}
+        reserved = self._reserve_task_id_primary(
+            task_id,
+            worker_id=worker_id,
+            task_types=type_list,
+            blocked_session_keys=blocked_sessions,
+            now=now,
+        )
+        if reserved is not None:
+            self.store.write_task_to_disk(reserved)
+            return reserved
+        task = self.store.get(task_id)
+        if task is None:
+            return None
+        if task.status not in {"pending", "retrying"}:
+            return None
+        type_set = set(type_list)
+        if type_set and task.task_type not in type_set:
+            return None
+        if task.session_key and task.session_key in blocked_sessions:
+            return None
+        task.metadata = {**task.metadata, "worker_id": worker_id}
+        self.store.create(task)
+        return self.store.mark_running(task.id, now=now)
+
     def _reserve_primary(
         self,
         *,
@@ -98,6 +139,38 @@ class LocalTaskQueue:
             return None
         try:
             row = method(
+                worker_id=worker_id,
+                task_types=task_types,
+                blocked_session_keys=sorted(blocked_session_keys),
+                now=now,
+            )
+        except Exception:
+            return None
+        if not isinstance(row, dict):
+            return None
+        try:
+            return TaskInstance.from_dict(row)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _reserve_task_id_primary(
+        self,
+        task_id: str,
+        *,
+        worker_id: str,
+        task_types: list[str],
+        blocked_session_keys: set[str],
+        now: float | None,
+    ) -> TaskInstance | None:
+        """优先通过数据库原子预占指定任务。"""
+
+        backend = getattr(self.store, "write_backend", None)
+        method = getattr(backend, "reserve_task_id", None) if backend is not None else None
+        if method is None:
+            return None
+        try:
+            row = method(
+                task_id=task_id,
                 worker_id=worker_id,
                 task_types=task_types,
                 blocked_session_keys=sorted(blocked_session_keys),

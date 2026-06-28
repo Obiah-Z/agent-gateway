@@ -1274,6 +1274,55 @@ class PostgresWriteRepository:
         payload = row.get("row", row)
         return payload if isinstance(payload, dict) else None
 
+    def reserve_task_id(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        task_types: list[str] | tuple[str, ...] | None = None,
+        blocked_session_keys: list[str] | tuple[str, ...] | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        """原子预占指定 ID 的 pending/retrying 任务。"""
+
+        current = time.time() if now is None else float(now)
+        clauses = ["id = %(task_id)s", "status = ANY(%(statuses)s)"]
+        params: dict[str, Any] = {
+            "task_id": task_id,
+            "statuses": ["pending", "retrying"],
+            "worker_metadata": {"worker_id": worker_id},
+            "now": current,
+        }
+        normalized_types = [str(item) for item in (task_types or []) if str(item)]
+        if normalized_types:
+            clauses.append("task_type = ANY(%(task_types)s)")
+            params["task_types"] = normalized_types
+        blocked_sessions = [str(item) for item in (blocked_session_keys or []) if str(item)]
+        if blocked_sessions:
+            clauses.append("NOT (session_key = ANY(%(blocked_session_keys)s))")
+            params["blocked_session_keys"] = blocked_sessions
+        sql = (
+            "WITH candidate AS ("
+            "SELECT id FROM tasks "
+            f"WHERE {' AND '.join(clauses)} "
+            "FOR UPDATE SKIP LOCKED LIMIT 1"
+            "), updated AS ("
+            "UPDATE tasks SET "
+            "status = 'running', "
+            "started_at = %(now)s, "
+            "updated_at = %(now)s, "
+            "metadata = metadata || %(worker_metadata)s::jsonb "
+            "FROM candidate WHERE tasks.id = candidate.id "
+            "RETURNING tasks.*"
+            ") SELECT row_to_json(updated) AS row FROM updated"
+        )
+        rows = self.query("tasks", sql=sql, params=params)
+        if not rows:
+            return None
+        row = rows[0]
+        payload = row.get("row", row)
+        return payload if isinstance(payload, dict) else None
+
     def write_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """兼容本地 RuntimeEventStore 的镜像入口。"""
 

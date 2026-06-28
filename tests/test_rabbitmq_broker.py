@@ -2,8 +2,9 @@ import json
 from types import SimpleNamespace
 
 from agent_gateway.runtime.infra import rabbitmq
-from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
+from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker, RabbitMQInboundTaskBroker
 from agent_gateway.runtime.state.queue import QueuedDelivery
+from agent_gateway.runtime.tasks.models import TaskInstance
 
 
 class FakeChannel:
@@ -17,6 +18,8 @@ class FakeChannel:
         self.acked: list[int] = []
         self.nacked: list[tuple[int, bool]] = []
         self.queue_message_counts: dict[str, int] = {}
+        self.qos: list[int] = []
+        self.purged: list[str] = []
 
     def exchange_declare(self, *, exchange: str, exchange_type: str, durable: bool) -> None:
         self.exchanges.append((exchange, exchange_type, durable))
@@ -34,6 +37,9 @@ class FakeChannel:
 
     def queue_bind(self, *, exchange: str, queue: str, routing_key: str) -> None:
         self.bindings.append((exchange, queue, routing_key))
+
+    def basic_qos(self, *, prefetch_count: int) -> None:
+        self.qos.append(prefetch_count)
 
     def basic_publish(self, *, exchange: str, routing_key: str, body: bytes, properties, mandatory: bool) -> None:
         self.published.append(
@@ -56,6 +62,12 @@ class FakeChannel:
 
     def basic_nack(self, *, delivery_tag: int, requeue: bool) -> None:
         self.nacked.append((delivery_tag, requeue))
+
+    def queue_purge(self, *, queue: str):
+        self.purged.append(queue)
+        count = self.queue_message_counts.get(queue, 0)
+        self.queue_message_counts[queue] = 0
+        return SimpleNamespace(method=SimpleNamespace(message_count=count))
 
 
 class FakeConnection:
@@ -259,3 +271,124 @@ def test_rabbitmq_delivery_broker_nacks_when_handler_returns_false(monkeypatch) 
 class SimpleMethod:
     def __init__(self, *, delivery_tag: int) -> None:
         self.delivery_tag = delivery_tag
+
+
+def test_rabbitmq_inbound_task_broker_publishes_lightweight_partitioned_reference(monkeypatch) -> None:
+    fake_pika = FakePika()
+    monkeypatch.setattr(rabbitmq, "pika", fake_pika)
+    broker = RabbitMQInboundTaskBroker(
+        url="amqp://admin:admin123@127.0.0.1:5672/",
+        exchange="gateway.inbound",
+        queue_prefix="gateway.inbound.partition",
+        dead_letter_exchange="gateway.inbound.dlx",
+        dead_letter_queue="gateway.inbound.dead",
+        partitions=4,
+        prefetch=1,
+        enabled=True,
+    )
+    task = TaskInstance.create(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="agent:feishu:user-1",
+        idempotency_key="idem-1",
+        payload={"text": "secret user body must not be published"},
+    )
+
+    broker.publish(task)
+
+    partition = broker.partition_for(task.session_key)
+    published = fake_pika.channel.published[0]
+    assert fake_pika.channel.qos == [1]
+    assert ("gateway.inbound", "direct", True) in fake_pika.channel.exchanges
+    assert (
+        f"gateway.inbound.partition.{partition}",
+        True,
+        {"x-dead-letter-exchange": "gateway.inbound.dlx"},
+    ) in fake_pika.channel.queues
+    assert published["exchange"] == "gateway.inbound"
+    assert published["routing_key"] == f"gateway.inbound.partition.{partition}"
+    assert published["body"]["task_id"] == task.id
+    assert published["body"]["task_type"] == "agent_inbound"
+    assert published["body"]["partition"] == partition
+    assert "payload" not in published["body"]
+    assert "secret user body" not in json.dumps(published["body"])
+    assert published["properties"].kwargs["headers"]["session_key"] == task.session_key
+
+
+def test_rabbitmq_inbound_task_broker_partitions_are_stable(monkeypatch) -> None:
+    fake_pika = FakePika()
+    monkeypatch.setattr(rabbitmq, "pika", fake_pika)
+    broker = RabbitMQInboundTaskBroker(
+        url="amqp://admin:admin123@127.0.0.1:5672/",
+        exchange="gateway.inbound",
+        queue_prefix="gateway.inbound.partition",
+        dead_letter_exchange="gateway.inbound.dlx",
+        dead_letter_queue="gateway.inbound.dead",
+        partitions=8,
+        enabled=True,
+    )
+
+    first = broker.partition_for("same-session")
+    second = broker.partition_for("same-session")
+    other = broker.partition_for("other-session")
+
+    assert first == second
+    assert 0 <= first < 8
+    assert 0 <= other < 8
+    assert broker.queue_name(first) == f"gateway.inbound.partition.{first}"
+
+
+def test_rabbitmq_inbound_task_broker_consumes_and_acks_partition(monkeypatch) -> None:
+    fake_pika = FakePika()
+    monkeypatch.setattr(rabbitmq, "pika", fake_pika)
+    fake_pika.channel.get_messages.append(
+        (
+            SimpleMethod(delivery_tag=17),
+            None,
+            json.dumps({"task_id": "task-1", "partition": 2}).encode("utf-8"),
+        )
+    )
+    broker = RabbitMQInboundTaskBroker(
+        url="amqp://admin:admin123@127.0.0.1:5672/",
+        exchange="gateway.inbound",
+        queue_prefix="gateway.inbound.partition",
+        dead_letter_exchange="gateway.inbound.dlx",
+        dead_letter_queue="gateway.inbound.dead",
+        partitions=4,
+        enabled=True,
+    )
+    seen = []
+
+    consumed = broker.consume_once(2, lambda payload: seen.append(payload["task_id"]) or True)
+
+    assert consumed is True
+    assert seen == ["task-1"]
+    assert fake_pika.channel.acked == [17]
+    assert fake_pika.channel.nacked == []
+
+
+def test_rabbitmq_inbound_task_broker_nacks_requeue_when_handler_returns_false(monkeypatch) -> None:
+    fake_pika = FakePika()
+    monkeypatch.setattr(rabbitmq, "pika", fake_pika)
+    fake_pika.channel.get_messages.append(
+        (
+            SimpleMethod(delivery_tag=18),
+            None,
+            json.dumps({"task_id": "task-2", "partition": 1}).encode("utf-8"),
+        )
+    )
+    broker = RabbitMQInboundTaskBroker(
+        url="amqp://admin:admin123@127.0.0.1:5672/",
+        exchange="gateway.inbound",
+        queue_prefix="gateway.inbound.partition",
+        dead_letter_exchange="gateway.inbound.dlx",
+        dead_letter_queue="gateway.inbound.dead",
+        partitions=4,
+        enabled=True,
+    )
+
+    consumed = broker.consume_once(1, lambda _payload: False)
+
+    assert consumed is True
+    assert fake_pika.channel.acked == []
+    assert fake_pika.channel.nacked == [(18, True)]
