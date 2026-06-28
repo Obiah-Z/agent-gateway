@@ -1,0 +1,193 @@
+# Optional multi-role deployment overlay.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
+#
+# The base `gateway` service is disabled by this overlay through the `single`
+# profile. Start the split services below instead.
+
+services:
+  gateway:
+    profiles:
+      - single
+
+  gateway-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GATEWAY_RUNTIME_ROLES: api
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_DASHBOARD_HOST: 0.0.0.0
+      FEISHU_WEBHOOK_HOST: 0.0.0.0
+      GATEWAY_WORKSPACE_ROOT: /app/workspace
+      GATEWAY_DATA_DIR: /app/data
+      GATEWAY_CONFIG_DIR: /app/config
+      GATEWAY_REDIS_ENABLED: "true"
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_POSTGRES_ENABLED: "true"
+      GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+      GATEWAY_INBOUND_BROKER: rabbitmq
+      GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      GATEWAY_INBOUND_RABBITMQ_PARTITIONS: "8"
+      GATEWAY_INBOUND_RABBITMQ_PREFETCH: "1"
+      GATEWAY_DELIVERY_BROKER: rabbitmq
+      GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    ports:
+      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8766:8766"
+    volumes:
+      - ./config:/app/config
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GATEWAY_RUNTIME_ROLES: worker
+      GATEWAY_TASK_WORKER_ID: gateway-worker-1
+      GATEWAY_TASK_WORKER_CONCURRENCY: "4"
+      GATEWAY_WORKSPACE_ROOT: /app/workspace
+      GATEWAY_DATA_DIR: /app/data
+      GATEWAY_CONFIG_DIR: /app/config
+      GATEWAY_REDIS_ENABLED: "true"
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_POSTGRES_ENABLED: "true"
+      GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+      GATEWAY_INBOUND_BROKER: rabbitmq
+      GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      GATEWAY_INBOUND_RABBITMQ_PARTITIONS: "8"
+      GATEWAY_INBOUND_RABBITMQ_PREFETCH: "1"
+      GATEWAY_DELIVERY_BROKER: rabbitmq
+      GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    volumes:
+      - ./config:/app/config
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-delivery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GATEWAY_RUNTIME_ROLES: delivery
+      GATEWAY_WORKSPACE_ROOT: /app/workspace
+      GATEWAY_DATA_DIR: /app/data
+      GATEWAY_CONFIG_DIR: /app/config
+      GATEWAY_REDIS_ENABLED: "true"
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_POSTGRES_ENABLED: "true"
+      GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+      GATEWAY_INBOUND_BROKER: rabbitmq
+      GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      GATEWAY_DELIVERY_BROKER: rabbitmq
+      GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    volumes:
+      - ./config:/app/config
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GATEWAY_RUNTIME_ROLES: scheduler
+      GATEWAY_WORKSPACE_ROOT: /app/workspace
+      GATEWAY_DATA_DIR: /app/data
+      GATEWAY_CONFIG_DIR: /app/config
+      GATEWAY_REDIS_ENABLED: "true"
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_POSTGRES_ENABLED: "true"
+      GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+      GATEWAY_INBOUND_BROKER: rabbitmq
+      GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      GATEWAY_DELIVERY_BROKER: rabbitmq
+      GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    volumes:
+      - ./config:/app/config
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GATEWAY_RUNTIME_ROLES: dashboard
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_DASHBOARD_HOST: 0.0.0.0
+      GATEWAY_WORKSPACE_ROOT: /app/workspace
+      GATEWAY_DATA_DIR: /app/data
+      GATEWAY_CONFIG_DIR: /app/config
+      GATEWAY_REDIS_ENABLED: "true"
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_POSTGRES_ENABLED: "true"
+      GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+      GATEWAY_INBOUND_BROKER: rabbitmq
+      GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      GATEWAY_DELIVERY_BROKER: rabbitmq
+      GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    ports:
+      - "127.0.0.1:8780:8780"
+    volumes:
+      - ./config:/app/config
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped

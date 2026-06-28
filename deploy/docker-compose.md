@@ -59,6 +59,12 @@ docker compose up -d --build
 docker-compose up -d --build
 ```
 
+如果要验证入口、worker、delivery、scheduler 和 Dashboard 拆分后的最终分布式 lane 部署形态，使用 [Docker Compose 多角色部署说明](multi-role-compose.md)：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
+```
+
 查看状态：
 
 ```bash
@@ -198,4 +204,4 @@ docker compose exec gateway agent-gateway postgres-init
 - 当前 Compose 是单机编排，不是 Kubernetes 或多主高可用部署。
 - Dashboard 默认仍无鉴权，只绑定本机；不要直接改成 `0.0.0.0` 暴露公网。
 - 飞书 Webhook 生产接入需要 HTTPS，参考 [反向代理与 HTTPS 部署指南](reverse-proxy.md)；Dashboard 默认不要裸奔公网。
-- `gateway` 当前以 `GATEWAY_RUNTIME_ROLES=all` 运行；多实例拆分可按 `api/worker/delivery/scheduler/dashboard` 角色扩展。拆出多个 worker 时，为每个实例配置不同的 `GATEWAY_TASK_WORKER_ID`，并按机器容量调整 `GATEWAY_TASK_WORKER_CONCURRENCY`。
+- 默认 `gateway` 以 `GATEWAY_RUNTIME_ROLES=all` 运行；如需拆分 `api/worker/delivery/scheduler/dashboard`，参考 [Docker Compose 多角色部署说明](multi-role-compose.md)。拆出多个 worker 时，为每个实例配置不同的 `GATEWAY_TASK_WORKER_ID`，并按机器容量调整 `GATEWAY_TASK_WORKER_CONCURRENCY`。

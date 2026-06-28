@@ -390,7 +390,7 @@ delivery-worker
 | 20.7.3 systemd 部署方式 | 已完成 | 新增 `deploy/systemd/agent-gateway.service`、`deploy/systemd/agent-gateway.env.example` 和 `deploy/systemd.md`，包含环境文件、doctor 预检查、重启策略、日志查看和升级流程。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
 | 20.7.4 数据卷与备份恢复 | 已完成 | 已新增 `deploy/backup-restore.md`，补齐 `.env`、`config/`、`workspace/`、`data/`、PostgreSQL、RabbitMQ 和 Redis 的备份/恢复命令，并在 Compose 文档与 README 挂入口。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
 | 20.7.5 反向代理与 HTTPS | 已完成 | 已新增 `deploy/reverse-proxy.md`，提供 Caddy 推荐方案、Nginx 备选配置、飞书后台填写方式、Compose 本机回环绑定要求、验收清单和安全底线。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
-| 20.7.6 部署文档整合 | 已完成 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
+| 20.7.6 部署文档整合 | 已完成 | 将部署模式、端口表、健康检查、常见故障、升级步骤和多角色 Compose overlay 整合进 README / deploy 文档。 | 新机器可按文档完成部署、基础排障和多角色分布式 lane 验收。 |
 
 ##### 20.7.1 Docker Compose 基础编排结果
 
@@ -409,7 +409,7 @@ delivery-worker
 
 当前边界：
 
-- Compose 默认单机 `GATEWAY_RUNTIME_ROLES=all`，尚未拆分 api/worker/delivery/scheduler 多服务。
+- Compose 默认单机 `GATEWAY_RUNTIME_ROLES=all`；如需拆分 api/worker/delivery/scheduler/dashboard，可使用 `docker-compose.roles.yml`。
 - Dashboard 和中间件端口默认只绑定 `127.0.0.1`，暂不直接支持公网暴露。
 - 飞书 Webhook 生产 HTTPS 暴露已由 20.7.5 反向代理文档补齐。
 - Compose 当前不自动执行 `postgres-init`，首次启动后需要手动执行初始化命令。
@@ -523,6 +523,20 @@ sudo systemctl start agent-gateway
 
 - 文档未实际申请证书或改动宿主机 Caddy/Nginx 配置。
 - Dashboard 访问控制仍依赖外部 Basic Auth、SSH tunnel、VPN 或后续 Phase 12 鉴权能力。
+
+##### 20.7.6 部署文档整合结果
+
+已完成内容：
+
+- README 已挂载 Docker Compose、Compose 多角色、备份恢复、反向代理 HTTPS 和项目计划入口。
+- `deploy/docker-compose.md` 说明默认单进程部署、健康检查、schema 初始化、readiness smoke、数据卷、升级和常见故障。
+- `deploy/multi-role-compose.md` 说明 `gateway-api`、`gateway-worker`、`gateway-delivery`、`gateway-scheduler`、`gateway-dashboard` 的职责、启动命令、验收命令和扩容边界。
+- 新增 `docker-compose.roles.yml`，可通过 Compose overlay 启动更接近最终分布式 lane 的多角色拓扑。
+
+当前边界：
+
+- 多角色 Compose 仍是单机多进程，不是跨机器高可用。
+- 多 worker 长期运行时需要给每个 worker 设置不同 `GATEWAY_TASK_WORKER_ID`，避免运维观测混淆。
 
 #### Phase 20.8 统一观测与压测
 
