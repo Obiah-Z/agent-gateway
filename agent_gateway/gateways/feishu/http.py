@@ -110,6 +110,9 @@ class FeishuWebhookServer:
         try:
             status, payload, request_headers, body_bytes, request_path = await self._read_request(reader)
             if status is not None:
+                if self._is_non_event_probe(status, payload):
+                    await self._write_json(writer, status, payload)
+                    return
                 self.audit.write(
                     outcome="rejected",
                     body=payload,
@@ -482,10 +485,15 @@ class FeishuWebhookServer:
             method, raw_path, _ = request_line.decode("utf-8").strip().split(" ", 2)
         except ValueError:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid request line"}, {}, b"", ""
-        if method.upper() != "POST":
-            return HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method not allowed"}, {}, b"", ""
+        method = method.upper()
         path = raw_path.split("?", 1)[0]
         path = self._normalize_path(path)
+        if method in {"GET", "HEAD"}:
+            return HTTPStatus.OK, {"ok": True, "kind": "feishu-webhook-health"}, {}, b"", path
+        if method == "OPTIONS":
+            return HTTPStatus.NO_CONTENT, {"ok": True}, {}, b"", path
+        if method != "POST":
+            return HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method not allowed"}, {}, b"", path
 
         headers: dict[str, str] = {}
         while True:
@@ -512,6 +520,12 @@ class FeishuWebhookServer:
         if not isinstance(body, dict):
             return HTTPStatus.BAD_REQUEST, {"error": "json body must be object"}, headers, body_bytes, path
         return None, body, headers, body_bytes, path
+
+    @staticmethod
+    def _is_non_event_probe(status: HTTPStatus, payload: dict[str, Any]) -> bool:
+        """识别浏览器访问、探活和 CORS 预检等非飞书事件请求。"""
+
+        return status in {HTTPStatus.OK, HTTPStatus.NO_CONTENT} and payload.get("ok") is True
 
     async def _write_json(
         self,
@@ -545,7 +559,7 @@ class FeishuWebhookServer:
         # 兼容早期单账号部署：当没有 account-level path 时，回退到进程级 FEISHU_WEBHOOK_PATH。
         if normalized_path == self._normalize_path(self.path):
             channel = self.channels.get("feishu")
-            if isinstance(channel, FeishuChannel):
+            if isinstance(channel, FeishuChannel) and self._is_webhook_channel(channel):
                 return channel
         return None
 
@@ -562,7 +576,11 @@ class FeishuWebhookServer:
 
         rows: list[tuple[object, FeishuChannel]] = []
         for account, channel in self.channels.iter_channels():
-            if account.channel == "feishu" and isinstance(channel, FeishuChannel):
+            if (
+                account.channel == "feishu"
+                and isinstance(channel, FeishuChannel)
+                and self._is_webhook_channel(channel)
+            ):
                 rows.append((account, channel))
         return rows
 
@@ -571,6 +589,13 @@ class FeishuWebhookServer:
 
         raw_path = str(channel.account.config.get("webhook_path", "") or self.path)
         return self._normalize_path(raw_path)
+
+    @staticmethod
+    def _is_webhook_channel(channel: FeishuChannel) -> bool:
+        """过滤长连接账号，避免它参与 Webhook 解密和路由。"""
+
+        mode = str(channel.account.config.get("connection_mode", "")).lower()
+        return mode != "long_connection"
 
     def _has_signature_headers(self, headers: dict[str, str]) -> bool:
         """判断请求是否携带飞书签名头。"""

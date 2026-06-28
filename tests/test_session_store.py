@@ -98,3 +98,67 @@ def test_session_store_omits_empty_assistant_content_and_patches_empty_tool_resu
         },
         {"role": "assistant", "content": [{"type": "text", "text": "done"}]},
     ]
+
+
+def test_session_store_sanitizes_read_backend_history(tmp_path: Path) -> None:
+    class ReadBackend:
+        def read_session_messages(self, agent_id: str, session_key: str):
+            return [
+                {"role": "user", "content": "heartbeat"},
+                {"role": "assistant", "content": []},
+                {"role": "assistant", "content": [{"type": "text", "text": ""}]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "toolu_1", "content": ""}
+                    ],
+                },
+                {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+            ]
+
+    store = SessionStore(tmp_path)
+    store.read_backend = ReadBackend()
+
+    messages = store.load_messages("research", "system:heartbeat:research")
+
+    assert messages == [
+        {"role": "user", "content": "heartbeat"},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "[empty tool result]",
+                }
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ]
+
+
+def test_session_store_rewrite_does_not_persist_empty_assistant_messages(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path)
+    session_key = "system:heartbeat:research"
+
+    store.rewrite_messages(
+        "research",
+        session_key,
+        [
+            {"role": "user", "content": "heartbeat"},
+            {"role": "assistant", "content": []},
+            {"role": "assistant", "content": [{"type": "text", "text": ""}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        ],
+    )
+
+    raw = store.session_path("research", session_key).read_text(encoding="utf-8")
+
+    assert '"content": []' not in raw
+    assert '"text": ""' not in raw
+    assert store.load_messages("research", session_key) == [
+        {"role": "user", "content": "heartbeat"},
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ]

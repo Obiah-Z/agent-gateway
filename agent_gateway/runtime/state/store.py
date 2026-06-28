@@ -13,7 +13,6 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from agent_gateway.runtime.domain.models import ConversationMessage
-from typing import Any
 
 
 class SessionStore:
@@ -70,6 +69,7 @@ class SessionStore:
         先写临时文件再 replace，避免重写过程中中断导致原会话损坏。
         """
 
+        messages = self.sanitize_messages(messages)
         self._write_primary(
             "rewrite_session_messages",
             agent_id,
@@ -120,14 +120,14 @@ class SessionStore:
                 if hasattr(self.read_backend, "read_session_messages"):
                     history = self.read_backend.read_session_messages(agent_id, session_key)
                     if history:
-                        return history
+                        return self.sanitize_messages(history)
             except Exception:
                 pass
         path = self.session_path(agent_id, session_key)
         if not path.exists():
             return []
 
-        return self._rebuild_history(path)
+        return self.sanitize_messages(self._rebuild_history(path))
 
     def list_sessions(self, agent_id: str = "") -> dict[str, int]:
         """列出会话文件及其消息条数，用于控制面查看。"""
@@ -251,7 +251,7 @@ class SessionStore:
         records: list[dict[str, Any]] = []
         now = time.time
 
-        for message in messages:
+        for message in self.sanitize_messages(messages):
             role = message["role"]
             content = message.get("content", "")
 
@@ -290,13 +290,30 @@ class SessionStore:
                             "ts": now(),
                         }
                     )
-                if not text_blocks and not tool_use_blocks:
-                    records.append({"type": "assistant", "content": [], "ts": now()})
                 continue
 
             records.append({"role": role, "content": content, "ts": now()})
 
         return records
+
+    @classmethod
+    def sanitize_messages(cls, messages: list[Any]) -> list[ConversationMessage]:
+        """清洗可传给模型的消息历史，过滤空 content 并修复空工具结果。"""
+
+        sanitized: list[ConversationMessage] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "")).strip()
+            content = message.get("content")
+            if role == "assistant":
+                content = cls._normalize_assistant_blocks(content)
+            elif role == "user":
+                content = cls._normalize_user_content(content)
+            if not role or not cls._content_has_payload(content):
+                continue
+            sanitized.append({"role": role, "content": content})
+        return sanitized
 
     def _mirror(self, method_name: str, *args: Any) -> None:
         """把主写入镜像到备份 sink，失败不影响主链路。"""
@@ -383,6 +400,32 @@ class SessionStore:
                     return True
             return False
         return content is not None
+
+    @staticmethod
+    def _normalize_user_content(content: Any) -> Any:
+        if not isinstance(content, list):
+            return content
+        normalized: list[Any] = []
+        for block in content:
+            if not isinstance(block, dict):
+                if str(block).strip():
+                    normalized.append(block)
+                continue
+            if block.get("type") == "tool_result":
+                normalized.append(
+                    {
+                        **block,
+                        "content": block.get("content") or "[empty tool result]",
+                    }
+                )
+                continue
+            if block.get("type") == "text":
+                text = str(block.get("text", ""))
+                if text.strip():
+                    normalized.append({"type": "text", "text": text})
+                continue
+            normalized.append(block)
+        return normalized
 
     @staticmethod
     def _is_tool_result_batch(content: Any) -> bool:

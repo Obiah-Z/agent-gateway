@@ -9,6 +9,7 @@ import time
 from typing import Any, Protocol
 
 from agent_gateway.runtime.state.repository import StateReadRepository
+from agent_gateway.runtime.state.store import SessionStore
 
 
 POSTGRES_TIME_COLUMNS = {
@@ -670,7 +671,7 @@ class PostgresReadRepository(StateReadRepository):
             content = metadata.get("content")
             if role and content is not None:
                 messages.append({"role": role, "content": content})
-        return messages
+        return SessionStore.sanitize_messages(messages)
 
     def _list_errors(self, *, limit: int, filters: dict[str, Any]) -> list[dict[str, Any]]:
         """返回与 RuntimeEventStore.recent_errors 一致的事件形态。"""
@@ -1118,8 +1119,12 @@ class PostgresWriteRepository:
     def write_session_message(self, agent_id: str, session_key: str, role: str, content: Any) -> dict[str, Any]:
         """兼容本地 SessionStore 的单条消息镜像入口。"""
 
+        messages = SessionStore.sanitize_messages([{"role": role, "content": content}])
+        if not messages:
+            return {}
+        message = messages[0]
         payload = {
-            "id": f"{agent_id}:{session_key}:{int(time.time() * 1000)}:{role}",
+            "id": f"{agent_id}:{session_key}:{int(time.time() * 1000)}:{message['role']}",
             "agent_id": agent_id,
             "session_key": session_key,
             "channel": "",
@@ -1133,8 +1138,8 @@ class PostgresWriteRepository:
             "message_count": 1,
             "metadata": {
                 "kind": "message",
-                "role": role,
-                "content": content,
+                "role": message["role"],
+                "content": message["content"],
             },
         }
         return self.append("sessions", payload)
@@ -1147,6 +1152,7 @@ class PostgresWriteRepository:
     ) -> dict[str, Any]:
         """兼容本地 SessionStore 的整段重写镜像入口。"""
 
+        messages = SessionStore.sanitize_messages(messages)
         payload = {
             "id": f"{agent_id}:{session_key}:snapshot",
             "agent_id": agent_id,

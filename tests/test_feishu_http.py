@@ -9,6 +9,7 @@ from agent_gateway.gateways.feishu.channel import FeishuChannel
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.domain.models import OutboundMessage
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
+from agent_gateway.runtime.observability.events import RuntimeEventStore
 
 
 class FakeChannelRuntime:
@@ -113,6 +114,30 @@ async def _post_json_unsigned(host: str, port: int, path: str, payload: dict) ->
     return status, payload
 
 
+async def _get_json(host: str, port: int, path: str) -> tuple[int, dict]:
+    reader, writer = await asyncio.open_connection(host, port)
+    request = "\r\n".join(
+        [
+            f"GET {path} HTTP/1.1",
+            f"Host: {host}:{port}",
+            "Connection: close",
+            "",
+            "",
+        ]
+    ).encode("utf-8")
+    writer.write(request)
+    await writer.drain()
+    raw = await reader.read()
+    writer.close()
+    await writer.wait_closed()
+
+    head, body_bytes = raw.split(b"\r\n\r\n", 1)
+    status_line = head.splitlines()[0].decode("utf-8")
+    status = int(status_line.split(" ")[1])
+    payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+    return status, payload
+
+
 def _build_server(tmp_path: Path | None = None) -> tuple[FeishuWebhookServer, FakeChannelRuntime]:
     runtime = FakeChannelRuntime()
     account = _build_feishu_account(
@@ -212,6 +237,26 @@ def _build_multi_account_server(
         state_dir=(tmp_path or Path("/tmp")) / "feishu-webhook-test",
     )
     return server, runtime
+
+
+def test_feishu_webhook_server_treats_get_as_health_check(tmp_path: Path) -> None:
+    async def _run() -> None:
+        server, runtime = _build_server(tmp_path)
+        del runtime
+        event_store = RuntimeEventStore(tmp_path / "events")
+        server.event_store = event_store
+        await server.start()
+        assert server._server is not None
+        port = server._server.sockets[0].getsockname()[1]
+
+        status, payload = await _get_json("127.0.0.1", port, "/webhooks/feishu")
+
+        await server.stop()
+        assert status == 200
+        assert payload == {"ok": True, "kind": "feishu-webhook-health"}
+        assert event_store.tail(limit=10) == []
+
+    asyncio.run(_run())
 
 
 def test_feishu_webhook_server_handles_challenge(tmp_path: Path) -> None:
@@ -446,6 +491,37 @@ def test_feishu_webhook_server_deduplicates_per_account(tmp_path: Path) -> None:
         ]
 
     asyncio.run(_run())
+
+
+def test_feishu_webhook_server_excludes_long_connection_accounts(tmp_path: Path) -> None:
+    runtime = FakeChannelRuntime()
+    state_root = tmp_path / "feishu-webhook-test" / "channel-state"
+    manager = ChannelManager()
+    long_account = _build_feishu_account(
+        account_id="feishu-long-local",
+        verification_token="",
+        encrypt_key="",
+    )
+    long_account.config["connection_mode"] = "long_connection"
+    main_account = _build_feishu_account(
+        account_id="feishu-main",
+        verification_token="verify-token",
+        encrypt_key="encrypt-key",
+        webhook_path="/webhooks/feishu",
+    )
+    manager.register(FeishuChannel(long_account, state_root), long_account)
+    manager.register(FeishuChannel(main_account, state_root), main_account)
+    server = FeishuWebhookServer(
+        host="127.0.0.1",
+        port=0,
+        path="/webhooks/feishu",
+        channels=manager,
+        channel_runtime=runtime,
+        state_dir=tmp_path / "feishu-webhook-test",
+    )
+
+    assert server.list_webhook_paths() == [("feishu-main", "/webhooks/feishu")]
+    assert server._resolve_channel("/webhooks/feishu").account_id == "feishu-main"
 
 
 def test_feishu_webhook_server_returns_accepted_for_ignored_event(tmp_path: Path) -> None:

@@ -243,6 +243,80 @@ def test_postgres_write_metric_normalizes_snapshot_row(monkeypatch) -> None:
     assert row["metadata"]["runtime"]["uptime_seconds"] == 9
 
 
+def test_postgres_read_session_messages_sanitizes_snapshot_rows(monkeypatch) -> None:
+    rows = [
+        {
+            "id": "research:system:heartbeat:research:snapshot",
+            "agent_id": "research",
+            "session_key": "system:heartbeat:research",
+            "metadata": {
+                "kind": "snapshot",
+                "messages": [
+                    {"role": "user", "content": "heartbeat"},
+                    {"role": "assistant", "content": []},
+                    {"role": "assistant", "content": [{"type": "text", "text": ""}]},
+                    {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+                ],
+            },
+        }
+    ]
+
+    monkeypatch.setattr(PostgresReadRepository, "_list_session_rows", lambda *args, **kwargs: rows)
+    repo = PostgresReadRepository(url="postgresql://local/db", enabled=True)
+
+    messages = repo.read_session_messages("research", "system:heartbeat:research")
+
+    assert messages == [
+        {"role": "user", "content": "heartbeat"},
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ]
+
+
+def test_postgres_write_session_snapshot_sanitizes_messages(monkeypatch) -> None:
+    captured = []
+
+    def fake_upsert(self, table, row):
+        captured.append((table, row))
+        return row
+
+    monkeypatch.setattr(PostgresWriteRepository, "upsert", fake_upsert)
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
+
+    row = repo.rewrite_session_messages(
+        "research",
+        "system:heartbeat:research",
+        [
+            {"role": "user", "content": "heartbeat"},
+            {"role": "assistant", "content": []},
+            {"role": "assistant", "content": [{"type": "text", "text": ""}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        ],
+    )
+
+    assert captured[0][0] == "sessions"
+    assert row["message_count"] == 2
+    assert row["metadata"]["messages"] == [
+        {"role": "user", "content": "heartbeat"},
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ]
+
+
+def test_postgres_write_session_message_skips_empty_content(monkeypatch) -> None:
+    captured = []
+
+    def fake_append(self, table, row):
+        captured.append((table, row))
+        return row
+
+    monkeypatch.setattr(PostgresWriteRepository, "append", fake_append)
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
+
+    row = repo.write_session_message("research", "system:heartbeat:research", "assistant", [])
+
+    assert row == {}
+    assert captured == []
+
+
 def test_postgres_write_alert_normalizes_alert_row(monkeypatch) -> None:
     captured = []
 
