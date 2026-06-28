@@ -503,6 +503,22 @@ def test_delivery_queue_falls_back_to_local_files_when_backend_write_fails(tmp_p
     assert queue.get_pending(delivery_id) is not None
 
 
+def test_delivery_queue_reads_local_fallback_when_primary_returns_empty(tmp_path: Path) -> None:
+    backend = RecordingDeliveryBackend()
+    backend.fail_writes = True
+    queue = DeliveryQueue(tmp_path / "queue")
+    queue.read_backend = backend
+    queue.write_backend = backend
+
+    delivery_id = queue.enqueue("cli", "peer-1", "hello", {})
+
+    assert backend.rows == {}
+    assert [entry.id for entry in queue.pending_entries()] == [delivery_id]
+    reserved = queue.reserve(worker_id="worker-a", now=1.0)
+    assert reserved is not None
+    assert reserved.id == delivery_id
+
+
 def test_delivery_runner_moves_permanent_failure_to_failed_without_retry(tmp_path: Path) -> None:
     queue = DeliveryQueue(tmp_path / "queue")
     delivery_id = queue.enqueue(

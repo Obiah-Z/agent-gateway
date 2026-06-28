@@ -208,25 +208,27 @@ class DeliveryQueue:
         """列出当前 pending 队列中的全部消息。"""
 
         backend_entries = self._entries_from_backend("pending")
-        if backend_entries is not None:
-            return backend_entries
-        return [
+        local_entries = [
             entry
             for entry in self._entries_from_dir(self.queue_dir)
             if not (entry.retry_count > 0 and entry.next_retry_at > 0)
         ]
+        if backend_entries is not None:
+            return self._merge_entries(backend_entries, local_entries)
+        return local_entries
 
     def retrying_entries(self) -> list[QueuedDelivery]:
         """列出当前 retrying 队列中的全部消息。"""
 
         backend_entries = self._entries_from_backend("retrying")
-        if backend_entries is not None:
-            return backend_entries
-        return [
+        local_entries = [
             entry
             for entry in self._entries_from_dir(self.queue_dir)
             if entry.retry_count > 0 and entry.next_retry_at > 0
         ]
+        if backend_entries is not None:
+            return self._merge_entries(backend_entries, local_entries)
+        return local_entries
 
     def reserve(
         self,
@@ -259,9 +261,10 @@ class DeliveryQueue:
         """列出当前 failed 队列中的全部消息。"""
 
         backend_entries = self._entries_from_backend("failed")
+        local_entries = self._entries_from_dir(self.failed_dir)
         if backend_entries is not None:
-            return backend_entries
-        return self._entries_from_dir(self.failed_dir)
+            return self._merge_entries(backend_entries, local_entries)
+        return local_entries
 
     def get_pending(self, delivery_id: str) -> QueuedDelivery | None:
         """按 ID 读取一条 pending 消息。"""
@@ -617,6 +620,24 @@ class DeliveryQueue:
             if loaded is not None:
                 entries.append(loaded)
         return entries
+
+    @staticmethod
+    def _merge_entries(
+        primary_entries: list[QueuedDelivery],
+        local_entries: list[QueuedDelivery],
+    ) -> list[QueuedDelivery]:
+        """合并主存储和本地兜底队列。
+
+        PostgreSQL 写入失败时，消息仍会落到本地文件；如果读路径只返回数据库结果，
+        这些 fallback 文件会被永久遮蔽。主存储记录优先，本地只补充缺失 ID。
+        """
+
+        merged: dict[str, QueuedDelivery] = {}
+        for entry in primary_entries:
+            merged[entry.id] = entry
+        for entry in local_entries:
+            merged.setdefault(entry.id, entry)
+        return sorted(merged.values(), key=lambda item: item.enqueued_at)
 
     @staticmethod
     def _build_idempotency_key(channel: str, to: str, text: str, metadata: dict[str, Any]) -> str:
