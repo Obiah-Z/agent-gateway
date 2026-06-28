@@ -68,6 +68,80 @@ def test_task_worker_consumes_broker_task_reference_by_id(tmp_path: Path) -> Non
     assert store.get(skipped.id).status == "pending"
 
 
+def test_task_worker_records_broker_ack_event(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    queue = LocalTaskQueue(store)
+    target = queue.enqueue(
+        task_type="echo",
+        source="test",
+        session_key="session-a",
+        payload={"text": "target"},
+    )
+    broker = FakeInboundTaskBroker(
+        [
+            {
+                "task_id": target.id,
+                "task_type": "echo",
+                "session_key": "session-a",
+                "partition": 1,
+                "idempotency_key": "idem-a",
+            }
+        ]
+    )
+    queue.broker = broker
+    events = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=events)
+    worker.register_handler("echo", lambda item: f"echo:{item.payload['text']}")
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert broker.acked == [target.id]
+    assert events.rows[-1]["type"] == "task.broker.acked"
+    assert events.rows[-1]["status"] == "ok"
+    assert events.rows[-1]["correlation_id"] == target.id
+    assert events.rows[-1]["session_key"] == "session-a"
+    assert events.rows[-1]["metadata"]["partition"] == 1
+    assert events.rows[-1]["metadata"]["reason"] == "task status: done"
+
+
+def test_task_worker_records_broker_requeue_for_unregistered_handler(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    broker = FakeInboundTaskBroker(
+        [{"task_id": "task-1", "task_type": "unknown", "partition": 0}]
+    )
+    queue.broker = broker
+    events = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=events)
+    worker.register_handler("echo", lambda item: "ok")
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert broker.acked == []
+    assert broker.nacked == ["task-1"]
+    assert events.rows[-1]["type"] == "task.broker.requeued"
+    assert events.rows[-1]["status"] == "warning"
+    assert events.rows[-1]["metadata"]["reason"] == "handler not registered"
+
+
+def test_task_worker_records_broker_discard_for_invalid_payload(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    broker = FakeInboundTaskBroker([{"task_type": "echo", "partition": 0}])
+    queue.broker = broker
+    events = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=events)
+    worker.register_handler("echo", lambda item: "ok")
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert broker.acked == [""]
+    assert events.rows[-1]["type"] == "task.broker.discarded"
+    assert events.rows[-1]["status"] == "warning"
+    assert events.rows[-1]["metadata"]["reason"] == "missing task_id"
+
+
 def test_task_worker_run_once_returns_false_without_available_task(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     worker = TaskWorkerRuntime(queue)

@@ -143,9 +143,25 @@ class TaskWorkerRuntime:
 
         task_id = str(payload.get("task_id", ""))
         task_type = str(payload.get("task_type", ""))
+        partition = int(payload.get("partition", -1) or -1)
+        session_key = str(payload.get("session_key", ""))
         if not task_id:
+            self._record_broker_event(
+                "task.broker.discarded",
+                payload=payload,
+                status="warning",
+                message="入站 broker 消息缺少 task_id，已丢弃",
+                reason="missing task_id",
+            )
             return True
         if task_type and task_type not in self.handlers:
+            self._record_broker_event(
+                "task.broker.requeued",
+                payload=payload,
+                status="warning",
+                message="当前 worker 未注册该任务类型，broker 消息重新入队",
+                reason="handler not registered",
+            )
             return False
         blocked_session_keys = self._blocked_session_keys()
         task = self.queue.reserve_task_id(
@@ -157,10 +173,70 @@ class TaskWorkerRuntime:
         if task is None:
             stored = self.queue.store.get(task_id)
             if stored is None or stored.status in {"done", "failed", "cancelled", "running"}:
+                self._record_broker_event(
+                    "task.broker.discarded",
+                    payload=payload,
+                    status="ok",
+                    message="入站 broker 消息对应任务已不可执行，已确认丢弃",
+                    reason=f"task status: {getattr(stored, 'status', 'missing')}",
+                )
                 return True
+            self._record_broker_event(
+                "task.broker.requeued",
+                payload=payload,
+                status="warning",
+                message="入站 broker 消息暂无法预占，已重新入队",
+                reason=f"task status: {stored.status}",
+            )
             return False
         asyncio.run(self._execute(task))
+        stored = self.queue.store.get(task.id)
+        self._record_broker_event(
+            "task.broker.acked",
+            payload={
+                **payload,
+                "partition": partition,
+                "session_key": session_key or task.session_key,
+            },
+            status="ok" if stored is not None and stored.status == "done" else "warning",
+            message="入站 broker 消息已执行并确认",
+            reason=f"task status: {getattr(stored, 'status', 'unknown')}",
+        )
         return True
+
+    def _record_broker_event(
+        self,
+        event_type: str,
+        *,
+        payload: dict[str, Any],
+        status: str,
+        message: str,
+        reason: str,
+    ) -> None:
+        """记录 broker 消费决策，便于排查 ack/nack/requeue。"""
+
+        if self.event_store is None:
+            return
+        task_id = str(payload.get("task_id", ""))
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="task_worker",
+                message=message,
+                correlation_id=task_id,
+                session_key=str(payload.get("session_key", "")),
+                metadata={
+                    "worker_id": self.worker_id,
+                    "task_id": task_id,
+                    "task_type": str(payload.get("task_type", "")),
+                    "partition": payload.get("partition", -1),
+                    "idempotency_key": str(payload.get("idempotency_key", "")),
+                    "reason": reason,
+                },
+            )
+        except Exception:
+            return
 
     async def _loop(self, index: int) -> None:
         """单个 worker 协程循环。"""
