@@ -27,12 +27,20 @@ from agent_gateway.gateways.messaging.base import Channel, ChannelAccount
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
-from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
+from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker, RabbitMQInboundTaskBroker
 from agent_gateway.runtime.state.queue import DeliveryQueue
+from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
 
 
 DEFAULT_REPORT_DIR = Path("workspace/reports/load-tests")
-SUPPORTED_SCENARIOS = {"delivery-local", "delivery-rabbitmq", "feishu-send-real", "mock-local", "model-real"}
+SUPPORTED_SCENARIOS = {
+    "delivery-local",
+    "delivery-rabbitmq",
+    "feishu-send-real",
+    "inbound-rabbitmq",
+    "mock-local",
+    "model-real",
+}
 
 
 @dataclass(slots=True)
@@ -134,6 +142,70 @@ class InMemoryDeliveryBackend:
         row["locked_at"] = current
         row["updated_at"] = current
         return dict(row)
+
+
+class InMemoryTaskBackend:
+    """Minimal tasks backend for inbound broker load tests."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+
+    def list(self, table: str, *, limit: int = 50, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        if table != "tasks":
+            return []
+        statuses = {str(item) for item in (filters or {}).get("statuses", []) if str(item)}
+        with self._lock:
+            rows = [
+                dict(row)
+                for row in self.rows.values()
+                if not statuses or str(row.get("status", "")) in statuses
+            ]
+        rows.sort(key=lambda row: float(row.get("updated_at", 0.0) or 0.0), reverse=True)
+        return rows[:limit]
+
+    def get(self, table: str, key: str) -> dict[str, Any] | None:
+        if table != "tasks":
+            return None
+        with self._lock:
+            row = self.rows.get(key)
+            return dict(row) if row is not None else None
+
+    def write_task(self, task: Any) -> dict[str, Any]:
+        payload = task.to_dict() if hasattr(task, "to_dict") else dict(task)
+        with self._lock:
+            self.rows[str(payload["id"])] = dict(payload)
+        return payload
+
+    def reserve_task_id(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        task_types: list[str] | tuple[str, ...] | None = None,
+        blocked_session_keys: list[str] | tuple[str, ...] | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        current = time.time() if now is None else float(now)
+        type_set = {str(item) for item in (task_types or []) if str(item)}
+        blocked_sessions = {str(item) for item in (blocked_session_keys or []) if str(item)}
+        with self._lock:
+            row = self.rows.get(task_id)
+            if row is None:
+                return None
+            if row.get("status") not in {"pending", "retrying"}:
+                return None
+            if type_set and row.get("task_type") not in type_set:
+                return None
+            if row.get("session_key") and row.get("session_key") in blocked_sessions:
+                return None
+            row["status"] = "running"
+            row["started_at"] = current
+            row["updated_at"] = current
+            metadata = dict(row.get("metadata", {}) or {})
+            metadata["worker_id"] = worker_id
+            row["metadata"] = metadata
+            return dict(row)
 
 
 def build_gateway_application() -> Any:
@@ -456,6 +528,155 @@ async def run_delivery_rabbitmq(
     return samples, wall_seconds, context
 
 
+async def run_inbound_rabbitmq(
+    *,
+    requests: int,
+    concurrency: int,
+    agent_delay_ms: float,
+    work_dir: Path,
+    rabbitmq_url: str,
+    rabbitmq_exchange: str,
+    rabbitmq_queue_prefix: str,
+    rabbitmq_dead_letter_exchange: str,
+    rabbitmq_dead_letter_queue: str,
+    rabbitmq_partitions: int,
+    rabbitmq_prefetch: int,
+    session_count: int,
+    connect_timeout_seconds: float,
+) -> tuple[list[RequestSample], float, dict[str, Any]]:
+    """Run RabbitMQ-backed inbound task publishing and worker consumption."""
+
+    task_dir = work_dir / f"inbound-rabbitmq-{uuid.uuid4().hex[:8]}"
+    backend = InMemoryTaskBackend()
+    store = LocalTaskStore(task_dir)
+    store.read_backend = backend
+    store.write_backend = backend
+    broker = RabbitMQInboundTaskBroker(
+        url=rabbitmq_url,
+        exchange=rabbitmq_exchange,
+        queue_prefix=rabbitmq_queue_prefix,
+        dead_letter_exchange=rabbitmq_dead_letter_exchange,
+        dead_letter_queue=rabbitmq_dead_letter_queue,
+        partitions=rabbitmq_partitions,
+        prefetch=rabbitmq_prefetch,
+        connect_timeout_seconds=connect_timeout_seconds,
+        enabled=True,
+    )
+    queue = LocalTaskQueue(store, broker=broker)
+    purged_before = broker.purge()
+    samples: list[RequestSample] = []
+    sample_by_task_id: dict[str, RequestSample] = {}
+    sample_started_at: dict[str, float] = {}
+    worker_count = max(1, concurrency)
+    effective_session_count = max(1, session_count)
+
+    async def inbound_handler(task) -> str:
+        if agent_delay_ms:
+            await asyncio.sleep(agent_delay_ms / 1000)
+        sample = sample_by_task_id.get(task.id)
+        if sample is not None:
+            elapsed_ms = (time.perf_counter() - sample_started_at[task.id]) * 1000
+            sample.ok = True
+            sample.e2e_ms = elapsed_ms
+            sample.agent_turn_ms = elapsed_ms
+        return "inbound processed"
+
+    enqueue_started = time.perf_counter()
+    for index in range(1, requests + 1):
+        request_id = f"inbound-{index:06d}-{uuid.uuid4().hex[:8]}"
+        session_index = (index - 1) % effective_session_count
+        session_key = f"load-session-{session_index:04d}"
+        started = time.perf_counter()
+        task = queue.enqueue(
+            task_type="agent_inbound",
+            source="load-test",
+            agent_id="load-agent",
+            session_key=session_key,
+            priority=100,
+            idempotency_key=request_id,
+            payload={
+                "text": f"inbound rabbitmq load test message {index}",
+                "sender_id": f"user-{session_index:04d}",
+                "channel": "load",
+                "account_id": "load-local",
+                "peer_id": f"user-{session_index:04d}",
+                "metadata": {"request_id": request_id},
+            },
+            metadata={"request_id": request_id, "session_index": session_index},
+        )
+        sample = RequestSample(
+            request_id=task.id,
+            ok=False,
+            error="not processed",
+            e2e_ms=0.0,
+            agent_turn_ms=0.0,
+            delivery_ms=0.0,
+        )
+        samples.append(sample)
+        sample_by_task_id[task.id] = sample
+        sample_started_at[task.id] = started
+    broker_stats_after_publish = broker.stats()
+    max_inbound_backlog = requests
+    enqueue_seconds = time.perf_counter() - enqueue_started
+
+    workers: list[TaskWorkerRuntime] = []
+    for index in range(worker_count):
+        worker = TaskWorkerRuntime(queue, worker_id=f"load-worker-{index + 1}")
+        worker.register_handler("agent_inbound", inbound_handler)
+        workers.append(worker)
+
+    started = time.perf_counter()
+    broker_stats_after_consume: dict[str, Any] = {}
+    while True:
+        done_count = sum(1 for sample in samples if sample.ok)
+        broker_stats_after_consume = broker.stats()
+        broker_messages = int(broker_stats_after_consume.get("messages", 0) or 0)
+        if done_count >= requests and broker_messages == 0:
+            break
+        handled = await asyncio.gather(*[worker.run_once() for worker in workers])
+        if not any(handled):
+            await asyncio.sleep(0)
+    wall_seconds = time.perf_counter() - started
+    broker_stats_after_consume = broker.stats()
+    purged_after = {"messages": 0, "dead_letter_messages": 0}
+    if int(broker_stats_after_consume.get("messages", 0) or 0) or int(
+        broker_stats_after_consume.get("dead_letter_messages", 0) or 0
+    ):
+        purged_after = broker.purge()
+        broker_stats_after_consume = broker.stats()
+    broker.close()
+
+    for sample in samples:
+        if sample.ok:
+            sample.error = ""
+        else:
+            sample.e2e_ms = wall_seconds * 1000
+            sample.agent_turn_ms = 0.0
+
+    partitions_seen = {
+        broker.partition_for(f"load-session-{index:04d}")
+        for index in range(effective_session_count)
+    }
+    context = {
+        "enqueue_seconds": round(enqueue_seconds, 3),
+        "processed": sum(1 for sample in samples if sample.ok),
+        "max_inbound_backlog": max_inbound_backlog,
+        "queue_dir": str(task_dir),
+        "uses_real_delivery_queue": False,
+        "uses_rabbitmq": True,
+        "effective_task_workers": worker_count,
+        "inbound_session_count": effective_session_count,
+        "inbound_partitions": max(1, rabbitmq_partitions),
+        "inbound_prefetch": max(1, rabbitmq_prefetch),
+        "partitions_seen": len(partitions_seen),
+        "broker_purged_before": purged_before,
+        "broker_purged_after": purged_after,
+        "broker_after_publish": broker_stats_after_publish,
+        "broker_after_consume": broker_stats_after_consume,
+    }
+    return samples, wall_seconds, context
+
+
 async def _run_model_real_request(
     *,
     app: Any,
@@ -689,7 +910,7 @@ def build_result(
             "e2e_ms": summarize_latencies(e2e_values),
             "agent_turn_ms": summarize_latencies(agent_values),
             "delivery_ms": summarize_latencies(delivery_values),
-            "max_inbound_backlog": 0,
+            "max_inbound_backlog": int(context.get("max_inbound_backlog", 0) or 0),
             "max_delivery_backlog": int(context.get("max_delivery_backlog", 0) or 0),
         },
         "context": context,
@@ -723,6 +944,12 @@ def render_markdown(result: dict[str, Any]) -> str:
         suggestion = "对比 delivery-local 报告，观察 RabbitMQ 引用分发、ack 和多 worker flush 的成本。"
         middleware = "使用 RabbitMQ；事实状态使用脚本内内存 backend，不访问真实 PostgreSQL"
         runtime_role = "delivery-rabbitmq script"
+    if scenario["name"] == "inbound-rabbitmq":
+        bottleneck = "inbound-rabbitmq 基线主要反映 RabbitMQ 入站分区、task_id 预占和 TaskWorkerRuntime 消费吞吐"
+        evidence = "该场景使用真实 RabbitMQ inbound broker、真实 LocalTaskQueue/TaskWorkerRuntime 和内存任务状态 backend，不调用真实模型或飞书。"
+        suggestion = "调整 --inbound-session-count、--inbound-rabbitmq-partitions 和 --concurrency，观察热点 session、分区数和 worker 池对吞吐的影响。"
+        middleware = "使用 RabbitMQ；任务事实状态使用脚本内内存 backend，不访问真实 PostgreSQL"
+        runtime_role = "inbound-rabbitmq script"
     if scenario["name"] == "model-real":
         bottleneck = "model-real 基线主要反映真实模型 API、上下文装配和 AgentLoopRunner 执行延迟"
         evidence = "该场景调用真实模型，但不发送飞书消息，也不压测出站投递。"
@@ -815,6 +1042,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rabbitmq-dead-letter-exchange", default="agent_gateway.delivery.load_test.dlx")
     parser.add_argument("--rabbitmq-dead-letter-queue", default="agent_gateway.delivery.load_test.dead")
     parser.add_argument("--rabbitmq-connect-timeout-seconds", type=float, default=2.0)
+    parser.add_argument("--inbound-rabbitmq-exchange", default="agent_gateway.inbound.load_test")
+    parser.add_argument("--inbound-rabbitmq-queue-prefix", default="agent_gateway.inbound.load_test.partition")
+    parser.add_argument("--inbound-rabbitmq-dead-letter-exchange", default="agent_gateway.inbound.load_test.dlx")
+    parser.add_argument("--inbound-rabbitmq-dead-letter-queue", default="agent_gateway.inbound.load_test.dead")
+    parser.add_argument("--inbound-rabbitmq-partitions", type=int, default=8)
+    parser.add_argument("--inbound-rabbitmq-prefetch", type=int, default=1)
+    parser.add_argument("--inbound-session-count", type=int, default=32)
     parser.add_argument("--allow-real-external", action="store_true")
     parser.add_argument("--agent-id", default="main")
     parser.add_argument("--session-prefix", default="load-test")
@@ -872,6 +1106,24 @@ def main(argv: list[str] | None = None) -> int:
                 rabbitmq_queue=args.rabbitmq_queue,
                 rabbitmq_dead_letter_exchange=args.rabbitmq_dead_letter_exchange,
                 rabbitmq_dead_letter_queue=args.rabbitmq_dead_letter_queue,
+                connect_timeout_seconds=max(0.2, args.rabbitmq_connect_timeout_seconds),
+            )
+        )
+    elif args.scenario == "inbound-rabbitmq":
+        samples, wall_seconds, context = asyncio.run(
+            run_inbound_rabbitmq(
+                requests=requests,
+                concurrency=concurrency,
+                agent_delay_ms=max(0.0, args.agent_delay_ms),
+                work_dir=args.work_dir,
+                rabbitmq_url=args.rabbitmq_url,
+                rabbitmq_exchange=args.inbound_rabbitmq_exchange,
+                rabbitmq_queue_prefix=args.inbound_rabbitmq_queue_prefix,
+                rabbitmq_dead_letter_exchange=args.inbound_rabbitmq_dead_letter_exchange,
+                rabbitmq_dead_letter_queue=args.inbound_rabbitmq_dead_letter_queue,
+                rabbitmq_partitions=max(1, args.inbound_rabbitmq_partitions),
+                rabbitmq_prefetch=max(1, args.inbound_rabbitmq_prefetch),
+                session_count=max(1, args.inbound_session_count),
                 connect_timeout_seconds=max(0.2, args.rabbitmq_connect_timeout_seconds),
             )
         )

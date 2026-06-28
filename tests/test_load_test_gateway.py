@@ -12,6 +12,7 @@ from scripts.load_test_gateway import (
     run_delivery_local,
     run_delivery_rabbitmq,
     run_feishu_send_real,
+    run_inbound_rabbitmq,
     run_model_real,
     render_markdown,
     run_mock_local,
@@ -20,9 +21,10 @@ from scripts.load_test_gateway import (
 
 
 class FakeRabbitMQBroker:
+    messages: list[dict] = []
+    dead: list[dict] = []
+
     def __init__(self, **kwargs) -> None:
-        self.messages: list[dict] = []
-        self.dead: list[dict] = []
         self.enabled = kwargs.get("enabled", False)
 
     def publish(self, entry) -> None:
@@ -58,8 +60,93 @@ class FakeRabbitMQBroker:
             self.messages.append(payload)
         return True
 
+    def purge(self):
+        purged = len(self.messages)
+        dead = len(self.dead)
+        self.messages.clear()
+        self.dead.clear()
+        return {"messages": purged, "dead_letter_messages": dead}
+
     def close(self) -> None:
         return None
+
+
+class FakeInboundRabbitMQBroker:
+    queues: dict[str, list[dict]] = {}
+    dead: list[dict] = []
+
+    def __init__(self, **kwargs) -> None:
+        self.enabled = kwargs.get("enabled", False)
+        self.exchange = kwargs.get("exchange", "")
+        self.queue_prefix = kwargs.get("queue_prefix", "")
+        self.dead_letter_exchange = kwargs.get("dead_letter_exchange", "")
+        self.dead_letter_queue = kwargs.get("dead_letter_queue", "")
+        self.partitions = max(1, int(kwargs.get("partitions", 1)))
+        self.prefetch = max(1, int(kwargs.get("prefetch", 1)))
+        for partition in range(self.partitions):
+            self.queues.setdefault(self.queue_name(partition), [])
+
+    def publish(self, task) -> None:
+        if not self.enabled:
+            return
+        partition = self.partition_for(task.session_key or task.id)
+        self.queues.setdefault(self.queue_name(partition), []).append(
+            {
+                "task_id": task.id,
+                "task_type": task.task_type,
+                "session_key": task.session_key,
+                "partition": partition,
+                "idempotency_key": task.idempotency_key,
+            }
+        )
+
+    def consume_once(self, partition: int, handler) -> bool:
+        queue = self.queues.setdefault(self.queue_name(partition), [])
+        if not queue:
+            return False
+        payload = queue.pop(0)
+        if not handler(payload):
+            queue.append(payload)
+        return True
+
+    def stats(self):
+        queues = [
+            {
+                "partition": partition,
+                "queue": self.queue_name(partition),
+                "messages": len(self.queues.get(self.queue_name(partition), [])),
+                "consumers": 0,
+            }
+            for partition in range(self.partitions)
+        ]
+        return {
+            "backend": "fake-rabbitmq-inbound",
+            "enabled": self.enabled,
+            "exchange": self.exchange,
+            "queue_prefix": self.queue_prefix,
+            "partitions": self.partitions,
+            "prefetch": self.prefetch,
+            "messages": sum(int(row["messages"]) for row in queues),
+            "dead_letter_messages": len(self.dead),
+            "queues": queues,
+        }
+
+    def purge(self):
+        purged = sum(len(rows) for rows in self.queues.values())
+        for rows in self.queues.values():
+            rows.clear()
+        dead = len(self.dead)
+        self.dead.clear()
+        return {"messages": purged, "dead_letter_messages": dead}
+
+    def close(self) -> None:
+        return None
+
+    def queue_name(self, partition: int) -> str:
+        return f"{self.queue_prefix}.{int(partition) % self.partitions}"
+
+    def partition_for(self, session_key: str) -> int:
+        return sum(session_key.encode("utf-8")) % self.partitions
 
 
 class FakeRunner:
@@ -190,6 +277,8 @@ def test_delivery_local_load_test_uses_real_delivery_queue(tmp_path) -> None:
 
 
 def test_delivery_rabbitmq_load_test_uses_broker_path(tmp_path, monkeypatch) -> None:
+    FakeRabbitMQBroker.messages = []
+    FakeRabbitMQBroker.dead = []
     monkeypatch.setattr(load_test_gateway, "RabbitMQDeliveryBroker", FakeRabbitMQBroker)
 
     samples, wall_seconds, context = asyncio.run(
@@ -224,6 +313,53 @@ def test_delivery_rabbitmq_load_test_uses_broker_path(tmp_path, monkeypatch) -> 
     assert context["broker_after_publish"]["messages"] == 4
     assert context["broker_after_consume"]["messages"] == 0
     assert "delivery-rabbitmq 基线" in render_markdown(result)
+
+
+def test_inbound_rabbitmq_load_test_uses_broker_partition_path(tmp_path, monkeypatch) -> None:
+    FakeInboundRabbitMQBroker.queues = {}
+    FakeInboundRabbitMQBroker.dead = []
+    monkeypatch.setattr(load_test_gateway, "RabbitMQInboundTaskBroker", FakeInboundRabbitMQBroker)
+
+    samples, wall_seconds, context = asyncio.run(
+        run_inbound_rabbitmq(
+            requests=6,
+            concurrency=2,
+            agent_delay_ms=0,
+            work_dir=tmp_path / "work",
+            rabbitmq_url="amqp://example",
+            rabbitmq_exchange="inbound-ex",
+            rabbitmq_queue_prefix="inbound-q",
+            rabbitmq_dead_letter_exchange="inbound-dlx",
+            rabbitmq_dead_letter_queue="inbound-dlq",
+            rabbitmq_partitions=4,
+            rabbitmq_prefetch=1,
+            session_count=3,
+            connect_timeout_seconds=0.2,
+        )
+    )
+    result = build_result(
+        scenario="inbound-rabbitmq",
+        requests=6,
+        concurrency=2,
+        wall_seconds=wall_seconds,
+        samples=samples,
+        agent_delay_ms=0,
+        delivery_delay_ms=0,
+        context=context,
+    )
+
+    assert result["summary"]["success"] == 6
+    assert result["summary"]["failed"] == 0
+    assert result["summary"]["max_inbound_backlog"] == 6
+    assert result["scenario"]["uses_rabbitmq"] is True
+    assert result["scenario"]["uses_real_delivery_queue"] is False
+    assert context["processed"] == 6
+    assert context["effective_task_workers"] == 2
+    assert context["inbound_session_count"] == 3
+    assert context["inbound_partitions"] == 4
+    assert context["broker_after_publish"]["messages"] == 6
+    assert context["broker_after_consume"]["messages"] == 0
+    assert "inbound-rabbitmq 基线" in render_markdown(result)
 
 
 def test_model_real_requires_explicit_external_opt_in() -> None:
