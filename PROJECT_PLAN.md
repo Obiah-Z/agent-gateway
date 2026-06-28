@@ -352,7 +352,7 @@ delivery-worker
 | 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明、状态迁移审计，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计；Prompt、Skill、Cron 配置等运行资产继续文件化。 |
 | 20.6 分布式可靠队列升级 | 已完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
 | 20.7 生产部署编排 | 待实现 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
-| 20.8 统一观测与压测 | 待实现 | 增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
+| 20.8 统一观测与压测 | 进行中 | 先定义压测指标口径、场景边界和报告格式，再增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
 
 #### 开展顺序建议
 
@@ -372,6 +372,138 @@ delivery-worker
 - 关键状态不依赖单机 JSONL，Dashboard 可以分页查询任务、事件、错误和记忆。
 - Redis、PostgreSQL、队列和反向代理都有健康检查、配置说明和降级策略。
 - 有基础压测结果，能说明当前机器配置下的吞吐、延迟和瓶颈。
+
+#### Phase 20.8 统一观测与压测
+
+状态：进行中。
+
+目标：
+
+- 用统一指标证明系统在不同并发、不同队列后端和不同外部依赖条件下的容量上限。
+- 区分网关自身瓶颈、模型 API 瓶颈、飞书发送瓶颈、PostgreSQL/RabbitMQ/Redis 中间件瓶颈。
+- 生成可复现的 Markdown 压测报告，避免只凭 Dashboard 主观判断性能。
+
+##### 20.8.1 指标口径定义
+
+状态：已完成。
+
+压测分层：
+
+| 层级 | 目标 | 说明 |
+| --- | --- | --- |
+| 本地闭环压测 | 测网关自身调度能力 | 使用 mock agent / mock channel，绕开真实模型和外部平台，重点观察入站 lane、任务队列、投递队列和状态写入。 |
+| 队列链路压测 | 测 PostgreSQL + RabbitMQ 可靠投递能力 | 只发送轻量投递消息，验证 reserve、ack、retry、DLQ、队列积压和多 delivery worker 消费。 |
+| 真实链路压测 | 测端到端用户体验 | 使用真实模型、真实飞书发送或 Webhook，低并发逐步提升，观察外部 API 延迟、限流和失败率。 |
+
+核心指标：
+
+| 指标 | 口径 | 主要来源 |
+| --- | --- | --- |
+| 入站吞吐 `inbound_rps` | 每秒成功进入 dispatcher 的消息数 | `inbound.received` runtime events、压测客户端统计。 |
+| 端到端延迟 `e2e_ms` | 从压测客户端发起到收到最终回复/投递完成的耗时 | 压测客户端本地计时；真实链路可关联 `correlation_id`。 |
+| Agent 执行延迟 `agent_turn_ms` | `agent.turn.started` 到 `agent.turn.completed/failed` 的耗时 | runtime events 中 `duration_ms`。 |
+| 工具调用延迟 `tool_call_ms` | 工具 started 到 completed/failed 的耗时 | `tool.call.*` runtime events。 |
+| 投递延迟 `delivery_ms` | `delivery.enqueued` 到 `delivery.sent/failed` 的耗时 | runtime events、delivery id。 |
+| P50/P95/P99 | 各类延迟分位数 | 压测脚本聚合。 |
+| 错误率 `error_rate` | failed/rejected/error 数量占总请求比例 | runtime events、压测客户端。 |
+| 入站积压 `inbound_backlog` | 全局队列、lane 队列和运行中 lane 数 | `runtime.status.inbound`、metrics snapshot。 |
+| 投递积压 `delivery_backlog` | pending、retrying、failed、DLQ 数量 | `delivery.stats`、RabbitMQ stats。 |
+| worker 吞吐 `worker_tps` | task worker / delivery worker 每秒完成量 | task stats、delivery events。 |
+| 中间件状态 | Redis、PostgreSQL、RabbitMQ 是否健康 | `health.check`、broker stats、PostgreSQL schema check。 |
+
+压测场景矩阵：
+
+| 场景 | 并发建议 | 目标 | 是否调用真实外部服务 |
+| --- | --- | --- | --- |
+| `mock-local` | 1、4、8、16、32 | 找网关本地调度上限和入站 lane 瓶颈 | 否 |
+| `delivery-local` | 1、4、8、16 | 找 PostgreSQL + 本地投递轮询瓶颈 | 否 |
+| `delivery-rabbitmq` | 1、4、8、16、32 | 找 RabbitMQ 分发、reserve 和 ack 瓶颈 | 否 |
+| `feishu-webhook` | 1、2、4、8 | 验证飞书入站和出站真实稳定性 | 是 |
+| `model-real` | 1、2、4 | 验证真实模型 profile、fallback、限流和上下文开销 | 是 |
+
+报告固定结构：
+
+```text
+# AI Agent Gateway 压测报告
+
+## 基本信息
+- 时间：
+- 机器：
+- Git commit：
+- Python 版本：
+- 运行角色：
+- Redis / PostgreSQL / RabbitMQ 配置：
+
+## 场景配置
+- 场景：
+- 并发：
+- 请求数：
+- 是否真实模型：
+- 是否真实飞书：
+
+## 结果摘要
+- 成功数 / 失败数 / 错误率：
+- 吞吐：
+- E2E P50 / P95 / P99：
+- Agent P50 / P95 / P99：
+- Delivery P50 / P95 / P99：
+- 最大入站积压：
+- 最大投递积压：
+
+## 瓶颈判断
+- 主要瓶颈：
+- 证据：
+- 建议：
+
+## 原始指标摘要
+- runtime.status：
+- delivery.stats：
+- metrics.summary：
+- errors.recent：
+```
+
+验收标准：
+
+- 后续压测脚本必须按上述指标命名和报告结构输出。
+- mock 场景和真实外部服务场景必须分开，不能把模型/飞书延迟误判为网关本地瓶颈。
+- 每次压测必须记录 Git commit、运行角色和 Redis/PostgreSQL/RabbitMQ 开关。
+
+##### 20.8 后续子阶段
+
+| 子阶段 | 状态 | 主要内容 | 完成标准 |
+| --- | --- | --- | --- |
+| 20.8.2 压测脚本 MVP | 已完成 | 新增 `scripts/load_test_gateway.py`，支持 `mock-local` 场景、并发、请求数、模拟 Agent/Delivery 延迟、JSON/Markdown 输出。 | 能跑 `mock-local` 并生成报告到 `workspace/reports/load-tests/`。 |
+| 20.8.3 队列链路压测 | 待实现 | 覆盖 PostgreSQL 本地轮询和 RabbitMQ 分发两种投递路径。 | 能对比 pending/retrying/DLQ、worker 吞吐和投递 P95。 |
+| 20.8.4 真实链路压测 | 待实现 | 小并发测试真实模型、飞书 Webhook 和飞书发送。 | 能区分外部 API 瓶颈与网关内部瓶颈。 |
+| 20.8.5 Prometheus metrics endpoint | 待实现 | 暴露 `/metrics` 或控制面等价接口，输出核心计数和队列指标。 | Prometheus 可 scrape，指标名稳定。 |
+| 20.8.6 容量基线报告 | 待实现 | 汇总当前机器在典型配置下的吞吐、P95、错误率和瓶颈。 | `reports/` 下有可复现 Markdown 报告。 |
+
+##### 20.8.2 压测脚本 MVP 结果
+
+已完成内容：
+
+- 新增 `scripts/load_test_gateway.py`，作为 Phase 20.8 的独立压测入口。
+- 当前支持 `mock-local` 场景，不调用真实模型、飞书、PostgreSQL、Redis 或 RabbitMQ。
+- 支持参数：
+  - `--requests`
+  - `--concurrency`
+  - `--agent-delay-ms`
+  - `--delivery-delay-ms`
+  - `--report-dir`
+  - `--basename`
+- 输出 JSON 和 Markdown 两份报告，默认目录为 `workspace/reports/load-tests/`。
+- 报告结构遵循 20.8.1 定义，包含 Git commit、Python 版本、机器信息、吞吐、P50/P95/P99、错误率和瓶颈判断。
+
+使用示例：
+
+```bash
+python scripts/load_test_gateway.py --scenario mock-local --requests 100 --concurrency 8
+```
+
+当前边界：
+
+- `mock-local` 只用于建立本地压测和报告生成基线，不能代表真实模型或飞书链路性能。
+- 队列链路压测将在 20.8.3 中接入 PostgreSQL / RabbitMQ 真实投递路径。
 
 #### 当前实现说明
 
