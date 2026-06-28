@@ -1,5 +1,6 @@
 from scripts.smoke_distributed_lane import (
     assert_broker_unavailable_result,
+    assert_postgres_lane_result,
     assert_primary_unavailable_result,
     assert_smoke_result,
     assert_ttl_takeover_result,
@@ -190,6 +191,60 @@ def test_primary_unavailable_smoke_parses_scenario() -> None:
     args = parse_args(["--scenario", "primary-unavailable"])
 
     assert args.scenario == "primary-unavailable"
+
+
+def test_postgres_lane_smoke_asserts_successful_result() -> None:
+    result = {
+        "status": "ok",
+        "write_ok": True,
+        "listed_owned": True,
+        "stale_before_release": True,
+        "mismatch_release": False,
+        "matched_release": True,
+        "release_reason": "smoke postgres lane release",
+        "released_row": {
+            "state": "released",
+            "metadata": {
+                "release_reason": "smoke postgres lane release",
+                "released_at": 1782660000.0,
+            },
+        },
+    }
+
+    assert assert_postgres_lane_result(result) == []
+
+
+def test_postgres_lane_smoke_reports_failed_invariants() -> None:
+    result = {
+        "status": "failed",
+        "write_ok": False,
+        "listed_owned": False,
+        "stale_before_release": False,
+        "mismatch_release": True,
+        "matched_release": False,
+        "release_reason": "smoke postgres lane release",
+        "released_row": {"state": "owned", "metadata": {}},
+    }
+
+    failures = assert_postgres_lane_result(result)
+
+    assert any("unexpected status" in item for item in failures)
+    assert any("write did not return" in item for item in failures)
+    assert any("not readable" in item for item in failures)
+    assert any("not detected as stale" in item for item in failures)
+    assert any("mismatch unexpectedly released" in item for item in failures)
+    assert any("matched release did not update" in item for item in failures)
+    assert any("released row state mismatch" in item for item in failures)
+    assert any("release metadata missing reason" in item for item in failures)
+    assert any("release metadata missing released_at" in item for item in failures)
+
+
+def test_postgres_lane_smoke_parses_scenario() -> None:
+    args = parse_args(["--scenario", "postgres-lane", "--postgres-connect-timeout-seconds", "3"])
+
+    assert args.scenario == "postgres-lane"
+    assert args.postgres_url == "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+    assert args.postgres_connect_timeout_seconds == 3
 
 
 def test_worker_crash_smoke_asserts_successful_result() -> None:

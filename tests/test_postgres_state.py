@@ -203,6 +203,8 @@ def test_postgres_write_query_sends_sql_via_stdin(monkeypatch) -> None:
     repo.query("agents", sql="SELECT 1")
 
     command, kwargs = calls[0]
+    assert "-v" in command
+    assert "ON_ERROR_STOP=1" in command
     assert "-f" in command
     assert "-" in command
     assert "-c" not in command

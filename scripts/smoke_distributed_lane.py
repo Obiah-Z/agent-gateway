@@ -22,6 +22,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agent_gateway.runtime.infra.redis_client import RedisClient
+from agent_gateway.runtime.state.postgres import (
+    PostgresReadRepository,
+    PostgresWriteRepository,
+    initialize_postgres_schema,
+)
 from agent_gateway.runtime.tasks import (
     LaneOwnerToken,
     LocalTaskQueue,
@@ -47,6 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "worker-crash",
             "broker-unavailable",
             "primary-unavailable",
+            "postgres-lane",
         ),
         default="inbound",
         help="smoke scenario to run",
@@ -65,6 +71,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rabbitmq-connect-timeout-seconds", type=float, default=2.0)
     parser.add_argument("--redis-url", default="redis://127.0.0.1:6379/0")
     parser.add_argument("--redis-socket-timeout-seconds", type=float, default=1.0)
+    parser.add_argument("--postgres-url", default="postgresql://postgres:postgres@127.0.0.1:5432/postgres")
+    parser.add_argument("--postgres-connect-timeout-seconds", type=float, default=2.0)
     parser.add_argument("--lane-ttl-seconds", type=int, default=30)
     parser.add_argument("--lane-namespace", default="gateway:smoke:lane")
     parser.add_argument("--takeover-session-key", default="smoke-session-ttl-takeover")
@@ -213,6 +221,33 @@ def assert_primary_unavailable_result(result: dict) -> list[str]:
     broker_stats = dict(result.get("broker_stats", {}) or {})
     if int(broker_stats.get("acked", 0) or 0) != 1:
         failures.append(f"broker payload was not acked: {broker_stats}")
+    return failures
+
+
+def assert_postgres_lane_result(result: dict) -> list[str]:
+    """Validate PostgreSQL session_lanes real-store smoke result."""
+
+    failures: list[str] = []
+    if result.get("status") != "ok":
+        failures.append(f"unexpected status: {result.get('status')}")
+    if result.get("write_ok") is not True:
+        failures.append("session lane write did not return the expected row")
+    if result.get("listed_owned") is not True:
+        failures.append("owned session lane was not readable from PostgreSQL")
+    if result.get("stale_before_release") is not True:
+        failures.append("owned session lane was not detected as stale")
+    if result.get("mismatch_release") is not False:
+        failures.append("owner_token mismatch unexpectedly released the lane")
+    if result.get("matched_release") is not True:
+        failures.append("owner_token matched release did not update the lane")
+    released = dict(result.get("released_row", {}) or {})
+    if released.get("state") != "released":
+        failures.append(f"released row state mismatch: {released.get('state')}")
+    metadata = dict(released.get("metadata", {}) or {})
+    if metadata.get("release_reason") != result.get("release_reason"):
+        failures.append(f"release metadata missing reason: {metadata}")
+    if "released_at" not in metadata:
+        failures.append(f"release metadata missing released_at: {metadata}")
     return failures
 
 
@@ -636,6 +671,93 @@ async def run_primary_unavailable_smoke(args: argparse.Namespace) -> dict:
     return result
 
 
+async def run_postgres_lane_smoke(args: argparse.Namespace) -> dict:
+    """Exercise session_lanes write/list/release against a real PostgreSQL store."""
+
+    now = time.time()
+    session_key = f"smoke-postgres-lane-{int(now * 1000)}"
+    owner_token = "smoke-pg-worker:smoke-pg-task"
+    release_reason = "smoke postgres lane release"
+    writer = PostgresWriteRepository(
+        url=args.postgres_url,
+        enabled=True,
+        connect_timeout_seconds=max(0.2, args.postgres_connect_timeout_seconds),
+    )
+    reader = PostgresReadRepository(
+        url=args.postgres_url,
+        enabled=True,
+        connect_timeout_seconds=max(0.2, args.postgres_connect_timeout_seconds),
+    )
+    initialize_postgres_schema(
+        url=args.postgres_url,
+        connect_timeout_seconds=max(0.2, args.postgres_connect_timeout_seconds),
+    )
+    stale_renewed_at = now - max(2, args.lane_ttl_seconds + 1)
+    row = {
+        "session_key": session_key,
+        "lane_key": f"{args.lane_namespace}:{session_key}",
+        "worker_id": "smoke-pg-worker",
+        "task_id": "smoke-pg-task",
+        "owner_token": owner_token,
+        "state": "owned",
+        "ttl_seconds": max(1, args.lane_ttl_seconds),
+        "acquired_at": stale_renewed_at,
+        "renewed_at": stale_renewed_at,
+        "updated_at": now,
+        "metadata": {"smoke": True, "scenario": "postgres-lane"},
+    }
+    try:
+        written = writer.write_session_lane(row)
+        owned_rows = reader.list(
+            "session_lanes",
+            limit=5,
+            filters={"state": "owned", "session_key": session_key},
+        )
+        owned_row = owned_rows[0] if owned_rows else {}
+        mismatch_release = writer.release_session_lane(
+            session_key,
+            owner_token="wrong-owner-token",
+            reason="wrong owner token smoke release",
+            now=now + 1,
+        )
+        matched_release = writer.release_session_lane(
+            session_key,
+            owner_token=owner_token,
+            reason=release_reason,
+            now=now + 2,
+        )
+        released_rows = reader.list(
+            "session_lanes",
+            limit=5,
+            filters={"state": "released", "session_key": session_key},
+        )
+        released_row = released_rows[0] if released_rows else {}
+        renewed_at = float(owned_row.get("renewed_at", 0.0) or 0.0)
+        ttl_seconds = int(owned_row.get("ttl_seconds", 0) or 0)
+        result = {
+            "status": "ok",
+            "scenario": "postgres-lane",
+            "session_key": session_key,
+            "postgres_url": args.postgres_url,
+            "write_ok": written.get("session_key") == session_key,
+            "listed_owned": bool(owned_row) and owned_row.get("owner_token") == owner_token,
+            "stale_before_release": renewed_at > 0 and ttl_seconds > 0 and now >= renewed_at + ttl_seconds,
+            "mismatch_release": mismatch_release,
+            "matched_release": matched_release,
+            "release_reason": release_reason,
+            "owned_row": owned_row,
+            "released_row": released_row,
+        }
+        result["failures"] = assert_postgres_lane_result(result)
+        result["status"] = "ok" if not result["failures"] else "failed"
+        return result
+    finally:
+        try:
+            writer.delete("session_lanes", session_key)
+        except Exception:
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.scenario in {"inbound", "ttl-takeover", "worker-crash"}:
@@ -655,6 +777,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
+        if args.scenario == "postgres-lane":
+            postgres_result = asyncio.run(run_postgres_lane_smoke(args))
+            print(json.dumps(postgres_result, ensure_ascii=False))
+            return 0 if not postgres_result.get("failures") else 1
         if args.scenario == "primary-unavailable":
             primary_result = asyncio.run(run_primary_unavailable_smoke(args))
             print(json.dumps(primary_result, ensure_ascii=False))
