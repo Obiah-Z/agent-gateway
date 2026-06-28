@@ -918,13 +918,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.26 Stale lane 受控批量释放 | 已完成 | 控制面新增 `execute_session_lane_recovery()`，WebSocket JSON-RPC 新增 `tasks.lanes.recovery.execute`，默认仍 dry-run；只有显式 `execute=true` 才按预检动作逐条调用 `tasks.lanes.release`，Dashboard 展示批量释放执行预览。 | 运维可以在确认 worker 已退出后批量释放 stale PostgreSQL lane owner；每条释放仍复用 stale、owner_token 和 writer 配置校验，避免绕过安全边界。 |
 | 20.9.27 Lane recovery 审计事件 | 已完成 | `execute_session_lane_recovery()` 写入 `session_lane.recovery.dry_run/released/release_failed/completed` 运行事件，metadata 包含候选数、动作数、释放数、失败数、worker_id、task_id 和 owner_token；`runtime.status` 预览关闭事件写入，避免面板刷新产生审计噪音。 | 可以通过事件流复盘谁触发了 lane 恢复、释放了哪些 session、哪些失败；状态查询不会污染审计事件。 |
 | 20.9.28 Lane recovery 审计视图 | 已完成 | 控制面新增 `lane_recovery_events()`，WebSocket JSON-RPC 新增 `tasks.lanes.recovery.events`，`runtime.status.tasks.persisted_lanes` 和 Dashboard 后台任务卡片展示最近 lane recovery 审计事件。 | 不需要手动调用 `events.tail` 就能在控制面和运维面板看到最近 dry-run、released、failed、completed 记录，并可按 session_key、worker_id、type、status 过滤。 |
+| 20.9.29 分布式 Lane 运维 Runbook | 已完成 | 新增 [分布式 Lane 运维 Runbook](doc/分布式Lane运维Runbook.md)，整理推荐配置、启动前检查、smoke 验收、Dashboard 排查顺序、控制面 JSON-RPC、stale lane 恢复流程、PostgreSQL/Redis/RabbitMQ 排障命令、常见故障和禁止操作。 | 新机器或故障现场可按文档完成 lane 状态检查、恢复预检、受控释放、审计回看和中间件联合排障。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检、显式确认后的受控批量释放、lane recovery 审计事件和审计视图；后续可继续做更完整的自动恢复策略。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检、显式确认后的受控批量释放、lane recovery 审计事件、审计视图和运维 Runbook；后续可继续做更完整的自动恢复策略。
 
 阶段完成标准：
 
