@@ -88,6 +88,9 @@ class FakeChannelRuntime:
 
 
 class FakeTaskWorker:
+    def __init__(self, *, broker: dict[str, object] | None = None) -> None:
+        self.broker = broker or {}
+
     def stats(self) -> dict[str, object]:
         return {
             "running": True,
@@ -95,7 +98,7 @@ class FakeTaskWorker:
             "concurrency": 2,
             "registered_task_types": ["agent_inbound"],
             "queue": {"pending": 0, "running": 0},
-            "broker": {},
+            "broker": self.broker,
             "session_locks": {"blocked_session_count": 0, "skip_count": 0, "last_blocked_sessions": []},
         }
 
@@ -1125,6 +1128,70 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     )
     assert control.event_store is not None
     assert control.event_store.tail(limit=10, event_type="session_lane.recovery.dry_run") == []
+
+
+def test_control_plane_lane_doctor_reports_distributed_readiness(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    settings.inbound_task_queue_enabled = True
+    settings.inbound_broker = "rabbitmq"
+    settings.delivery_broker = "rabbitmq"
+    settings.proactive_channel = "cli"
+    settings.proactive_account_id = "cli-local"
+    settings.proactive_peer_id = "cli-user"
+    agents = AgentManager()
+    agents.register(AgentConfig(id="main", name="Main", model="deepseek-v4-pro"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="main", tier=5, match_key="default", match_value="*"))
+    channels = ChannelManager()
+    channels.accounts = [ChannelAccount(channel="cli", account_id="cli-local", label="CLI")]
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager(
+            [AuthProfile(name="primary", provider="anthropic", api_key="k", base_url="https://base")]
+        ),
+        channels=channels,
+        autonomy=FakeAutonomy(),
+        channel_runtime=FakeChannelRuntime(),
+        delivery_queue=DeliveryQueue(tmp_path / "delivery"),
+        redis_client=FakeRedisClient(
+            RedisHealth(enabled=True, ok=True, url="redis://127.0.0.1:6379/0")
+        ),
+        postgres_client=FakePostgresClient(
+            PostgresHealth(enabled=True, ok=True, url="postgresql://postgres:postgres@127.0.0.1:5432/postgres")
+        ),
+        state_repository=FakeLaneStateRepository(),
+        task_worker=FakeTaskWorker(
+            broker={
+                "enabled": True,
+                "backend": "rabbitmq",
+                "messages": 0,
+                "dead_letter_messages": 0,
+                "partitions": 8,
+                "prefetch": 1,
+            }
+        ),
+        task_queue=LocalTaskQueue(LocalTaskStore(tmp_path / "tasks")),
+        event_store=RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl"),
+    )
+
+    report = control.lane_doctor(limit=5)
+
+    assert report["readiness"]["ready"] is True
+    assert report["summary"]["ready"] is True
+    assert report["readiness"]["failed"] == 0
+    assert {row["name"] for row in report["readiness"]["checks"]} >= {
+        "inbound_task_queue",
+        "inbound_broker.rabbitmq",
+        "redis.lane_ownership",
+        "postgres.state",
+        "task_worker.agent_inbound",
+        "session_lanes.persisted",
+        "delivery.reliable_outbound",
+        "health.no_critical",
+    }
 
 
 def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:

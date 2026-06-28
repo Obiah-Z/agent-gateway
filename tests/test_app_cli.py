@@ -340,6 +340,7 @@ def test_lane_doctor_cli_prints_text(monkeypatch, capsys) -> None:
                 "status": "warning",
                 "limit": limit,
                 "summary": {
+                    "ready": False,
                     "owned_lanes": 1,
                     "stale_lanes": 1,
                     "recovery_actions": 1,
@@ -349,6 +350,20 @@ def test_lane_doctor_cli_prints_text(monkeypatch, capsys) -> None:
                 "checks": [
                     {"name": "session_lanes", "status": "warning", "owned": 1, "stale": 1},
                 ],
+                "readiness": {
+                    "ready": False,
+                    "status": "not_ready",
+                    "passed": 7,
+                    "failed": 1,
+                    "checks": [
+                        {
+                            "name": "inbound_broker.rabbitmq",
+                            "status": "fail",
+                            "ok": False,
+                            "message": "需要设置 GATEWAY_INBOUND_BROKER=rabbitmq 并确认 broker 可用",
+                        }
+                    ],
+                },
                 "recovery_plan": {"action_count": 1},
             }
 
@@ -362,4 +377,6 @@ def test_lane_doctor_cli_prints_text(monkeypatch, capsys) -> None:
 
     output = capsys.readouterr().out
     assert "分布式 Lane 诊断：warning" in output
+    assert "最终形态就绪：not_ready passed=7 failed=1" in output
+    assert "FAIL inbound_broker.rabbitmq" in output
     assert "恢复建议" in output

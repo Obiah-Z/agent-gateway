@@ -133,6 +133,7 @@ def render_lane_doctor_text(report: dict[str, object]) -> str:
         f"分布式 Lane 诊断：{report.get('status', 'unknown')}",
         (
             "摘要："
+            f"ready={summary.get('ready', False)} "
             f"owned={summary.get('owned_lanes', 0)} "
             f"stale={summary.get('stale_lanes', 0)} "
             f"recovery_actions={summary.get('recovery_actions', 0)} "
@@ -151,6 +152,27 @@ def render_lane_doctor_text(report: dict[str, object]) -> str:
             if key not in {"name", "status"}
         )
         lines.append(f"- {row.get('status', 'unknown').upper()} {row.get('name', '--')} {details}".rstrip())
+    readiness = report.get("readiness", {})
+    readiness = readiness if isinstance(readiness, dict) else {}
+    readiness_checks = list(readiness.get("checks", []) or [])
+    if readiness_checks:
+        lines.extend(
+            [
+                "",
+                (
+                    "最终形态就绪："
+                    f"{readiness.get('status', 'unknown')} "
+                    f"passed={readiness.get('passed', 0)} "
+                    f"failed={readiness.get('failed', 0)}"
+                ),
+            ]
+        )
+        for row in readiness_checks:
+            if not isinstance(row, dict):
+                continue
+            if row.get("ok"):
+                continue
+            lines.append(f"- FAIL {row.get('name', '--')} {row.get('message', '')}".rstrip())
     recovery_plan = report.get("recovery_plan", {})
     recovery_plan = recovery_plan if isinstance(recovery_plan, dict) else {}
     if int(recovery_plan.get("action_count", 0) or 0) > 0:

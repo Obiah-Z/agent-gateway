@@ -1958,6 +1958,9 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
   const executions = Array.isArray(executionsPayload?.items) ? executionsPayload.items.slice().reverse() : [];
   const doctorSummary = laneDoctor?.summary || {};
   const doctorChecks = Array.isArray(laneDoctor?.checks) ? laneDoctor.checks : [];
+  const readiness = laneDoctor?.readiness || {};
+  const readinessChecks = Array.isArray(readiness.checks) ? readiness.checks : [];
+  const failedReadiness = readinessChecks.filter((row) => !row.ok);
   const counts = items.reduce((acc, item) => {
     const status = normalizeStatus(item.status || "pending");
     acc[status] = (acc[status] || 0) + 1;
@@ -1984,6 +1987,8 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
       title,
       "small",
       [
+        `最终形态 ${readiness.ready ? "已就绪" : "未就绪"}`,
+        `失败项 ${readiness.failed ?? failedReadiness.length}`,
         `过期 Lane ${doctorSummary.stale_lanes ?? 0}`,
         `恢复动作 ${doctorSummary.recovery_actions ?? 0}`,
         `Broker 积压 ${doctorSummary.broker_messages ?? 0}`,
@@ -1993,6 +1998,19 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
     );
     head.appendChild(title);
     block.appendChild(head);
+    if (failedReadiness.length) {
+      const visibleReadiness = slicePanelItems(failedReadiness, "lane-readiness-failures");
+      for (const check of visibleReadiness) {
+        const row = document.createElement("div");
+        row.className = "trace-event trace-event-warning";
+        appendText(row, "strong", `未就绪：${check.name || "unknown"}`);
+        appendText(row, "small", check.message || "需要检查配置或依赖状态", "task-meta");
+        block.appendChild(row);
+      }
+      appendCollapseToggle(block, "lane-readiness-failures", failedReadiness.length, () => {
+        renderTasks(payload, executionsPayload, laneDoctor);
+      });
+    }
     const visibleChecks = slicePanelItems(doctorChecks, "lane-doctor-checks");
     for (const check of visibleChecks) {
       const row = document.createElement("div");

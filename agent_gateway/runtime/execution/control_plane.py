@@ -534,14 +534,28 @@ class GatewayControlPlane:
             },
         ]
         warning_count = sum(1 for row in checks if row.get("status") == "warning")
+        readiness = self._distributed_lane_readiness(
+            runtime=runtime,
+            health=health,
+            tasks=tasks,
+            task_broker=task_broker,
+            persisted_lanes=persisted_lanes,
+            lanes=lanes,
+            redis=redis,
+            postgres=postgres,
+        )
         ok = bool(health.get("ok")) and warning_count == 0
         return {
             "ok": ok,
             "status": "ok" if ok else "warning",
             "limit": safe_limit,
             "checks": checks,
+            "readiness": readiness,
             "summary": {
                 "warnings": warning_count,
+                "ready": bool(readiness.get("ready")),
+                "readiness_passed": int(readiness.get("passed", 0) or 0),
+                "readiness_failed": int(readiness.get("failed", 0) or 0),
                 "owned_lanes": int(persisted_lanes.get("count", len(lane_items)) or 0),
                 "stale_lanes": int(persisted_lanes.get("stale_count", len(stale_lanes)) or 0),
                 "recovery_actions": int(recovery_plan.get("action_count", 0) or 0),
@@ -558,6 +572,121 @@ class GatewayControlPlane:
                 "redis": redis,
                 "postgres": postgres,
             },
+        }
+
+    def _distributed_lane_readiness(
+        self,
+        *,
+        runtime: dict[str, Any],
+        health: dict[str, Any],
+        tasks: dict[str, Any],
+        task_broker: dict[str, Any],
+        persisted_lanes: dict[str, Any],
+        lanes: dict[str, Any],
+        redis: dict[str, Any],
+        postgres: dict[str, Any],
+    ) -> dict[str, Any]:
+        """评估最终分布式 lane 形态的关键开关和依赖是否就绪。"""
+
+        delivery = runtime.get("delivery", {})
+        delivery = delivery if isinstance(delivery, dict) else {}
+        delivery_broker = delivery.get("broker", {})
+        delivery_broker = delivery_broker if isinstance(delivery_broker, dict) else {}
+        registered_task_types = tasks.get("registered_task_types", [])
+        if not isinstance(registered_task_types, list):
+            registered_task_types = []
+        checks = [
+            self._readiness_check(
+                "inbound_task_queue",
+                bool(self.settings.inbound_task_queue_enabled),
+                "非 CLI 入站消息会先落 agent_inbound 任务队列",
+                "需要开启 GATEWAY_INBOUND_TASK_QUEUE_ENABLED=true",
+            ),
+            self._readiness_check(
+                "inbound_broker.rabbitmq",
+                self.settings.inbound_broker == "rabbitmq" and bool(task_broker.get("enabled")),
+                "入站任务通过 RabbitMQ 分区 broker 分发 task_id 引用",
+                "需要设置 GATEWAY_INBOUND_BROKER=rabbitmq 并确认 broker 可用",
+                {
+                    "configured": self.settings.inbound_broker,
+                    "partitions": task_broker.get("partitions", self.settings.inbound_rabbitmq_partitions),
+                    "prefetch": task_broker.get("prefetch", self.settings.inbound_rabbitmq_prefetch),
+                },
+            ),
+            self._readiness_check(
+                "redis.lane_ownership",
+                bool(redis.get("enabled")) and bool(redis.get("ok")),
+                "Redis 可用于 session lane ownership、TTL 和续租",
+                "需要开启 GATEWAY_REDIS_ENABLED=true 并确认 Redis ping 正常",
+            ),
+            self._readiness_check(
+                "postgres.state",
+                bool(postgres.get("enabled")) and bool(postgres.get("ok")),
+                "PostgreSQL 可用于任务、事件和 lane 状态外置",
+                "需要开启 GATEWAY_POSTGRES_ENABLED=true 并确认 PostgreSQL ping 正常",
+            ),
+            self._readiness_check(
+                "task_worker.agent_inbound",
+                bool(tasks.get("configured")) and "agent_inbound" in {str(item) for item in registered_task_types},
+                "Worker 池已注册 agent_inbound handler，可消费入站任务",
+                "需要启动 worker 角色并注册 agent_inbound handler",
+                {
+                    "running": bool(tasks.get("running")),
+                    "worker_id": tasks.get("worker_id", ""),
+                    "concurrency": int(tasks.get("concurrency", 0) or 0),
+                },
+            ),
+            self._readiness_check(
+                "session_lanes.persisted",
+                bool(persisted_lanes.get("configured") or lanes.get("configured")),
+                "PostgreSQL session_lanes 可查询 lane owner 和 stale 状态",
+                "需要初始化数据库 schema 并接入 state repository",
+            ),
+            self._readiness_check(
+                "delivery.reliable_outbound",
+                bool(delivery.get("configured")),
+                "Agent 回复会进入可靠投递队列再发送",
+                "需要装配 DeliveryQueue 和 DeliveryRuntime",
+                {
+                    "delivery_broker": self.settings.delivery_broker,
+                    "broker_enabled": bool(delivery_broker.get("enabled")),
+                    "pending": int(delivery.get("pending", 0) or 0),
+                    "failed": int(delivery.get("failed", 0) or 0),
+                },
+            ),
+            self._readiness_check(
+                "health.no_critical",
+                int(health.get("summary", {}).get("critical", 0) or 0) == 0,
+                "健康检查没有 critical 项",
+                "需要先修复 health.check 中的 critical 项",
+            ),
+        ]
+        failed = sum(1 for row in checks if row.get("status") == "fail")
+        passed = sum(1 for row in checks if row.get("status") == "pass")
+        return {
+            "ready": failed == 0,
+            "status": "ready" if failed == 0 else "not_ready",
+            "passed": passed,
+            "failed": failed,
+            "checks": checks,
+        }
+
+    @staticmethod
+    def _readiness_check(
+        name: str,
+        ok: bool,
+        pass_message: str,
+        fail_message: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """生成一条最终分布式 lane readiness 检查结果。"""
+
+        return {
+            "name": name,
+            "status": "pass" if ok else "fail",
+            "ok": bool(ok),
+            "message": pass_message if ok else fail_message,
+            "metadata": metadata or {},
         }
 
     def recent_errors(
