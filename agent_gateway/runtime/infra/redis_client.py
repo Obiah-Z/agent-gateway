@@ -138,6 +138,29 @@ class RedisClient:
         """
         return bool(self._get_client().eval(script, 1, key, value))
 
+    def renew_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
+        """仅在 value 匹配时续租锁 TTL，避免误续租其他 worker 的锁。"""
+
+        if not self.enabled:
+            return True
+        if not key:
+            return True
+        script = """
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("EXPIRE", KEYS[1], ARGV[2])
+        end
+        return 0
+        """
+        return bool(
+            self._get_client().eval(
+                script,
+                1,
+                key,
+                value,
+                str(max(1, ttl_seconds)),
+            )
+        )
+
     def check_fixed_window_rate_limit(
         self,
         key_prefix: str,

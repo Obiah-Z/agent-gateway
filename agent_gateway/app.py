@@ -272,6 +272,9 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
             delivery_runtime=None,
             redis_client=redis_client,
             lock_ttl_seconds=settings.inbound_session_lock_ttl_seconds,
+            lock_renew_interval_seconds=(
+                settings.inbound_session_lock_renew_interval_seconds or None
+            ),
             worker_id=task_worker.worker_id,
         ),
     )

@@ -32,8 +32,15 @@ class FakeSetRedisClient(RedisClient):
                 values[key] = value
                 return True
 
-            def eval(self, script: str, numkeys: int, key: str, value: str) -> int:
+            def eval(self, script: str, numkeys: int, key: str, *args: str) -> int:
                 del script, numkeys
+                value = args[0]
+                if len(args) == 2:
+                    ttl = int(args[1])
+                    if values.get(key) == value:
+                        expirations[key] = ttl
+                        return 1
+                    return 0
                 if values.get(key) == value:
                     values.pop(key, None)
                     return 1
@@ -89,6 +96,16 @@ def test_redis_lock_requires_matching_token_to_release() -> None:
     assert client.release_lock("lock-1", value="worker-b") is False
     assert client.release_lock("lock-1", value="worker-a") is True
     assert client.acquire_lock("lock-1", value="worker-b", ttl_seconds=60) is True
+
+
+def test_redis_lock_renew_requires_matching_token() -> None:
+    client = FakeSetRedisClient()
+
+    assert client.acquire_lock("lock-1", value="worker-a", ttl_seconds=60) is True
+    assert client.renew_lock("lock-1", value="worker-b", ttl_seconds=120) is False
+    assert "lock-1" not in client.expirations
+    assert client.renew_lock("lock-1", value="worker-a", ttl_seconds=120) is True
+    assert client.expirations["lock-1"] == 120
 
 
 def test_redis_fixed_window_rate_limit_counts_per_window() -> None:

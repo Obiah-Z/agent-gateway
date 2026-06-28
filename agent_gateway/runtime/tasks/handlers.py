@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.domain.models import InboundMessage
@@ -57,6 +59,7 @@ class AgentInboundTaskHandler:
         delivery_runtime: DeliveryRuntime | None = None,
         redis_client: RedisClient | None = None,
         lock_ttl_seconds: int = 300,
+        lock_renew_interval_seconds: float | None = None,
         worker_id: str = "local-worker",
     ) -> None:
         self.dispatcher = dispatcher
@@ -64,6 +67,10 @@ class AgentInboundTaskHandler:
         self.delivery_runtime = delivery_runtime
         self.redis_client = redis_client
         self.lock_ttl_seconds = max(1, int(lock_ttl_seconds))
+        self.lock_renew_interval_seconds = self._resolve_renew_interval(
+            lock_renew_interval_seconds,
+            self.lock_ttl_seconds,
+        )
         self.worker_id = worker_id
 
     async def __call__(self, task: TaskInstance) -> str:
@@ -72,6 +79,7 @@ class AgentInboundTaskHandler:
         lock_key = self._lock_key(task)
         lock_value = f"{self.worker_id}:{task.id}"
         acquired = False
+        renew_task: asyncio.Task[None] | None = None
         if self.redis_client is not None and self.redis_client.enabled and lock_key:
             try:
                 acquired = self.redis_client.acquire_lock(
@@ -83,6 +91,10 @@ class AgentInboundTaskHandler:
                 raise RetryableTaskError(f"agent inbound session lock unavailable: {exc}") from exc
             if not acquired:
                 raise RetryableTaskError(f"agent inbound session locked: {task.session_key}")
+            renew_task = asyncio.create_task(
+                self._renew_lock_until_cancelled(lock_key, lock_value),
+                name=f"agent-inbound-lock-renew:{task.id}",
+            )
         try:
             inbound = inbound_from_task(task)
             result = await self.dispatcher.dispatch_inbound(inbound)
@@ -91,11 +103,37 @@ class AgentInboundTaskHandler:
                 await self.delivery_runtime.flush_once()
             return f"agent inbound delivered: {delivery_id}"
         finally:
+            if renew_task is not None:
+                renew_task.cancel()
+                try:
+                    await renew_task
+                except asyncio.CancelledError:
+                    pass
             if acquired and self.redis_client is not None and lock_key:
                 try:
                     self.redis_client.release_lock(lock_key, value=lock_value)
                 except Exception:
                     pass
+
+    async def _renew_lock_until_cancelled(self, lock_key: str, lock_value: str) -> None:
+        """定期续租当前任务持有的 session 锁，覆盖长模型调用场景。"""
+
+        assert self.redis_client is not None
+        while True:
+            await asyncio.sleep(self.lock_renew_interval_seconds)
+            try:
+                renewed = await asyncio.to_thread(
+                    self.redis_client.renew_lock,
+                    lock_key,
+                    value=lock_value,
+                    ttl_seconds=self.lock_ttl_seconds,
+                )
+            except Exception:
+                # 续租失败时不直接中断已在执行的 Agent 回合，避免重复副作用；
+                # Redis 锁后续会自然过期，观测和重试治理在后续阶段补齐。
+                continue
+            if not renewed:
+                return
 
     @staticmethod
     def _lock_key(task: TaskInstance) -> str:
@@ -105,3 +143,11 @@ class AgentInboundTaskHandler:
         if not session_key:
             return ""
         return f"gateway:lock:agent_inbound:{session_key}"
+
+    @staticmethod
+    def _resolve_renew_interval(raw_value: float | None, ttl_seconds: int) -> float:
+        """计算续租间隔，默认使用 TTL 的三分之一并保留最小 1 秒。"""
+
+        if raw_value is not None:
+            return max(0.1, float(raw_value))
+        return max(1.0, min(60.0, ttl_seconds / 3.0))
