@@ -716,6 +716,8 @@ class GatewayControlPlane:
             if self.task_worker is not None
             else {"configured": False}
         )
+        if tasks.get("configured"):
+            tasks["persisted_lanes"] = self._session_lane_status()
         return {
             "agents": {
                 "count": len(agents),
@@ -958,6 +960,22 @@ class GatewayControlPlane:
                 "warning": sum(1 for row in checks if row["status"] == "warning"),
                 "ok": sum(1 for row in checks if row["status"] == "ok"),
             },
+        }
+
+    def _session_lane_status(self) -> dict[str, Any]:
+        """读取 PostgreSQL 中最近的 session lane owner 状态。"""
+
+        if self.state_repository is None:
+            return {"configured": False, "count": 0, "items": []}
+        rows = self._state_repo_list(
+            "session_lanes",
+            limit=50,
+            filters={"state": "owned"},
+        )
+        return {
+            "configured": True,
+            "count": len(rows),
+            "items": rows[:6],
         }
 
     def get_source(self, kind: str) -> dict[str, Any]:

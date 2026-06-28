@@ -905,6 +905,8 @@ function renderRuntime(runtime) {
   const inbound = runtime.inbound || {};
   const tasks = runtime.tasks || {};
   const sessionLocks = tasks.session_locks || {};
+  const persistedLanes = tasks.persisted_lanes || {};
+  const persistedLaneItems = Array.isArray(persistedLanes.items) ? persistedLanes.items : [];
   const taskBroker = tasks.broker || tasks.queue?.broker || {};
   const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
   const visibleBrokerQueues = brokerQueues.slice(0, 6);
@@ -957,6 +959,7 @@ function renderRuntime(runtime) {
         `入站Broker ${brokerEnabled ? "已启用" : "未启用"}`,
         `Broker积压 ${brokerBacklog}`,
         `被锁会话 ${sessionLocks.blocked_session_count ?? 0}`,
+        `持久Lane ${persistedLanes.count ?? 0}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
@@ -981,6 +984,18 @@ function renderRuntime(runtime) {
           "最近跳过",
           (sessionLocks.last_blocked_sessions || [])
             .map((row) => `${row.task_type}:${row.session_key}`)
+            .join(" | ") || "无",
+        ],
+        [
+          "持久 Lane",
+          persistedLanes.configured
+            ? `${persistedLanes.count ?? 0} 条最近 owner`
+            : "未接入 PostgreSQL",
+        ],
+        [
+          "最近 owner",
+          persistedLaneItems
+            .map((row) => `${row.worker_id || "--"}:${row.session_key || "--"}`)
             .join(" | ") || "无",
         ],
       ],

@@ -87,12 +87,47 @@ class FakeChannelRuntime:
         }
 
 
+class FakeTaskWorker:
+    def stats(self) -> dict[str, object]:
+        return {
+            "running": True,
+            "worker_id": "worker-a",
+            "concurrency": 2,
+            "registered_task_types": ["agent_inbound"],
+            "queue": {"pending": 0, "running": 0},
+            "broker": {},
+            "session_locks": {"blocked_session_count": 0, "skip_count": 0, "last_blocked_sessions": []},
+        }
+
+
 class FakeRedisClient:
     def __init__(self, health: RedisHealth) -> None:
         self._health = health
 
     def health(self) -> RedisHealth:
         return self._health
+
+
+class FakeLaneStateRepository:
+    def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+        del cursor, limit
+        if table != "session_lanes":
+            return []
+        assert filters == {"state": "owned"}
+        return [
+            {
+                "session_key": "agent:feishu:user-1",
+                "lane_key": "gateway:lock:agent:feishu:user-1",
+                "worker_id": "worker-a",
+                "task_id": "task-a",
+                "state": "owned",
+                "renewed_at": 2.0,
+            }
+        ]
+
+    def get(self, table: str, key: str):
+        del table, key
+        return None
 
 
 class FakePostgresClient:
@@ -954,6 +989,9 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         postgres_client=FakePostgresClient(
             PostgresHealth(enabled=False, ok=True, url="postgresql://postgres:postgres@127.0.0.1:5432/postgres")
         ),
+        state_repository=FakeLaneStateRepository(),
+        task_worker=FakeTaskWorker(),
+        task_queue=LocalTaskQueue(LocalTaskStore(tmp_path / "tasks")),
     )
 
     status = control.runtime_status()
@@ -969,6 +1007,9 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["postgres"]["ok"] is True
     assert status["inbound"]["configured"] is True
     assert status["inbound"]["max_concurrent_lanes"] == 4
+    assert status["tasks"]["persisted_lanes"]["configured"] is True
+    assert status["tasks"]["persisted_lanes"]["count"] == 1
+    assert status["tasks"]["persisted_lanes"]["items"][0]["worker_id"] == "worker-a"
     assert status["cron"]["count"] == 1
     assert health["ok"] is True
     assert health["status"] == "ok"
