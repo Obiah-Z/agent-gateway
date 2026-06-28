@@ -1084,9 +1084,14 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["tasks"]["persisted_lanes"]["count"] == 1
     assert status["tasks"]["persisted_lanes"]["stale_count"] == 1
     assert status["tasks"]["persisted_lanes"]["history_count"] == 1
+    assert status["tasks"]["persisted_lanes"]["recovery_suggestion_count"] == 1
     assert status["tasks"]["persisted_lanes"]["items"][0]["worker_id"] == "worker-a"
     assert status["tasks"]["persisted_lanes"]["stale_items"][0]["session_key"] == "agent:feishu:user-1"
     assert status["tasks"]["persisted_lanes"]["history_items"][0]["event"] == "acquired"
+    assert (
+        status["tasks"]["persisted_lanes"]["recovery_suggestions"][0]["action"]
+        == "release_session_lane"
+    )
     assert status["cron"]["count"] == 1
     assert health["ok"] is False
     assert health["status"] == "degraded"
@@ -1164,6 +1169,65 @@ def test_control_plane_lists_session_lane_history_with_filters(tmp_path: Path) -
             "event": "acquired",
         },
     )
+
+
+def test_control_plane_suggests_recovery_for_stale_session_lanes(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+    )
+
+    result = control.session_lane_recovery_suggestions(limit=10)
+
+    assert result["configured"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["action"] == "release_session_lane"
+    assert result["items"][0]["release_params"] == {
+        "session_key": "agent:feishu:user-1",
+        "owner_token": "worker-a:task-a",
+        "force": False,
+        "reason": "stale lane recovery",
+    }
+    assert result["items"][0]["expired_seconds"] > 0
+    assert repository.calls[0] == (
+        "session_lanes",
+        10,
+        {
+            "state": "owned",
+            "session_key": "",
+            "worker_id": "",
+            "task_id": "",
+        },
+    )
+
+
+def test_control_plane_skips_recovery_for_fresh_session_lanes(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 9999999999.0
+    repository.rows[0]["ttl_seconds"] = 30
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+    )
+
+    result = control.session_lane_recovery_suggestions(limit=10)
+
+    assert result["configured"] is True
+    assert result["count"] == 0
+    assert result["items"] == []
 
 
 def test_control_plane_releases_only_stale_session_lane_by_default(tmp_path: Path) -> None:

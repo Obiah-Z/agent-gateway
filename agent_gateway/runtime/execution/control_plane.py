@@ -753,6 +753,54 @@ class GatewayControlPlane:
             "filters": filters,
         }
 
+    def session_lane_recovery_suggestions(self, *, limit: int = 50) -> dict[str, Any]:
+        """生成 stale session lane 的人工恢复建议。
+
+        该接口只根据 PostgreSQL 持久状态给出建议，不直接释放 Redis 锁或修改数据库。
+        真正释放仍需显式调用 `release_session_lane()`，避免误操作影响活跃 worker。
+        """
+
+        safe_limit = max(1, min(int(limit), 200))
+        lanes = self.list_session_lanes(state="owned", limit=safe_limit)
+        rows = list(lanes.get("items", []) or [])
+        now = time.time()
+        suggestions: list[dict[str, Any]] = []
+        for row in rows:
+            if not self._is_session_lane_stale(row, now=now):
+                continue
+            renewed_at = self._coerce_float(row.get("renewed_at"))
+            ttl_seconds = self._coerce_int(row.get("ttl_seconds"))
+            expired_seconds = max(0.0, now - (renewed_at + ttl_seconds))
+            session_key = str(row.get("session_key", ""))
+            owner_token = str(row.get("owner_token", ""))
+            suggestions.append(
+                {
+                    "session_key": session_key,
+                    "worker_id": str(row.get("worker_id", "")),
+                    "task_id": str(row.get("task_id", "")),
+                    "owner_token": owner_token,
+                    "ttl_seconds": ttl_seconds,
+                    "renewed_at": renewed_at,
+                    "expired_seconds": round(expired_seconds, 3),
+                    "action": "release_session_lane",
+                    "severity": "warning",
+                    "message": "持久 Lane 已超过 TTL，可确认 worker 已退出后释放 PostgreSQL owner 状态。",
+                    "release_params": {
+                        "session_key": session_key,
+                        "owner_token": owner_token,
+                        "force": False,
+                        "reason": "stale lane recovery",
+                    },
+                    "lane": row,
+                }
+            )
+        return {
+            "configured": bool(lanes.get("configured")),
+            "count": len(suggestions),
+            "items": suggestions[:safe_limit],
+            "limit": safe_limit,
+        }
+
     def release_session_lane(
         self,
         *,
@@ -1208,6 +1256,8 @@ class GatewayControlPlane:
         stale_rows = [row for row in rows if self._is_session_lane_stale(row)]
         history = self.list_session_lane_history(limit=50)
         history_rows = list(history.get("items", []) or [])
+        recovery = self.session_lane_recovery_suggestions(limit=50)
+        recovery_rows = list(recovery.get("items", []) or [])
         return {
             "configured": bool(lanes.get("configured")),
             "count": len(rows),
@@ -1216,6 +1266,8 @@ class GatewayControlPlane:
             "stale_items": stale_rows[:6],
             "history_count": len(history_rows),
             "history_items": history_rows[:6],
+            "recovery_suggestion_count": len(recovery_rows),
+            "recovery_suggestions": recovery_rows[:6],
         }
 
     @staticmethod
@@ -1231,6 +1283,24 @@ class GatewayControlPlane:
             return False
         current = time.time() if now is None else float(now)
         return current >= renewed_at + ttl_seconds
+
+    @staticmethod
+    def _coerce_float(value: Any) -> float:
+        """把持久状态中的数字字段安全转成 float。"""
+
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _coerce_int(value: Any) -> int:
+        """把持久状态中的数字字段安全转成 int。"""
+
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
 
     def get_source(self, kind: str) -> dict[str, Any]:
         """读取指定配置源文件的原始内容。"""

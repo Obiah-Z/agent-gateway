@@ -913,13 +913,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.21 Worker 执行事件查询/面板增强 | 已完成 | 控制面新增 `task_executions()`，WebSocket JSON-RPC 新增 `tasks.executions`，支持按 task_id、session_key、worker_id、type 和 status 查询 `task.worker.*` 生命周期事件；Dashboard 后台任务区展示最近 Worker 执行节点。 | 运维面板可直接看到最近 worker started/completed/retrying/failed，不需要翻 JSONL 或手写 `events.tail` 过滤条件。 |
 | 20.9.22 Lane owner 历史记录 | 已完成 | PostgreSQL 新增 append-only `session_lane_events` 表，记录 session_key、lane_key、worker_id、task_id、owner_token、event、ttl_seconds、occurred_at 和 metadata；`RedisLaneCoordinator` 在 acquire/renew/release 时写入 acquired/renewed/released 历史事件；`postgres-lane` smoke 覆盖历史写入与清理。 | 可以复盘一个 session lane 的 owner 变化过程，定位 TTL 接管、worker 崩溃后残留、频繁续租和人工释放。 |
 | 20.9.23 Lane history 查询与 Dashboard 展示 | 已完成 | 控制面新增 `list_session_lane_history()`，WebSocket JSON-RPC 新增 `tasks.lanes.history`，`runtime.status.tasks.persisted_lanes` 增加 `history_count/history_items`，Dashboard 后台任务卡片展示最近 Lane owner 历史。 | 运维面板和控制面可以直接查看最近 acquired/renewed/released 历史，不需要手动查询 PostgreSQL 或翻事件文件。 |
+| 20.9.24 Stale lane 恢复建议 | 已完成 | 控制面新增 `session_lane_recovery_suggestions()`，WebSocket JSON-RPC 新增 `tasks.lanes.recovery`，`runtime.status.tasks.persisted_lanes` 和 Dashboard 展示最近 stale lane 的恢复建议、owner token 和可传给 `tasks.lanes.release` 的释放参数。 | stale lane 不再只显示告警，还能直接给出下一步人工处理建议；默认不自动释放，避免误影响活跃 worker。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询和 Dashboard 最近 Lane 历史展示；后续可继续做更完整的自动恢复策略。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示和 stale lane 恢复建议；后续可继续做更完整的自动恢复策略。
 
 阶段完成标准：
 

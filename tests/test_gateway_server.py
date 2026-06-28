@@ -908,6 +908,43 @@ def test_gateway_server_exposes_session_lane_history(tmp_path) -> None:
     )
 
 
+def test_gateway_server_exposes_session_lane_recovery_suggestions(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    agents = AgentManager()
+    bindings = BindingTable()
+    channels = ChannelManager()
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 1.0
+    repository.rows[0]["ttl_seconds"] = 1
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([]),
+        channels=channels,
+        state_repository=repository,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(server._m_tasks_lanes_recovery({"limit": 10}))
+
+    assert result["configured"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["action"] == "release_session_lane"
+    assert result["items"][0]["release_params"]["session_key"] == "agent:feishu:user-1"
+
+
 def test_gateway_server_releases_session_lane(tmp_path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",
