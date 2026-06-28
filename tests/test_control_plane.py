@@ -894,6 +894,32 @@ def test_control_plane_manages_task_queue(tmp_path: Path) -> None:
     assert control.retry_task(pending.id) is True
 
 
+def test_control_plane_formats_task_payload_preview_time(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(
+        task_type="cron",
+        source="scheduler",
+        agent_id="research",
+        session_key="system:cron:health-check",
+        payload={"job_id": "health-check", "scheduled_at": 1782619200.6118104},
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        task_queue=queue,
+    )
+
+    detail = control.get_task(task.id, include_payload=False)
+
+    assert detail["payload_preview"] == "任务 health-check · 调度时间 2026年06月28日 12时00分"
+    assert "1782619200" not in detail["payload_preview"]
+    assert "{'job_id'" not in detail["payload_preview"]
+
+
 def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     settings = _build_settings(tmp_path)
     settings.workspace_root.mkdir(parents=True, exist_ok=True)

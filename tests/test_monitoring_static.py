@@ -104,6 +104,29 @@ def test_monitoring_dashboard_uses_global_panel_collapse_limit() -> None:
     assert "展开剩余" in app_js
 
 
+def test_monitoring_dashboard_uses_compact_sidebar_navigation() -> None:
+    index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+
+    assert index.count("<a href=\"#") == 7
+    assert "健康运行" in index
+    assert "指标告警" in index
+    assert "事件错误" in index
+    assert "任务投递" in index
+    assert "display: flex;" in styles
+    assert "margin-top: auto;" in styles
+
+
+def test_monitoring_dashboard_formats_time_values_consistently() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "function isFormattedTimeText" in app_js
+    assert "function isTimeFieldName" in app_js
+    assert "function formatNestedDisplayValue" in app_js
+    assert "numeric > 100000000000 ? numeric : numeric * 1000" in app_js
+    assert "key.endsWith(\"_time\") || key.endsWith(\"_at\")" in app_js
+
+
 def test_monitoring_dashboard_includes_task_queue_view() -> None:
     app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
     styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")

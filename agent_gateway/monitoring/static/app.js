@@ -362,6 +362,9 @@ function formatDuration(seconds) {
 }
 
 function formatTimestamp(value) {
+  if (typeof value === "string" && isFormattedTimeText(value)) {
+    return value;
+  }
   const date = parseDateValue(value);
   if (!date) {
     return "--";
@@ -374,11 +377,11 @@ function formatDisplayValue(label, value) {
     return "--";
   }
   const key = String(label || "");
-  if (TIME_FIELD_NAMES.has(key)) {
+  if (isTimeFieldName(key)) {
     return formatTimestamp(value);
   }
   if (typeof value === "object") {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(formatNestedDisplayValue(value), null, 2);
   }
   return String(value);
 }
@@ -388,11 +391,15 @@ function parseDateValue(value) {
     return null;
   }
   if (typeof value === "number") {
-    return new Date(value * 1000);
+    return new Date(value > 100000000000 ? value : value * 1000);
   }
-  const text = String(value);
+  const text = String(value).trim();
   if (text === "never" || text === "n/a") {
     return null;
+  }
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const numeric = Number(text);
+    return new Date(numeric > 100000000000 ? numeric : numeric * 1000);
   }
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) {
@@ -418,6 +425,34 @@ function formatDateParts(date, { includeSeconds = false } = {}) {
   }, {});
   const base = `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}时${parts.minute}分`;
   return includeSeconds ? `${base}${parts.second}秒` : base;
+}
+
+function isFormattedTimeText(value) {
+  return /^\d{4}年\d{2}月\d{2}日 \d{2}时\d{2}分(\d{2}秒)?$/.test(String(value || "").trim());
+}
+
+function isTimeFieldName(name) {
+  const key = String(name || "").toLowerCase();
+  return TIME_FIELD_NAMES.has(key) || key.endsWith("_time") || key.endsWith("_at");
+}
+
+function formatNestedDisplayValue(value, key = "") {
+  if (Array.isArray(value)) {
+    return value.map((item) => formatNestedDisplayValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        formatNestedDisplayValue(entryValue, entryKey),
+      ]),
+    );
+  }
+  if (isTimeFieldName(key)) {
+    const formatted = formatTimestamp(value);
+    return formatted === "--" ? value : formatted;
+  }
+  return value;
 }
 
 function normalizeStatus(status) {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 import os
+import json
 import time
 from typing import Any
 
@@ -985,9 +987,7 @@ class GatewayControlPlane:
     def _task_to_dict(task: TaskInstance, *, include_payload: bool = False) -> dict[str, Any]:
         """把任务实例转成控制面响应结构。"""
 
-        payload_preview = ""
-        if task.payload:
-            payload_preview = str(task.payload.get("text") or task.payload)[:200]
+        payload_preview = GatewayControlPlane._task_payload_preview(task.payload)
         row: dict[str, Any] = {
             "id": task.id,
             "task_type": task.task_type,
@@ -1010,6 +1010,60 @@ class GatewayControlPlane:
         if include_payload:
             row["payload"] = task.payload
         return row
+
+    @staticmethod
+    def _task_payload_preview(payload: dict[str, Any]) -> str:
+        """生成适合 Dashboard 展示的任务载荷摘要，避免暴露原始 Python repr。"""
+
+        if not payload:
+            return ""
+        text = payload.get("text")
+        if text:
+            return str(text)[:200]
+        job_id = payload.get("job_id")
+        scheduled_at = payload.get("scheduled_at")
+        if job_id and scheduled_at:
+            return f"任务 {job_id} · 调度时间 {GatewayControlPlane._format_epoch_time(scheduled_at)}"
+        if job_id:
+            return f"任务 {job_id}"
+        return json.dumps(
+            GatewayControlPlane._format_nested_time_values(payload),
+            ensure_ascii=False,
+            default=str,
+        )[:200]
+
+    @staticmethod
+    def _format_nested_time_values(value: Any, key: str = "") -> Any:
+        """递归格式化任务载荷中的时间字段，供预览文本使用。"""
+
+        if isinstance(value, dict):
+            return {
+                item_key: GatewayControlPlane._format_nested_time_values(item_value, item_key)
+                for item_key, item_value in value.items()
+            }
+        if isinstance(value, list):
+            return [GatewayControlPlane._format_nested_time_values(item) for item in value]
+        if GatewayControlPlane._is_time_field_name(key):
+            formatted = GatewayControlPlane._format_epoch_time(value)
+            return formatted or value
+        return value
+
+    @staticmethod
+    def _is_time_field_name(key: str) -> bool:
+        normalized = str(key or "").lower()
+        return normalized.endswith("_at") or normalized.endswith("_time")
+
+    @staticmethod
+    def _format_epoch_time(value: Any) -> str:
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError):
+            return ""
+        if timestamp <= 0:
+            return ""
+        if timestamp > 100000000000:
+            timestamp = timestamp / 1000
+        return datetime.fromtimestamp(timestamp).strftime("%Y年%m月%d日 %H时%M分")
 
     @staticmethod
     def _health_check(
