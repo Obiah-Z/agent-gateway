@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, quote
 from typing import Any
 
 from agent_gateway.monitoring import STATIC_DIR
+from agent_gateway.monitoring.prometheus import render_prometheus_metrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,12 +33,14 @@ class DashboardStaticServer:
         static_dir: Path = STATIC_DIR,
         config: DashboardConfig | None = None,
         onboarding: Any = None,
+        control_plane: Any = None,
     ) -> None:
         self.host = host
         self.port = port
         self.static_dir = static_dir
         self.config = config or DashboardConfig(websocket_url="ws://127.0.0.1:8765")
         self.onboarding = onboarding
+        self.control_plane = control_plane
         self._server: asyncio.base_events.Server | None = None
 
     async def start(self) -> None:
@@ -136,6 +139,9 @@ class DashboardStaticServer:
         if path.startswith("/onboarding/feishu"):
             await self._handle_onboarding_page(writer, raw_path)
             return
+        if path == "/metrics":
+            await self._handle_metrics(writer)
+            return
         if path == "/dashboard-config.json":
             await self._write_json(
                 writer,
@@ -192,6 +198,27 @@ class DashboardStaticServer:
         # so the first version accepts query-less defaults for low-friction local use.
         session = self.onboarding.create_session(mode="personal")
         await self._write_json(writer, HTTPStatus.OK, session)
+
+    async def _handle_metrics(self, writer: asyncio.StreamWriter) -> None:
+        """Expose runtime metrics in Prometheus text format."""
+
+        if self.control_plane is None:
+            await self._write_bytes(
+                writer,
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                b"gateway_metrics_configured 0\ngateway_metrics_available 0\n",
+                content_type="text/plain; version=0.0.4; charset=utf-8",
+                headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+            )
+            return
+        summary = self.control_plane.metrics_summary(limit=60)
+        await self._write_bytes(
+            writer,
+            HTTPStatus.OK,
+            render_prometheus_metrics(summary).encode("utf-8"),
+            content_type="text/plain; version=0.0.4; charset=utf-8",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     async def _handle_onboarding_status(
         self,

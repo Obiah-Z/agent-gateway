@@ -430,6 +430,7 @@ async def serve(app: GatewayApplication) -> None:
                 refresh_interval_seconds=app.settings.dashboard_refresh_interval_seconds,
             ),
             onboarding=onboarding_service,
+            control_plane=app.control_plane,
         )
         if app.settings.dashboard_enabled and role_plan.dashboard
         else None

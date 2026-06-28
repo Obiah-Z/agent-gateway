@@ -35,6 +35,20 @@ class FakeOnboarding:
         }
 
 
+class FakeControlPlane:
+    def metrics_summary(self, *, limit: int = 60):
+        return {
+            "configured": True,
+            "available": True,
+            "count": 1,
+            "delivery": {"max_pending": 7},
+            "lanes": {"max_active": 2},
+            "events": {"max_errors_5m": 1},
+            "cron": {"max_enabled": 3},
+            "profiles": {"max_available": 1},
+        }
+
+
 async def _get(host: str, port: int, path: str) -> tuple[int, dict[str, str], bytes]:
     reader, writer = await asyncio.open_connection(host, port)
     request = "\r\n".join(
@@ -113,6 +127,49 @@ def test_dashboard_static_server_rejects_path_traversal() -> None:
 
         assert status == 404
         assert body == b"not found"
+
+    asyncio.run(_run())
+
+
+def test_dashboard_static_server_serves_prometheus_metrics() -> None:
+    async def _run() -> None:
+        server = DashboardStaticServer(
+            host="127.0.0.1",
+            port=0,
+            control_plane=FakeControlPlane(),
+        )
+        await server.start()
+        assert server._server is not None
+        port = server._server.sockets[0].getsockname()[1]
+        try:
+            status, headers, body = await _get("127.0.0.1", port, "/metrics")
+        finally:
+            await server.stop()
+
+        text = body.decode("utf-8")
+        assert status == 200
+        assert "text/plain" in headers["content-type"]
+        assert "gateway_metrics_available 1" in text
+        assert "gateway_delivery_max_pending 7" in text
+        assert "gateway_events_max_errors_5m 1" in text
+
+    asyncio.run(_run())
+
+
+def test_dashboard_static_server_metrics_unavailable_without_control_plane() -> None:
+    async def _run() -> None:
+        server = DashboardStaticServer(host="127.0.0.1", port=0)
+        await server.start()
+        assert server._server is not None
+        port = server._server.sockets[0].getsockname()[1]
+        try:
+            status, headers, body = await _get("127.0.0.1", port, "/metrics")
+        finally:
+            await server.stop()
+
+        assert status == 503
+        assert "text/plain" in headers["content-type"]
+        assert b"gateway_metrics_available 0" in body
 
     asyncio.run(_run())
 
