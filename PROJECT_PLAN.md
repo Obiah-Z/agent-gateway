@@ -389,7 +389,7 @@ delivery-worker
 | 20.7.2 启动前检查命令 | 已完成 | 新增 `agent-gateway doctor` 和 `agent-gateway doctor --json`，检查 `.env`、模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。 | 启动前能输出 pass/warn/fail；存在 fail 时返回非零退出码。 |
 | 20.7.3 systemd 部署方式 | 已完成 | 新增 `deploy/systemd/agent-gateway.service`、`deploy/systemd/agent-gateway.env.example` 和 `deploy/systemd.md`，包含环境文件、doctor 预检查、重启策略、日志查看和升级流程。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
 | 20.7.4 数据卷与备份恢复 | 已完成 | 已新增 `deploy/backup-restore.md`，补齐 `.env`、`config/`、`workspace/`、`data/`、PostgreSQL、RabbitMQ 和 Redis 的备份/恢复命令，并在 Compose 文档与 README 挂入口。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
-| 20.7.5 反向代理与 HTTPS | 待实现 | 增加 Nginx 或 Caddy 示例，支持飞书 Webhook HTTPS 暴露，并限制 Dashboard 访问范围。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
+| 20.7.5 反向代理与 HTTPS | 已完成 | 已新增 `deploy/reverse-proxy.md`，提供 Caddy 推荐方案、Nginx 备选配置、飞书后台填写方式、Compose 本机回环绑定要求、验收清单和安全底线。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
 | 20.7.6 部署文档整合 | 已完成 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
 
 ##### 20.7.1 Docker Compose 基础编排结果
@@ -411,7 +411,7 @@ delivery-worker
 
 - Compose 默认单机 `GATEWAY_RUNTIME_ROLES=all`，尚未拆分 api/worker/delivery/scheduler 多服务。
 - Dashboard 和中间件端口默认只绑定 `127.0.0.1`，暂不直接支持公网暴露。
-- 飞书 Webhook 生产 HTTPS 暴露放到 20.7.5 反向代理阶段。
+- 飞书 Webhook 生产 HTTPS 暴露已由 20.7.5 反向代理文档补齐。
 - Compose 当前不自动执行 `postgres-init`，首次启动后需要手动执行初始化命令。
 
 ##### 20.7.2 启动前检查命令结果
@@ -491,7 +491,38 @@ sudo systemctl start agent-gateway
 
 - service 示例默认单进程 `GATEWAY_RUNTIME_ROLES=all`。
 - Redis、PostgreSQL、RabbitMQ 需要由系统包、Docker 或其他方式单独托管。
-- 飞书 Webhook HTTPS 暴露仍放到 20.7.5 反向代理阶段。
+- 飞书 Webhook HTTPS 暴露已由 20.7.5 反向代理文档补齐。
+
+##### 20.7.4 数据卷与备份恢复结果
+
+已完成内容：
+
+- 新增 `deploy/backup-restore.md`。
+- 明确 `.env`、`config/`、`workspace/`、`data/`、PostgreSQL、RabbitMQ 和 Redis 的数据边界与重要性。
+- 提供项目文件归档、PostgreSQL `pg_dump/pg_restore`、RabbitMQ/Redis Docker volume 停机归档和恢复命令。
+- 明确 RabbitMQ / Redis 不是事实状态源，恢复优先以 PostgreSQL / TaskStore 为准。
+- README 和 Compose 文档已增加备份恢复入口。
+
+当前边界：
+
+- 文档提供可执行命令，但尚未封装成自动化备份脚本。
+- PostgreSQL 推荐逻辑备份；直接复制 volume 只建议停机时执行。
+- `.env` 和 dump 文件包含敏感信息，不能提交到仓库或公开渠道。
+
+##### 20.7.5 反向代理与 HTTPS 结果
+
+已完成内容：
+
+- 新增 `deploy/reverse-proxy.md`。
+- 推荐 Caddy 作为单机 HTTPS 入口，提供自动证书配置示例。
+- 提供 Nginx + 证书路径的备选反向代理配置。
+- 明确只将 `/webhooks/feishu*` 暴露到公网 HTTPS，Dashboard 和 WebSocket 控制面默认不公网暴露。
+- 增加飞书后台 URL 填写方式、Compose 本机回环绑定要求、验收清单、常见故障和安全底线。
+
+当前边界：
+
+- 文档未实际申请证书或改动宿主机 Caddy/Nginx 配置。
+- Dashboard 访问控制仍依赖外部 Basic Auth、SSH tunnel、VPN 或后续 Phase 12 鉴权能力。
 
 #### Phase 20.8 统一观测与压测
 

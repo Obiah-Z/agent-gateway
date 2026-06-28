@@ -11,7 +11,7 @@
 | `postgres` | `postgres:16-alpine` | 配置、任务、事件、指标、记忆和投递事实状态 | 仅 Compose 内部网络 |
 | `rabbitmq` | `rabbitmq:3.13-management-alpine` | 可靠投递分发、ack、retry、DLQ | 仅 Compose 内部网络 |
 
-默认只把 Gateway 的控制面、Webhook 和 Dashboard 绑定到本机回环地址。Redis、PostgreSQL 和 RabbitMQ 不映射到宿主机端口，避免和本机已安装服务冲突，也避免中间件被误暴露。公网 Webhook 和 Dashboard 访问应在后续反向代理阶段通过 HTTPS 和鉴权处理。
+默认只把 Gateway 的控制面、Webhook 和 Dashboard 绑定到本机回环地址。Redis、PostgreSQL 和 RabbitMQ 不映射到宿主机端口，避免和本机已安装服务冲突，也避免中间件被误暴露。公网 Webhook 访问应通过 [反向代理与 HTTPS 部署指南](reverse-proxy.md) 配置；Dashboard 默认不要公网暴露。
 
 ## 准备配置
 
@@ -197,5 +197,5 @@ docker compose exec gateway agent-gateway postgres-init
 
 - 当前 Compose 是单机编排，不是 Kubernetes 或多主高可用部署。
 - Dashboard 默认仍无鉴权，只绑定本机；不要直接改成 `0.0.0.0` 暴露公网。
-- 飞书 Webhook 生产接入需要 HTTPS，后续应通过 Nginx/Caddy 反向代理补齐。
+- 飞书 Webhook 生产接入需要 HTTPS，参考 [反向代理与 HTTPS 部署指南](reverse-proxy.md)；Dashboard 默认不要裸奔公网。
 - `gateway` 当前以 `GATEWAY_RUNTIME_ROLES=all` 运行；多实例拆分可按 `api/worker/delivery/scheduler/dashboard` 角色扩展。拆出多个 worker 时，为每个实例配置不同的 `GATEWAY_TASK_WORKER_ID`，并按机器容量调整 `GATEWAY_TASK_WORKER_CONCURRENCY`。

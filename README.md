@@ -517,6 +517,7 @@ cd ~/Desktop/claw0/gateway
 - [消息闭环实现说明](doc/消息闭环实现说明.md)
 - [Docker Compose 部署说明](deploy/docker-compose.md)
 - [备份与恢复指南](deploy/backup-restore.md)
+- [反向代理与 HTTPS 部署指南](deploy/reverse-proxy.md)
 - [项目计划](PROJECT_PLAN.md)
 
 ## 当前边界
