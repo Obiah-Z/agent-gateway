@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from pathlib import Path
 
 from agent_gateway.gateways.messaging.manager import ChannelManager
@@ -115,31 +116,45 @@ class FakeLockRedisClient(RedisClient):
         *,
         locked: bool = False,
         fail: bool = False,
+        fail_renew: bool = False,
+        fail_lock_exists: bool = False,
         existing_locks: set[str] | None = None,
     ) -> None:
         super().__init__(enabled=True, url="redis://example.test:6379/0")
         self.locked = locked
         self.fail = fail
+        self.fail_renew = fail_renew
+        self.fail_lock_exists = fail_lock_exists
         self.existing_locks = set(existing_locks or set())
         self.acquired: list[tuple[str, str, int]] = []
         self.released: list[tuple[str, str]] = []
         self.renewed: list[tuple[str, str, int]] = []
+        self.acquired_event = threading.Event()
 
     def acquire_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
         if self.fail:
             raise RuntimeError("redis unavailable")
         self.acquired.append((key, value, ttl_seconds))
-        return not self.locked
+        if self.locked or key in self.existing_locks:
+            return False
+        self.existing_locks.add(key)
+        self.acquired_event.set()
+        return True
 
     def release_lock(self, key: str, *, value: str) -> bool:
         self.released.append((key, value))
+        self.existing_locks.discard(key)
         return True
 
     def renew_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
         self.renewed.append((key, value, ttl_seconds))
+        if self.fail_renew:
+            raise RuntimeError("renew failed")
         return True
 
     def lock_exists(self, key: str) -> bool:
+        if self.fail_lock_exists:
+            raise RuntimeError("probe failed")
         return key in self.existing_locks
 
 
@@ -151,6 +166,10 @@ class FakeEventStore:
         row = {"type": event_type, **kwargs}
         self.rows.append(row)
         return row
+
+
+async def _run_once(worker: TaskWorkerRuntime) -> bool:
+    return await worker.run_once()
 
 
 def test_task_worker_executes_agent_inbound_task(tmp_path: Path) -> None:
@@ -419,6 +438,180 @@ def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
             "retry_count": 0,
         }
     ]
+
+
+def test_concurrent_agent_inbound_workers_do_not_execute_same_session(
+    tmp_path: Path,
+) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    first = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        priority=10,
+        payload={
+            "text": "first",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    second = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        priority=20,
+        payload={
+            "text": "second",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    redis_client = FakeLockRedisClient()
+    dispatcher = FakeInboundDispatcher(delay_seconds=0.1)
+    worker_a = TaskWorkerRuntime(queue, worker_id="worker-a")
+    worker_b = TaskWorkerRuntime(queue, worker_id="worker-b")
+    for worker in (worker_a, worker_b):
+        worker.register_handler(
+            "agent_inbound",
+            AgentInboundTaskHandler(
+                dispatcher,
+                ChannelManager(),
+                redis_client=redis_client,
+                lock_ttl_seconds=30,
+                worker_id=worker.worker_id,
+            ),
+        )
+
+    async def run_race() -> tuple[bool, bool]:
+        task_a = asyncio.create_task(_run_once(worker_a))
+        await asyncio.to_thread(redis_client.acquired_event.wait, 1.0)
+        task_b = asyncio.create_task(_run_once(worker_b))
+        return await asyncio.gather(task_a, task_b)
+
+    handled_a, handled_b = asyncio.run(run_race())
+
+    assert handled_a is True
+    assert handled_b is False
+    assert queue.store.get(first.id).status == "done"
+    assert queue.store.get(second.id).status == "pending"
+    assert [inbound.text for inbound in dispatcher.dispatched] == ["first"]
+
+
+def test_agent_inbound_lock_renew_failure_does_not_abort_current_turn(
+    tmp_path: Path,
+) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        payload={
+            "text": "slow",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    redis_client = FakeLockRedisClient(fail_renew=True)
+    dispatcher = FakeInboundDispatcher(delay_seconds=0.2)
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            redis_client=redis_client,
+            lock_ttl_seconds=3,
+            lock_renew_interval_seconds=0.01,
+            worker_id="worker-1",
+        ),
+    )
+
+    handled = asyncio.run(worker.run_once())
+    stored = queue.store.get(task.id)
+
+    assert handled is True
+    assert stored.status == "done"
+    assert redis_client.renewed
+    assert dispatcher.dispatched[0].text == "slow"
+
+
+def test_task_worker_does_not_skip_when_lock_probe_fails(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        payload={
+            "text": "probe failure falls through",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    redis_client = FakeLockRedisClient(fail_lock_exists=True)
+    dispatcher = FakeInboundDispatcher()
+    event_store = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=event_store)
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            redis_client=redis_client,
+            worker_id="worker-1",
+        ),
+    )
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert queue.store.get(task.id).status == "done"
+    assert event_store.rows == []
+    assert worker.stats()["session_locks"]["skip_count"] == 0
+
+
+def test_task_worker_deduplicates_session_lock_skip_events(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    locked = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        priority=10,
+        payload={
+            "text": "locked",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    redis_client = FakeLockRedisClient(
+        existing_locks={"gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"}
+    )
+    event_store = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=event_store)
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            FakeInboundDispatcher(),
+            ChannelManager(),
+            redis_client=redis_client,
+            worker_id="worker-1",
+        ),
+    )
+
+    assert asyncio.run(worker.run_once()) is False
+    assert asyncio.run(worker.run_once()) is False
+    assert queue.store.get(locked.id).status == "pending"
+    assert len(event_store.rows) == 1
+    assert worker.stats()["session_locks"]["skip_count"] == 2
     assert event_store.rows == [
         {
             "type": "agent_inbound.session_locked_skipped",
