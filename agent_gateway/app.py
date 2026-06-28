@@ -118,6 +118,150 @@ def build_dashboard_websocket_url(settings: GatewaySettings) -> str:
     return f"{protocol}://{host}:{settings.port}"
 
 
+def build_lane_doctor_report(app: GatewayApplication, *, limit: int = 20) -> dict[str, object]:
+    """构建分布式 lane 只读诊断报告。"""
+
+    safe_limit = max(1, min(int(limit), 200))
+    control = app.control_plane
+    runtime = control.runtime_status()
+    health = control.health_check()
+    tasks = runtime.get("tasks", {})
+    tasks = tasks if isinstance(tasks, dict) else {}
+    persisted_lanes = tasks.get("persisted_lanes", {})
+    persisted_lanes = persisted_lanes if isinstance(persisted_lanes, dict) else {}
+    queue_stats = tasks.get("queue", {})
+    queue_stats = queue_stats if isinstance(queue_stats, dict) else {}
+    task_broker = tasks.get("broker") or queue_stats.get("broker", {})
+    task_broker = task_broker if isinstance(task_broker, dict) else {}
+    session_locks = tasks.get("session_locks", {})
+    session_locks = session_locks if isinstance(session_locks, dict) else {}
+    lanes = control.list_session_lanes(state="owned", limit=safe_limit)
+    stale_lanes = list(persisted_lanes.get("stale_items", []) or [])[:safe_limit]
+    recovery_plan = control.plan_session_lane_recovery(limit=safe_limit)
+    recovery_events = control.lane_recovery_events(limit=safe_limit)
+    task_executions = control.task_executions(limit=safe_limit)
+    redis = runtime.get("redis", {})
+    redis = redis if isinstance(redis, dict) else {}
+    postgres = runtime.get("postgres", {})
+    postgres = postgres if isinstance(postgres, dict) else {}
+    checks: list[dict[str, object]] = []
+    checks.append(
+        {
+            "name": "health",
+            "status": health.get("status", "unknown"),
+            "ok": bool(health.get("ok")),
+        }
+    )
+    checks.append(
+        {
+            "name": "redis",
+            "status": "ok" if redis.get("ok") else "warning",
+            "enabled": bool(redis.get("enabled")),
+            "ok": bool(redis.get("ok")),
+        }
+    )
+    checks.append(
+        {
+            "name": "postgres",
+            "status": "ok" if postgres.get("ok") else "warning",
+            "enabled": bool(postgres.get("enabled")),
+            "ok": bool(postgres.get("ok")),
+        }
+    )
+    checks.append(
+        {
+            "name": "inbound_broker",
+            "status": "ok" if int(task_broker.get("dead_letter_messages", 0) or 0) == 0 else "warning",
+            "enabled": bool(task_broker.get("enabled")),
+            "messages": int(task_broker.get("messages", 0) or 0),
+            "dead_letter_messages": int(task_broker.get("dead_letter_messages", 0) or 0),
+        }
+    )
+    checks.append(
+        {
+            "name": "session_lanes",
+            "status": "ok" if int(persisted_lanes.get("stale_count", 0) or 0) == 0 else "warning",
+            "owned": int(persisted_lanes.get("count", 0) or 0),
+            "stale": int(persisted_lanes.get("stale_count", 0) or 0),
+        }
+    )
+    checks.append(
+        {
+            "name": "session_locks",
+            "status": "ok" if int(session_locks.get("blocked_session_count", 0) or 0) == 0 else "warning",
+            "blocked_session_count": int(session_locks.get("blocked_session_count", 0) or 0),
+            "skip_count": int(session_locks.get("skip_count", 0) or 0),
+        }
+    )
+    warning_count = sum(1 for row in checks if row.get("status") == "warning")
+    ok = bool(health.get("ok")) and warning_count == 0
+    return {
+        "ok": ok,
+        "status": "ok" if ok else "warning",
+        "limit": safe_limit,
+        "checks": checks,
+        "summary": {
+            "warnings": warning_count,
+            "owned_lanes": int(persisted_lanes.get("count", 0) or 0),
+            "stale_lanes": int(persisted_lanes.get("stale_count", 0) or 0),
+            "recovery_actions": int(recovery_plan.get("action_count", 0) or 0),
+            "broker_messages": int(task_broker.get("messages", 0) or 0),
+            "broker_dead_letters": int(task_broker.get("dead_letter_messages", 0) or 0),
+        },
+        "lanes": lanes,
+        "stale_lanes": stale_lanes,
+        "recovery_plan": recovery_plan,
+        "recovery_events": recovery_events,
+        "task_executions": task_executions,
+        "runtime": {
+            "tasks": tasks,
+            "redis": redis,
+            "postgres": postgres,
+        },
+    }
+
+
+def render_lane_doctor_text(report: dict[str, object]) -> str:
+    """把 lane-doctor 诊断报告渲染为中文摘要。"""
+
+    summary = report.get("summary", {})
+    summary = summary if isinstance(summary, dict) else {}
+    lines = [
+        f"分布式 Lane 诊断：{report.get('status', 'unknown')}",
+        (
+            "摘要："
+            f"owned={summary.get('owned_lanes', 0)} "
+            f"stale={summary.get('stale_lanes', 0)} "
+            f"recovery_actions={summary.get('recovery_actions', 0)} "
+            f"broker_messages={summary.get('broker_messages', 0)} "
+            f"broker_dlq={summary.get('broker_dead_letters', 0)}"
+        ),
+        "",
+        "检查项：",
+    ]
+    for row in list(report.get("checks", []) or []):
+        if not isinstance(row, dict):
+            continue
+        details = ", ".join(
+            f"{key}={value}"
+            for key, value in row.items()
+            if key not in {"name", "status"}
+        )
+        lines.append(f"- {row.get('status', 'unknown').upper()} {row.get('name', '--')} {details}".rstrip())
+    recovery_plan = report.get("recovery_plan", {})
+    recovery_plan = recovery_plan if isinstance(recovery_plan, dict) else {}
+    if int(recovery_plan.get("action_count", 0) or 0) > 0:
+        lines.extend(
+            [
+                "",
+                "恢复建议：",
+                "- 存在 stale lane 可执行动作，请先查看 tasks.lanes.recovery.plan。",
+                "- 确认 worker 已退出后，再显式调用 tasks.lanes.recovery.execute execute=true。",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def build_application(settings: GatewaySettings | None = None) -> GatewayApplication:
     """装配完整网关应用。"""
 
@@ -986,6 +1130,21 @@ def main() -> None:
         action="store_true",
         help="Do not republish due retrying delivery records.",
     )
+    lane_doctor = subparsers.add_parser(
+        "lane-doctor",
+        help="Run read-only distributed lane diagnostics.",
+    )
+    lane_doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON output.",
+    )
+    lane_doctor.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum rows to include for lane, recovery and task event views.",
+    )
 
     parser.add_argument("--env-file", default="")
     args = parser.parse_args()
@@ -1065,6 +1224,13 @@ def main() -> None:
             include_retrying=not args.no_retrying,
         )
         print(result)
+        return
+    if args.command == "lane-doctor":
+        report = build_lane_doctor_report(app, limit=args.limit)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(render_lane_doctor_text(report))
         return
     parser.error(f"unknown command: {args.command}")
 

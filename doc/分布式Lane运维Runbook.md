@@ -77,6 +77,7 @@ docker compose exec gateway agent-gateway postgres-check-schema
 source .venv/bin/activate
 agent-gateway doctor
 agent-gateway postgres-check-schema
+agent-gateway lane-doctor
 ```
 
 依赖连通性：
@@ -168,6 +169,32 @@ http://127.0.0.1:8780
 | 被锁会话长期存在 | session 正在执行长任务，或 Redis owner 未过期 |
 | 过期 Lane 存在 | PostgreSQL 中有 stale owner，需要确认 Redis TTL 和 worker 状态 |
 | DLQ 大于 0 | RabbitMQ broker 消费或 handler 发生不可恢复失败 |
+
+## 5.1 Lane Doctor
+
+`lane-doctor` 是只读诊断命令，会汇总健康检查、入站 broker 积压、Redis/PostgreSQL 状态、持久 lane、stale lane、恢复预检、恢复审计和最近 worker 执行事件。
+
+文本输出：
+
+```bash
+agent-gateway lane-doctor
+```
+
+JSON 输出：
+
+```bash
+agent-gateway lane-doctor --json --limit 20
+```
+
+安全边界：
+
+- 不启动 Gateway 服务。
+- 不消费 RabbitMQ 消息。
+- 不释放 lane。
+- 不修改 Redis key。
+- 不写入 PostgreSQL 恢复状态。
+
+适合用于部署后验收和故障现场第一轮只读诊断。
 
 ## 6. 控制面查询
 
