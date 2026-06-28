@@ -130,6 +130,32 @@ agent-gateway cron-trigger <job_id> --no-flush
 
 `--no-flush` 表示只写入可靠投递队列，不立即刷送。
 
+## Docker Compose 部署
+
+项目提供单机 Docker Compose 编排，用于同时启动 Gateway、Redis、PostgreSQL 和 RabbitMQ：
+
+```bash
+cd ~/Desktop/claw0/gateway
+cp .env.example .env
+docker compose up -d --build
+docker compose exec gateway agent-gateway postgres-init
+docker compose exec gateway agent-gateway postgres-check-schema
+```
+
+如果本机 Docker 没有 Compose v2 插件，可把 `docker compose` 替换为 `docker-compose`。
+
+默认端口只绑定本机回环地址：
+
+```text
+Dashboard:        http://127.0.0.1:8780
+Prometheus metrics: http://127.0.0.1:8780/metrics
+WebSocket 控制面: ws://127.0.0.1:8765
+飞书 Webhook:     http://127.0.0.1:8766/webhooks/feishu
+RabbitMQ 管理台:  http://127.0.0.1:15672
+```
+
+详细说明见 [Docker Compose 部署说明](deploy/docker-compose.md)。
+
 ## 配置说明
 
 | 文件 | 说明 |

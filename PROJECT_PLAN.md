@@ -351,7 +351,7 @@ delivery-worker
 | 20.4 PostgreSQL 状态外置 | 已完成 | 设计 sessions、tasks、runtime_events、errors、metrics、memory_entries、config_audits 表；保留 JSONL 作为审计备份或降级路径。 | Dashboard 主要列表可从数据库查询，支持分页、筛选和归档。 |
 | 20.5 PostgreSQL 初始化与回填 | 已完成 | 增加 schema 初始化命令、本地 JSON/JSONL 回填命令、dry-run 预检、批量 upsert、实库回放校验、README 迁移说明、状态迁移审计，并把可靠投递队列接入 PostgreSQL primary storage。 | 新环境可一键建表；旧本地数据可安全回填；重复执行不会产生重复配置和运行数据；开启 `GATEWAY_POSTGRES_ENABLED=true` 后运行时优先读写 PostgreSQL，本地文件作为兜底和审计；Prompt、Skill、Cron 配置等运行资产继续文件化。 |
 | 20.6 分布式可靠队列升级 | 已完成 | 在 PostgreSQL-backed delivery queue 基础上，已新增 RabbitMQ-backed 分发层；PostgreSQL 作为事实状态表，RabbitMQ 作为跨进程唤醒、ack、retry、dead-letter 和削峰层，Redis Streams 保留为轻量备选。 | delivery-worker 可通过 RabbitMQ 分发和 PostgreSQL reserve 横向扩展；失败消息可重试、可进入 DLQ、可在 Dashboard 和控制面处理。 |
-| 20.7 生产部署编排 | 待实现 | 增加 Dockerfile、Compose、数据卷、反向代理、HTTPS、启动检查和备份恢复说明。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
+| 20.7 生产部署编排 | 进行中 | 已完成 Dockerfile、Docker Compose、基础依赖编排、数据卷和部署说明；后续补启动前检查、systemd、备份恢复、反向代理和 HTTPS。 | 新机器按文档可启动完整依赖和 gateway 服务。 |
 | 20.8 统一观测与压测 | 进行中 | 先定义压测指标口径、场景边界和报告格式，再增加 Prometheus metrics endpoint、压测脚本、容量基线、P95 延迟、队列积压、worker 吞吐和错误率指标。 | 能用压测报告说明系统在不同并发下的瓶颈和容量。 |
 
 #### 开展顺序建议
@@ -372,6 +372,46 @@ delivery-worker
 - 关键状态不依赖单机 JSONL，Dashboard 可以分页查询任务、事件、错误和记忆。
 - Redis、PostgreSQL、队列和反向代理都有健康检查、配置说明和降级策略。
 - 有基础压测结果，能说明当前机器配置下的吞吐、延迟和瓶颈。
+
+#### Phase 20.7 生产部署编排
+
+状态：进行中。
+
+目标：
+
+- 把当前本地手动启动方式升级为可复现的单机部署形态。
+- 固定 Redis、PostgreSQL、RabbitMQ、Gateway、Dashboard 的启动、端口、数据卷和健康检查边界。
+- 为后续 systemd、反向代理、HTTPS、备份恢复和多角色拆分部署打基础。
+
+| 子阶段 | 状态 | 主要内容 | 完成标准 |
+| --- | --- | --- | --- |
+| 20.7.1 Docker Compose 基础编排 | 已完成 | 新增 `Dockerfile`、`.dockerignore`、`docker-compose.yml` 和 `deploy/docker-compose.md`；编排 Redis、PostgreSQL、RabbitMQ、Gateway，设置健康检查、数据卷和本机端口绑定。 | 可 `docker compose up -d --build` 拉起依赖和 Gateway；文档说明 schema 初始化、数据卷和访问地址。 |
+| 20.7.2 启动前检查命令 | 待实现 | 增加 `agent-gateway doctor`，检查 `.env`、模型配置、Redis、PostgreSQL、RabbitMQ、目录权限、飞书关键配置和 Dashboard 暴露风险。 | 启动前能输出 pass/warn/fail，定位缺失配置或中间件不可用。 |
+| 20.7.3 systemd 部署方式 | 待实现 | 增加 `deploy/systemd/agent-gateway.service`、环境文件示例、重启策略和日志查看说明。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
+| 20.7.4 数据卷与备份恢复 | 待实现 | 补齐 `workspace/`、`data/`、PostgreSQL、RabbitMQ、Redis 和 `.env` 的备份/恢复命令。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
+| 20.7.5 反向代理与 HTTPS | 待实现 | 增加 Nginx 或 Caddy 示例，支持飞书 Webhook HTTPS 暴露，并限制 Dashboard 访问范围。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
+| 20.7.6 部署文档整合 | 待实现 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
+
+##### 20.7.1 Docker Compose 基础编排结果
+
+已完成内容：
+
+- 新增 `Dockerfile`，基于 `python:3.12-slim` 构建 Gateway 镜像。
+- 新增 `.dockerignore`，避免 `.env`、虚拟环境、运行数据和压测产物进入镜像。
+- 新增 `docker-compose.yml`：
+  - `redis`：启用 AOF，并绑定 `127.0.0.1:6379`。
+  - `postgres`：使用 `postgres:16-alpine`，默认账号 `postgres/postgres`。
+  - `rabbitmq`：使用 management 镜像，默认账号 `admin/admin123`。
+  - `gateway`：挂载 `config/`、`workspace/`、`data/`，并覆盖容器内中间件地址为服务名。
+- 新增 `deploy/docker-compose.md`，说明服务组成、启动命令、schema 初始化、访问地址、数据卷和当前边界。
+- README 增加 Docker Compose 快速入口。
+
+当前边界：
+
+- Compose 默认单机 `GATEWAY_RUNTIME_ROLES=all`，尚未拆分 api/worker/delivery/scheduler 多服务。
+- Dashboard 和中间件端口默认只绑定 `127.0.0.1`，暂不直接支持公网暴露。
+- 飞书 Webhook 生产 HTTPS 暴露放到 20.7.5 反向代理阶段。
+- Compose 当前不自动执行 `postgres-init`，首次启动后需要手动执行初始化命令。
 
 #### Phase 20.8 统一观测与压测
 

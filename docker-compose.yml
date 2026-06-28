@@ -1,0 +1,93 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: agent-gateway-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent-gateway-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: agent-gateway-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-gateway
+    env_file:
+      - .env
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_DASHBOARD_HOST: 0.0.0.0
+      FEISHU_WEBHOOK_HOST: 0.0.0.0
+      GATEWAY_WORKSPACE_ROOT: /app/workspace
+      GATEWAY_DATA_DIR: /app/data
+      GATEWAY_CONFIG_DIR: /app/config
+      GATEWAY_REDIS_ENABLED: "true"
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_POSTGRES_ENABLED: "true"
+      GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_DELIVERY_BROKER: rabbitmq
+      GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    ports:
+      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8766:8766"
+      - "127.0.0.1:8780:8780"
+    volumes:
+      - ./config:/app/config
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:
+  rabbitmq-data:
