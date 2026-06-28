@@ -157,6 +157,10 @@ class TaskWorkerRuntime:
                 if checker(task):
                     blocked.add(task.session_key)
                     if len(samples) < 6:
+                        inspector = getattr(handler, "inspect_session_lane", None)
+                        lane_owner = {}
+                        if inspector is not None:
+                            lane_owner = dict(inspector(task) or {})
                         samples.append(
                             {
                                 "task_id": task.id,
@@ -166,6 +170,7 @@ class TaskWorkerRuntime:
                                 "session_key": task.session_key,
                                 "status": task.status,
                                 "retry_count": task.retry_count,
+                                "lane_owner": lane_owner,
                             }
                         )
             except Exception:
@@ -203,6 +208,7 @@ class TaskWorkerRuntime:
                         "source": sample.get("source", ""),
                         "task_status": sample.get("status", ""),
                         "retry_count": sample.get("retry_count", 0),
+                        "lane_owner": sample.get("lane_owner", {}),
                     },
                 )
             except Exception:

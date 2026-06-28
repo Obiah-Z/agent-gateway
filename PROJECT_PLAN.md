@@ -893,7 +893,7 @@ python scripts/build_capacity_baseline.py
 | 20.9.8.1 最终 lane 目标落盘 | 已完成 | 根据最终形态说明，明确 RabbitMQ 负责可靠排队，Redis/PostgreSQL 负责 lane 归属与状态，worker 池执行，同 session 串行、不同 session 并行。 | PROJECT_PLAN 明确最终架构，不再把 RabbitMQ 分区和 lane ownership 混为一层。 |
 | 20.9.8.2 RedisLaneCoordinator MVP | 已完成 | 抽象 lane ownership API：acquire、renew、release、inspect，owner token 使用 `worker_id + task_id`，兼容当前 Redis lock。 | 单元测试证明同 session 只能一个 owner，续租/释放均 token-safe。 |
 | 20.9.8.3 AgentInboundTaskHandler 接入 lane coordinator | 已完成 | handler 内部已从直接调用 Redis lock 迁移到 `RedisLaneCoordinator`，保留现有 key namespace、错误消息和事件行为。 | 现有 20.9.2-20.9.6 测试继续通过。 |
-| 20.9.8.4 Worker heartbeat 与 lane metadata | 待实现 | lane ownership value 增加 worker_id、task_id、acquired_at、renewed_at，支持 worker heartbeat 和 Dashboard inspect。 | runtime.status 能看到 active lane owner 和最近续租时间。 |
+| 20.9.8.4 Worker heartbeat 与 lane metadata | 已完成 | lane ownership value 已增加 worker_id、task_id、acquired_at、renewed_at，续租会刷新 renewed_at；worker blocked session 样例和事件 metadata 已包含 lane owner inspect 信息。 | runtime.status 能看到 active lane owner 和最近续租时间。 |
 | 20.9.8.5 超时接管与迁移策略 | 待实现 | 设计并验证 owner TTL 过期后的接管、retry 任务重入、worker 崩溃恢复和热点 session 标记。 | 故障注入能证明 worker 崩溃后 lane 可由其他 worker 接管。 |
 
 推荐落地顺序：

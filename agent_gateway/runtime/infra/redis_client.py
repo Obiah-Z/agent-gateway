@@ -161,6 +161,37 @@ class RedisClient:
             )
         )
 
+    def replace_lock_value(
+        self,
+        key: str,
+        *,
+        expected_value: str,
+        new_value: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """仅在旧 value 匹配时替换锁 value 并刷新 TTL。"""
+
+        if not self.enabled:
+            return True
+        if not key:
+            return True
+        script = """
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+        end
+        return false
+        """
+        return bool(
+            self._get_client().eval(
+                script,
+                1,
+                key,
+                expected_value,
+                new_value,
+                str(max(1, ttl_seconds)),
+            )
+        )
+
     def lock_exists(self, key: str) -> bool:
         """检查锁 key 是否存在，用于 reserve 阶段避开热点 session。"""
 
@@ -169,6 +200,16 @@ class RedisClient:
         if not key:
             return False
         return bool(self._get_client().exists(key))
+
+    def get_value(self, key: str) -> str:
+        """读取 Redis 字符串 value；未启用或不存在时返回空字符串。"""
+
+        if not self.enabled:
+            return ""
+        if not key:
+            return ""
+        value = self._get_client().get(key)
+        return str(value or "")
 
     def check_fixed_window_rate_limit(
         self,

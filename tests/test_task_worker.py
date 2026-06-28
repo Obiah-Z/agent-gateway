@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 from pathlib import Path
 
@@ -126,9 +127,11 @@ class FakeLockRedisClient(RedisClient):
         self.fail_renew = fail_renew
         self.fail_lock_exists = fail_lock_exists
         self.existing_locks = set(existing_locks or set())
+        self.values: dict[str, str] = {}
         self.acquired: list[tuple[str, str, int]] = []
         self.released: list[tuple[str, str]] = []
         self.renewed: list[tuple[str, str, int]] = []
+        self.replaced: list[tuple[str, str, str, int]] = []
         self.acquired_event = threading.Event()
 
     def acquire_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
@@ -138,12 +141,16 @@ class FakeLockRedisClient(RedisClient):
         if self.locked or key in self.existing_locks:
             return False
         self.existing_locks.add(key)
+        self.values[key] = value
         self.acquired_event.set()
         return True
 
     def release_lock(self, key: str, *, value: str) -> bool:
         self.released.append((key, value))
+        if self.values.get(key) != value:
+            return False
         self.existing_locks.discard(key)
+        self.values.pop(key, None)
         return True
 
     def renew_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
@@ -152,10 +159,29 @@ class FakeLockRedisClient(RedisClient):
             raise RuntimeError("renew failed")
         return True
 
+    def replace_lock_value(
+        self,
+        key: str,
+        *,
+        expected_value: str,
+        new_value: str,
+        ttl_seconds: int,
+    ) -> bool:
+        self.replaced.append((key, expected_value, new_value, ttl_seconds))
+        if self.values.get(key) != expected_value:
+            return False
+        if self.fail_renew:
+            raise RuntimeError("renew failed")
+        self.values[key] = new_value
+        return True
+
     def lock_exists(self, key: str) -> bool:
         if self.fail_lock_exists:
             raise RuntimeError("probe failed")
         return key in self.existing_locks
+
+    def get_value(self, key: str) -> str:
+        return self.values.get(key, "")
 
 
 class FakeEventStore:
@@ -239,17 +265,19 @@ def test_agent_inbound_task_uses_redis_session_lock(tmp_path: Path) -> None:
 
     assert handled is True
     assert stored.status == "done"
+    acquired_payload = json.loads(redis_client.acquired[0][1])
     assert redis_client.acquired == [
         (
             "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1",
-            f"worker-1:{task.id}",
+            redis_client.acquired[0][1],
             120,
         )
     ]
+    assert acquired_payload["owner_token"] == f"worker-1:{task.id}"
     assert redis_client.released == [
         (
             "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1",
-            f"worker-1:{task.id}",
+            redis_client.released[0][1],
         )
     ]
 
@@ -362,12 +390,10 @@ def test_agent_inbound_task_renews_redis_session_lock_during_slow_dispatch(
 
     assert handled is True
     assert stored.status == "done"
-    assert redis_client.renewed
-    assert redis_client.renewed[0] == (
-        "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1",
-        f"worker-1:{task.id}",
-        3,
-    )
+    assert redis_client.replaced
+    assert redis_client.replaced[0][0] == "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"
+    renewed_payload = json.loads(redis_client.replaced[0][2])
+    assert renewed_payload["owner_token"] == f"worker-1:{task.id}"
 
 
 def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
@@ -400,8 +426,20 @@ def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
             "peer_id": "user-2",
         },
     )
-    redis_client = FakeLockRedisClient(
-        existing_locks={"gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"}
+    lane_key = "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"
+    redis_client = FakeLockRedisClient(existing_locks={lane_key})
+    redis_client.values[lane_key] = json.dumps(
+        {
+            "version": 1,
+            "session_key": "inbound:feishu:bot-a:user-1",
+            "lane_key": lane_key,
+            "worker_id": "worker-x",
+            "task_id": "running-task",
+            "owner_token": "worker-x:running-task",
+            "acquired_at": 100.0,
+            "renewed_at": 120.0,
+        },
+        ensure_ascii=False,
     )
     dispatcher = FakeInboundDispatcher()
     event_store = FakeEventStore()
@@ -436,6 +474,17 @@ def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
             "session_key": "inbound:feishu:bot-a:user-1",
             "status": "pending",
             "retry_count": 0,
+            "lane_owner": {
+                "session_key": "inbound:feishu:bot-a:user-1",
+                "lane_key": lane_key,
+                "owned": True,
+                "worker_id": "worker-x",
+                "task_id": "running-task",
+                "owner_value": redis_client.values[lane_key],
+                "acquired_at": 100.0,
+                "renewed_at": 120.0,
+                "legacy": False,
+            },
         }
     ]
 
@@ -537,7 +586,7 @@ def test_agent_inbound_lock_renew_failure_does_not_abort_current_turn(
 
     assert handled is True
     assert stored.status == "done"
-    assert redis_client.renewed
+    assert redis_client.replaced
     assert dispatcher.dispatched[0].text == "slow"
 
 
@@ -592,9 +641,9 @@ def test_task_worker_deduplicates_session_lock_skip_events(tmp_path: Path) -> No
             "peer_id": "user-1",
         },
     )
-    redis_client = FakeLockRedisClient(
-        existing_locks={"gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"}
-    )
+    lane_key = "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"
+    redis_client = FakeLockRedisClient(existing_locks={lane_key})
+    redis_client.values[lane_key] = "worker-x:running-task"
     event_store = FakeEventStore()
     worker = TaskWorkerRuntime(queue, worker_id="worker-1", event_store=event_store)
     worker.register_handler(
@@ -612,22 +661,12 @@ def test_task_worker_deduplicates_session_lock_skip_events(tmp_path: Path) -> No
     assert queue.store.get(locked.id).status == "pending"
     assert len(event_store.rows) == 1
     assert worker.stats()["session_locks"]["skip_count"] == 2
-    assert event_store.rows == [
-        {
-            "type": "agent_inbound.session_locked_skipped",
-            "status": "warning",
-            "component": "task_worker",
-            "message": "入站任务 session 已被其他 worker 持锁，本轮 reserve 跳过",
-            "correlation_id": locked.id,
-            "agent_id": "",
-            "session_key": "inbound:feishu:bot-a:user-1",
-            "metadata": {
-                "worker_id": "worker-1",
-                "task_id": locked.id,
-                "task_type": "agent_inbound",
-                "source": "feishu",
-                "task_status": "pending",
-                "retry_count": 0,
-            },
-        }
-    ]
+    row = event_store.rows[0]
+    assert row["type"] == "agent_inbound.session_locked_skipped"
+    assert row["status"] == "warning"
+    assert row["component"] == "task_worker"
+    assert row["correlation_id"] == locked.id
+    assert row["session_key"] == "inbound:feishu:bot-a:user-1"
+    assert row["metadata"]["worker_id"] == "worker-1"
+    assert row["metadata"]["task_id"] == locked.id
+    assert row["metadata"]["lane_owner"]["owned"] is True

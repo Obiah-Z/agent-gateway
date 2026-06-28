@@ -84,6 +84,7 @@ class AgentInboundTaskHandler:
 
         owner = LaneOwnerToken(worker_id=self.worker_id, task_id=task.id)
         ownership: LaneOwnership | None = None
+        ownership_ref: dict[str, LaneOwnership] = {}
         renew_task: asyncio.Task[None] | None = None
         if self.lane_coordinator.enabled and task.session_key.strip():
             try:
@@ -96,8 +97,9 @@ class AgentInboundTaskHandler:
                 raise RetryableTaskError(f"agent inbound session lock unavailable: {exc}") from exc
             if ownership is None:
                 raise RetryableTaskError(f"agent inbound session locked: {task.session_key}")
+            ownership_ref["current"] = ownership
             renew_task = asyncio.create_task(
-                self._renew_lock_until_cancelled(ownership),
+                self._renew_lock_until_cancelled(ownership_ref),
                 name=f"agent-inbound-lock-renew:{task.id}",
             )
         try:
@@ -116,7 +118,7 @@ class AgentInboundTaskHandler:
                     pass
             if ownership is not None:
                 try:
-                    self.lane_coordinator.release(ownership)
+                    self.lane_coordinator.release(ownership_ref.get("current", ownership))
                 except Exception:
                     pass
 
@@ -131,7 +133,20 @@ class AgentInboundTaskHandler:
             # Redis 不可用时不在 reserve 阶段跳过，执行阶段会进入 retrying。
             return False
 
-    async def _renew_lock_until_cancelled(self, ownership: LaneOwnership) -> None:
+    def inspect_session_lane(self, task: TaskInstance) -> dict[str, object]:
+        """返回任务 session lane 的当前 owner 信息。"""
+
+        if not self.lane_coordinator.enabled:
+            return {}
+        try:
+            return self.lane_coordinator.inspect(task.session_key).to_dict()
+        except Exception:
+            return {}
+
+    async def _renew_lock_until_cancelled(
+        self,
+        ownership_ref: dict[str, LaneOwnership],
+    ) -> None:
         """定期续租当前任务持有的 session 锁，覆盖长模型调用场景。"""
 
         while True:
@@ -139,7 +154,7 @@ class AgentInboundTaskHandler:
             try:
                 renewed = await asyncio.to_thread(
                     self.lane_coordinator.renew,
-                    ownership,
+                    ownership_ref["current"],
                 )
             except Exception:
                 # 续租失败时不直接中断已在执行的 Agent 回合，避免重复副作用；
@@ -147,6 +162,7 @@ class AgentInboundTaskHandler:
                 continue
             if not renewed:
                 return
+            ownership_ref["current"] = renewed
 
     @staticmethod
     def _lock_key(task: TaskInstance) -> str:

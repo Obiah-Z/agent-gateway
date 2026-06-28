@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import time
+from typing import Any
 
 from agent_gateway.runtime.infra.redis_client import RedisClient
 
@@ -9,8 +12,8 @@ from agent_gateway.runtime.infra.redis_client import RedisClient
 class LaneOwnerToken:
     """分布式 lane owner token。
 
-    MVP 阶段保持 `worker_id:task_id` 字符串格式，兼容现有 Redis session lock；
-    后续会升级为带 heartbeat、acquired_at、renewed_at 的 JSON metadata。
+    `value` 保持 `worker_id:task_id` 字符串格式，用于错误消息和旧 value 兼容；
+    Redis lane value 默认写入 JSON metadata，便于后续 heartbeat、接管和 Dashboard inspect。
     """
 
     worker_id: str
@@ -31,6 +34,37 @@ class LaneOwnership:
     lane_key: str
     owner: LaneOwnerToken
     ttl_seconds: int
+    owner_value: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class LaneInfo:
+    """当前 Redis 中可观测的 session lane owner 信息。"""
+
+    session_key: str
+    lane_key: str
+    owned: bool
+    worker_id: str = ""
+    task_id: str = ""
+    owner_value: str = ""
+    acquired_at: float = 0.0
+    renewed_at: float = 0.0
+    legacy: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """返回可用于 runtime.status / Dashboard 的字典。"""
+
+        return {
+            "session_key": self.session_key,
+            "lane_key": self.lane_key,
+            "owned": self.owned,
+            "worker_id": self.worker_id,
+            "task_id": self.task_id,
+            "owner_value": self.owner_value,
+            "acquired_at": self.acquired_at,
+            "renewed_at": self.renewed_at,
+            "legacy": self.legacy,
+        }
 
 
 class RedisLaneCoordinator:
@@ -69,20 +103,30 @@ class RedisLaneCoordinator:
         *,
         owner: LaneOwnerToken,
         ttl_seconds: int,
+        now: float | None = None,
     ) -> LaneOwnership | None:
         """尝试获取 session lane ownership，失败返回 None。"""
 
         lane_key = self.lane_key(session_key)
+        current = time.time() if now is None else float(now)
+        owner_value = self._encode_owner(
+            session_key=session_key,
+            lane_key=lane_key,
+            owner=owner,
+            acquired_at=current,
+            renewed_at=current,
+        )
         if not self.enabled or not lane_key:
             return LaneOwnership(
                 session_key=session_key,
                 lane_key=lane_key,
                 owner=owner,
                 ttl_seconds=max(1, int(ttl_seconds)),
+                owner_value=owner_value,
             )
         acquired = self.redis_client.acquire_lock(
             lane_key,
-            value=owner.value,
+            value=owner_value,
             ttl_seconds=max(1, int(ttl_seconds)),
         )
         if not acquired:
@@ -92,17 +136,49 @@ class RedisLaneCoordinator:
             lane_key=lane_key,
             owner=owner,
             ttl_seconds=max(1, int(ttl_seconds)),
+            owner_value=owner_value,
         )
 
-    def renew(self, ownership: LaneOwnership) -> bool:
+    def renew(self, ownership: LaneOwnership, *, now: float | None = None) -> LaneOwnership | None:
         """续租当前 owner 持有的 lane。"""
 
         if not self.enabled or not ownership.lane_key:
-            return True
-        return self.redis_client.renew_lock(
-            ownership.lane_key,
-            value=ownership.owner.value,
+            return ownership
+        current = time.time() if now is None else float(now)
+        acquired_at = self._decode_owner(ownership.owner_value).acquired_at or current
+        new_value = self._encode_owner(
+            session_key=ownership.session_key,
+            lane_key=ownership.lane_key,
+            owner=ownership.owner,
+            acquired_at=acquired_at,
+            renewed_at=current,
+        )
+        replaced = False
+        replace_method = getattr(self.redis_client, "replace_lock_value", None)
+        if replace_method is not None:
+            replaced = bool(
+                replace_method(
+                    ownership.lane_key,
+                    expected_value=ownership.owner_value,
+                    new_value=new_value,
+                    ttl_seconds=ownership.ttl_seconds,
+                )
+            )
+        if not replaced and ownership.owner_value == ownership.owner.value:
+            replaced = self.redis_client.renew_lock(
+                ownership.lane_key,
+                value=ownership.owner.value,
+                ttl_seconds=ownership.ttl_seconds,
+            )
+            new_value = ownership.owner_value
+        if not replaced:
+            return None
+        return LaneOwnership(
+            session_key=ownership.session_key,
+            lane_key=ownership.lane_key,
+            owner=ownership.owner,
             ttl_seconds=ownership.ttl_seconds,
+            owner_value=new_value,
         )
 
     def release(self, ownership: LaneOwnership) -> bool:
@@ -112,7 +188,7 @@ class RedisLaneCoordinator:
             return True
         return self.redis_client.release_lock(
             ownership.lane_key,
-            value=ownership.owner.value,
+            value=ownership.owner_value,
         )
 
     def is_owned(self, session_key: str) -> bool:
@@ -122,3 +198,82 @@ class RedisLaneCoordinator:
         if not self.enabled or not lane_key:
             return False
         return self.redis_client.lock_exists(lane_key)
+
+    def inspect(self, session_key: str) -> LaneInfo:
+        """读取当前 session lane owner metadata。"""
+
+        lane_key = self.lane_key(session_key)
+        if not self.enabled or not lane_key:
+            return LaneInfo(session_key=session_key, lane_key=lane_key, owned=False)
+        raw = self.redis_client.get_value(lane_key)
+        if not raw:
+            return LaneInfo(session_key=session_key, lane_key=lane_key, owned=False)
+        return self._decode_owner(raw, session_key=session_key, lane_key=lane_key)
+
+    def _encode_owner(
+        self,
+        *,
+        session_key: str,
+        lane_key: str,
+        owner: LaneOwnerToken,
+        acquired_at: float,
+        renewed_at: float,
+    ) -> str:
+        """编码 lane owner metadata。"""
+
+        return json.dumps(
+            {
+                "version": 1,
+                "session_key": session_key,
+                "lane_key": lane_key,
+                "worker_id": owner.worker_id,
+                "task_id": owner.task_id,
+                "owner_token": owner.value,
+                "acquired_at": acquired_at,
+                "renewed_at": renewed_at,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    def _decode_owner(
+        self,
+        raw_value: str,
+        *,
+        session_key: str = "",
+        lane_key: str = "",
+    ) -> LaneInfo:
+        """解析 Redis 中的 lane owner value，兼容旧字符串 token。"""
+
+        try:
+            payload = json.loads(raw_value)
+        except json.JSONDecodeError:
+            worker_id, _, task_id = raw_value.partition(":")
+            return LaneInfo(
+                session_key=session_key,
+                lane_key=lane_key,
+                owned=bool(raw_value),
+                worker_id=worker_id,
+                task_id=task_id,
+                owner_value=raw_value,
+                legacy=True,
+            )
+        if not isinstance(payload, dict):
+            return LaneInfo(
+                session_key=session_key,
+                lane_key=lane_key,
+                owned=bool(raw_value),
+                owner_value=raw_value,
+                legacy=True,
+            )
+        return LaneInfo(
+            session_key=str(payload.get("session_key") or session_key),
+            lane_key=str(payload.get("lane_key") or lane_key),
+            owned=True,
+            worker_id=str(payload.get("worker_id", "")),
+            task_id=str(payload.get("task_id", "")),
+            owner_value=raw_value,
+            acquired_at=float(payload.get("acquired_at", 0.0) or 0.0),
+            renewed_at=float(payload.get("renewed_at", 0.0) or 0.0),
+            legacy=False,
+        )
