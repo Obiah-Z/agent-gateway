@@ -102,12 +102,15 @@ class TaskWorkerRuntime:
     def stats(self) -> dict[str, Any]:
         """返回 worker 与队列状态。"""
 
+        queue_stats = self.queue.stats()
+        broker_stats = dict(queue_stats.get("broker", {}) or {})
         return {
             "running": self._running,
             "worker_id": self.worker_id,
             "concurrency": self.concurrency,
             "registered_task_types": sorted(self.handlers),
-            "queue": self.queue.stats(),
+            "queue": queue_stats,
+            "broker": broker_stats,
             "session_locks": {
                 "blocked_session_count": len(self._last_blocked_sessions),
                 "skip_count": self._session_lock_skip_count,

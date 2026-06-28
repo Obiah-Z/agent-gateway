@@ -905,6 +905,12 @@ function renderRuntime(runtime) {
   const inbound = runtime.inbound || {};
   const tasks = runtime.tasks || {};
   const sessionLocks = tasks.session_locks || {};
+  const taskBroker = tasks.broker || tasks.queue?.broker || {};
+  const brokerQueues = Array.isArray(taskBroker.queues) ? taskBroker.queues : [];
+  const visibleBrokerQueues = brokerQueues.slice(0, 6);
+  const brokerEnabled = Boolean(taskBroker.enabled);
+  const brokerBacklog = Number(taskBroker.messages || 0);
+  const brokerDeadLetters = Number(taskBroker.dead_letter_messages || 0);
   const sections = [
     {
       icon: "AG",
@@ -943,20 +949,34 @@ function renderRuntime(runtime) {
       icon: "TW",
       title: "后台任务",
       value: `${tasks.queue?.pending ?? 0}/${tasks.queue?.running ?? 0}`,
-      status: Number(sessionLocks.blocked_session_count || 0) > 0 ? "warning" : "ok",
+      status: brokerDeadLetters > 0 || Number(sessionLocks.blocked_session_count || 0) > 0 ? "warning" : "ok",
       summary: "待执行 / 运行中任务",
       chips: [
         `worker ${tasks.running ? "运行中" : "未运行"}`,
         `并发 ${tasks.concurrency ?? 0}`,
+        `入站Broker ${brokerEnabled ? "已启用" : "未启用"}`,
+        `Broker积压 ${brokerBacklog}`,
         `被锁会话 ${sessionLocks.blocked_session_count ?? 0}`,
-        `累计跳过 ${sessionLocks.skip_count ?? 0}`,
       ],
       rows: [
         ["worker ID", tasks.worker_id || "--"],
         ["注册任务", (tasks.registered_task_types || []).join(", ") || "无"],
         ["待执行", `${tasks.queue?.pending ?? 0}`],
         ["重试中", `${tasks.queue?.retrying ?? 0}`],
+        ["入站 Broker", brokerEnabled ? `${taskBroker.backend || "broker"} 已启用` : "未启用"],
+        ["Broker Exchange", taskBroker.exchange || "--"],
+        ["Broker 分区", `${taskBroker.partitions ?? 0}`],
+        ["Broker Prefetch", `${taskBroker.prefetch ?? 0}`],
+        ["Broker 总积压", `${brokerBacklog}`],
+        ["Broker 死信", `${brokerDeadLetters}`],
+        [
+          "分区积压",
+          visibleBrokerQueues
+            .map((row) => `#${row.partition}:${row.messages}`)
+            .join(" | ") || "无",
+        ],
         ["被锁会话", `${sessionLocks.blocked_session_count ?? 0}`],
+        ["累计跳过", `${sessionLocks.skip_count ?? 0}`],
         [
           "最近跳过",
           (sessionLocks.last_blocked_sessions || [])

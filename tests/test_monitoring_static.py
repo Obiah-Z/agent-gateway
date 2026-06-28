@@ -148,6 +148,18 @@ def test_monitoring_dashboard_includes_task_queue_view() -> None:
     assert ".task-item" in styles
 
 
+def test_monitoring_dashboard_includes_inbound_broker_observability() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "taskBroker" in app_js
+    assert "入站Broker" in app_js
+    assert "Broker积压" in app_js
+    assert "Broker 总积压" in app_js
+    assert "Broker 死信" in app_js
+    assert "分区积压" in app_js
+    assert "brokerQueues.slice(0, 6)" in app_js
+
+
 def test_monitoring_static_dir_is_inside_package() -> None:
     assert Path("agent_gateway/monitoring/static") in STATIC_DIR.relative_to(Path.cwd()).parents or (
         Path.cwd() / "agent_gateway/monitoring/static"

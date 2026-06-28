@@ -122,6 +122,18 @@ def test_task_worker_stats_include_registered_handlers_and_queue(tmp_path: Path)
     assert stats["queue"]["pending"] == 1
 
 
+def test_task_worker_stats_include_broker_summary(tmp_path: Path) -> None:
+    broker = FakeInboundTaskBroker([])
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"), broker=broker)
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    worker.register_handler("echo", lambda item: "ok")
+
+    stats = worker.stats()
+
+    assert stats["broker"] == {"backend": "fake", "messages": 0}
+    assert stats["queue"]["broker"] == {"backend": "fake", "messages": 0}
+
+
 class FakeInboundDispatcher:
     def __init__(self, *, delay_seconds: float = 0.0) -> None:
         self.dispatched: list[InboundMessage] = []
