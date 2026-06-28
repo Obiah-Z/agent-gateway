@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 from dataclasses import dataclass, replace
+import json
 import time
 import uuid
 from pathlib import Path
@@ -43,6 +44,7 @@ from agent_gateway.runtime.execution.lanes import CommandQueue
 from agent_gateway.runtime.execution.loop import AgentLoopRunner
 from agent_gateway.runtime.execution.metrics_runtime import MetricsRuntime
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
+from agent_gateway.runtime.diagnostics import render_doctor_text, run_doctor
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager, ResilienceRunner
 from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
@@ -930,6 +932,15 @@ def main() -> None:
         "postgres-smoke",
         help="Verify PostgreSQL primary storage and local fallback writes.",
     )
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="Run startup diagnostics without serving traffic.",
+    )
+    doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON output.",
+    )
     delivery_republish = subparsers.add_parser(
         "delivery-republish",
         help="Republish pending/retrying delivery references to the configured broker.",
@@ -948,7 +959,18 @@ def main() -> None:
     parser.add_argument("--env-file", default="")
     args = parser.parse_args()
 
-    load_env(Path(args.env_file) if args.env_file else None)
+    env_path = Path(args.env_file) if args.env_file else None
+    load_env(env_path)
+    if args.command == "doctor":
+        settings = GatewaySettings.from_env()
+        report = run_doctor(settings, env_file=env_path)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(render_doctor_text(report))
+        if not report.get("ok", False):
+            raise SystemExit(1)
+        return
     if args.command == "postgres-init":
         settings = GatewaySettings.from_env()
         sql = build_postgres_schema_sql()

@@ -60,17 +60,20 @@ docker compose logs -f gateway
 如需校验 Compose 语法，可以运行：
 
 ```bash
-docker-compose config
+docker compose config
 ```
 
-注意：`docker-compose config` 会展开 `.env` 中的真实密钥，不要把完整输出粘贴到公开渠道。
+注意：`docker compose config` 会展开 `.env` 中的真实密钥，不要把完整输出粘贴到公开渠道。
 
 首次启动后初始化 PostgreSQL schema：
 
 ```bash
+docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-init
 docker compose exec gateway agent-gateway postgres-check-schema
 ```
+
+`doctor` 会检查模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。存在 `FAIL` 时会返回非零退出码。
 
 如需把已有本地 JSON/JSONL 状态回填到数据库：
 

@@ -386,7 +386,7 @@ delivery-worker
 | 子阶段 | 状态 | 主要内容 | 完成标准 |
 | --- | --- | --- | --- |
 | 20.7.1 Docker Compose 基础编排 | 已完成 | 新增 `Dockerfile`、`.dockerignore`、`docker-compose.yml` 和 `deploy/docker-compose.md`；编排 Redis、PostgreSQL、RabbitMQ、Gateway，设置健康检查、数据卷和本机端口绑定。 | 可 `docker compose up -d --build` 拉起依赖和 Gateway；文档说明 schema 初始化、数据卷和访问地址。 |
-| 20.7.2 启动前检查命令 | 待实现 | 增加 `agent-gateway doctor`，检查 `.env`、模型配置、Redis、PostgreSQL、RabbitMQ、目录权限、飞书关键配置和 Dashboard 暴露风险。 | 启动前能输出 pass/warn/fail，定位缺失配置或中间件不可用。 |
+| 20.7.2 启动前检查命令 | 已完成 | 新增 `agent-gateway doctor` 和 `agent-gateway doctor --json`，检查 `.env`、模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。 | 启动前能输出 pass/warn/fail；存在 fail 时返回非零退出码。 |
 | 20.7.3 systemd 部署方式 | 待实现 | 增加 `deploy/systemd/agent-gateway.service`、环境文件示例、重启策略和日志查看说明。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
 | 20.7.4 数据卷与备份恢复 | 待实现 | 补齐 `workspace/`、`data/`、PostgreSQL、RabbitMQ、Redis 和 `.env` 的备份/恢复命令。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
 | 20.7.5 反向代理与 HTTPS | 待实现 | 增加 Nginx 或 Caddy 示例，支持飞书 Webhook HTTPS 暴露，并限制 Dashboard 访问范围。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
@@ -405,6 +405,7 @@ delivery-worker
   - `gateway`：挂载 `config/`、`workspace/`、`data/`，并覆盖容器内中间件地址为服务名。
 - 新增 `deploy/docker-compose.md`，说明服务组成、启动命令、schema 初始化、访问地址、数据卷和当前边界。
 - README 增加 Docker Compose 快速入口。
+- 已通过 `docker compose version` 和 `docker compose config` 验证 Compose v2 可用与配置语法正确。
 
 当前边界：
 
@@ -412,6 +413,51 @@ delivery-worker
 - Dashboard 和中间件端口默认只绑定 `127.0.0.1`，暂不直接支持公网暴露。
 - 飞书 Webhook 生产 HTTPS 暴露放到 20.7.5 反向代理阶段。
 - Compose 当前不自动执行 `postgres-init`，首次启动后需要手动执行初始化命令。
+
+##### 20.7.2 启动前检查命令结果
+
+已完成内容：
+
+- 新增 `agent_gateway/runtime/diagnostics.py`。
+- 新增 CLI：
+  - `agent-gateway doctor`
+  - `agent-gateway doctor --json`
+- `doctor` 不构建完整 Gateway app，不启动入站通道、模型调用或后台任务。
+- 当前检查项包括：
+  - `.env` 是否存在。
+  - `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`MODEL_ID`。
+  - `workspace/`、`data/`、`config/` 是否存在且可写。
+  - Redis ping。
+  - PostgreSQL `pg_isready`。
+  - PostgreSQL schema drift。
+  - RabbitMQ broker stats。
+  - RabbitMQ 开启时 PostgreSQL 是否启用。
+  - Dashboard 绑定公网地址风险。
+  - 飞书 Webhook 外部绑定但未配置 encrypt key 的风险。
+- 文本输出按 `PASS/WARN/FAIL` 展示；JSON 输出适合部署脚本和 CI 读取。
+- 存在 `FAIL` 时退出码为 `1`。
+
+使用示例：
+
+```bash
+agent-gateway doctor
+agent-gateway doctor --json
+```
+
+Docker Compose 初始化建议：
+
+```bash
+docker compose up -d --build
+docker compose exec gateway agent-gateway doctor
+docker compose exec gateway agent-gateway postgres-init
+docker compose exec gateway agent-gateway postgres-check-schema
+```
+
+当前边界：
+
+- `doctor` 是启动前轻量检查，不替代运行时 `health.check`。
+- RabbitMQ 检查会声明/探测队列拓扑，但不会发布业务消息。
+- 飞书检查当前只做配置风险提示，不主动访问飞书 OpenAPI。
 
 #### Phase 20.8 统一观测与压测
 

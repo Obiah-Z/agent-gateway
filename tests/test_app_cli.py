@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 
 from agent_gateway import app as gateway_app
@@ -240,6 +241,50 @@ def test_postgres_smoke_runs_verification_without_serving(monkeypatch, capsys) -
     output = capsys.readouterr().out
     assert "'result': 'ok'" in output
     assert "pg-smoke-test" in output
+
+
+def test_doctor_cli_prints_json_without_building_application(monkeypatch, capsys) -> None:
+    def fail_build_application():
+        raise AssertionError("doctor must not build the gateway app")
+
+    monkeypatch.setattr(sys, "argv", ["agent-gateway", "doctor", "--json"])
+    monkeypatch.setattr(gateway_app, "build_application", fail_build_application)
+    monkeypatch.setattr(
+        gateway_app,
+        "run_doctor",
+        lambda settings, env_file=None: {
+            "ok": True,
+            "summary": {"pass": 1, "warn": 0, "fail": 0},
+            "checks": [{"status": "pass", "name": "test", "message": "ok", "detail": {}}],
+        },
+    )
+
+    gateway_app.main()
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["checks"][0]["name"] == "test"
+
+
+def test_doctor_cli_exits_nonzero_on_fail(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["agent-gateway", "doctor"])
+    monkeypatch.setattr(
+        gateway_app,
+        "run_doctor",
+        lambda settings, env_file=None: {
+            "ok": False,
+            "summary": {"pass": 0, "warn": 0, "fail": 1},
+            "checks": [{"status": "fail", "name": "model.api_key", "message": "missing", "detail": {}}],
+        },
+    )
+
+    try:
+        gateway_app.main()
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:  # pragma: no cover - regression guard.
+        raise AssertionError("doctor failure should exit nonzero")
+    assert "FAIL" in capsys.readouterr().out
 
 
 def test_delivery_republish_cli_republishes_without_serving(monkeypatch, capsys) -> None:

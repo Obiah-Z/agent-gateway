@@ -138,6 +138,7 @@ agent-gateway cron-trigger <job_id> --no-flush
 cd ~/Desktop/claw0/gateway
 cp .env.example .env
 docker compose up -d --build
+docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-init
 docker compose exec gateway agent-gateway postgres-check-schema
 ```
@@ -395,6 +396,15 @@ Dashboard 主要用于：
 | `feishu.onboarding.start/status/list` | 飞书绑定会话管理 |
 | `feishu.long_connection.status` | 飞书长连接消费状态 |
 | `agents.*`、`bindings.*`、`channels.*`、`profiles.*` | 运行配置查看、修改、保存和重载 |
+
+启动前检查：
+
+```bash
+agent-gateway doctor
+agent-gateway doctor --json
+```
+
+`doctor` 不会启动完整网关服务，会检查模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险；存在 `FAIL` 时返回非零退出码，便于 Docker Compose、systemd 或部署脚本提前拦截。
 
 ## 测试
 
