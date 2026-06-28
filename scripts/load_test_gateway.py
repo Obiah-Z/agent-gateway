@@ -22,9 +22,15 @@ import time
 import uuid
 from typing import Any
 
+from agent_gateway.gateways.messaging.base import Channel, ChannelAccount
+from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.runtime.domain.models import InboundMessage, OutboundMessage
+from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
+from agent_gateway.runtime.state.queue import DeliveryQueue
+
 
 DEFAULT_REPORT_DIR = Path("workspace/reports/load-tests")
-SUPPORTED_SCENARIOS = {"mock-local"}
+SUPPORTED_SCENARIOS = {"delivery-local", "mock-local"}
 
 
 @dataclass(slots=True)
@@ -37,6 +43,25 @@ class RequestSample:
     e2e_ms: float
     agent_turn_ms: float
     delivery_ms: float
+
+
+class LoadTestChannel(Channel):
+    """Mock channel used by delivery-local load tests."""
+
+    name = "load"
+
+    def __init__(self, *, delay_ms: float = 0.0) -> None:
+        self.delay_ms = max(0.0, delay_ms)
+        self.sent: list[OutboundMessage] = []
+
+    def receive(self) -> InboundMessage | None:
+        return None
+
+    def send(self, outbound: OutboundMessage) -> bool:
+        if self.delay_ms:
+            time.sleep(self.delay_ms / 1000)
+        self.sent.append(outbound)
+        return True
 
 
 def percentile(values: list[float], percent: float) -> float:
@@ -129,6 +154,77 @@ async def run_mock_local(
     return list(samples), time.perf_counter() - started
 
 
+async def run_delivery_local(
+    *,
+    requests: int,
+    concurrency: int,
+    delivery_delay_ms: float,
+    work_dir: Path,
+) -> tuple[list[RequestSample], float, dict[str, Any]]:
+    """Run real DeliveryQueue + DeliveryRuntime with a mock local channel."""
+
+    queue_dir = work_dir / f"delivery-local-{uuid.uuid4().hex[:8]}"
+    queue = DeliveryQueue(queue_dir)
+    manager = ChannelManager()
+    channel = LoadTestChannel(delay_ms=delivery_delay_ms)
+    manager.register(channel, ChannelAccount(channel="load", account_id="load-local"))
+    runtime = DeliveryRuntime(queue, manager)
+    samples: list[RequestSample] = []
+
+    enqueue_started = time.perf_counter()
+    for index in range(1, requests + 1):
+        request_id = f"delivery-{index:06d}-{uuid.uuid4().hex[:8]}"
+        started = time.perf_counter()
+        delivery_id = queue.enqueue(
+            "load",
+            "load-peer",
+            f"load test message {index}",
+            {
+                "account_id": "load-local",
+                "kind": "load-test",
+                "request_id": request_id,
+            },
+        )
+        samples.append(
+            RequestSample(
+                request_id=delivery_id,
+                ok=True,
+                error="",
+                e2e_ms=0.0,
+                agent_turn_ms=0.0,
+                delivery_ms=(time.perf_counter() - started) * 1000,
+            )
+        )
+    max_delivery_backlog = len(queue.pending_entries())
+    enqueue_seconds = time.perf_counter() - enqueue_started
+
+    started = time.perf_counter()
+    # The local file queue is a fallback/audit path and is intentionally measured
+    # as a single delivery worker. Multi-worker correctness is covered by the
+    # PostgreSQL/RabbitMQ path, not by concurrent local file scans.
+    while len(queue.pending_entries()) > 0:
+        await runtime.flush_once()
+    wall_seconds = time.perf_counter() - started
+
+    delivery_finished_ms = wall_seconds * 1000
+    if samples:
+        per_message_ms = delivery_finished_ms / len(samples)
+        for sample in samples:
+            sample.e2e_ms = per_message_ms
+            sample.delivery_ms = per_message_ms
+
+    context = {
+        "enqueue_seconds": round(enqueue_seconds, 3),
+        "sent": len(channel.sent),
+        "max_delivery_backlog": max_delivery_backlog,
+        "queue_dir": str(queue_dir),
+        "uses_real_delivery_queue": True,
+        "effective_delivery_workers": 1,
+        "requested_concurrency": concurrency,
+    }
+    return samples, wall_seconds, context
+
+
 def git_commit() -> str:
     """Return current short git commit for report reproducibility."""
 
@@ -154,6 +250,7 @@ def build_result(
     samples: list[RequestSample],
     agent_delay_ms: float,
     delivery_delay_ms: float,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a stable JSON-serializable load test result."""
 
@@ -163,6 +260,7 @@ def build_result(
     agent_values = [sample.agent_turn_ms for sample in successful]
     delivery_values = [sample.delivery_ms for sample in successful]
     throughput = len(successful) / wall_seconds if wall_seconds > 0 else 0.0
+    context = context or {}
     return {
         "meta": {
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -178,6 +276,7 @@ def build_result(
             "delivery_delay_ms": delivery_delay_ms,
             "uses_real_model": False,
             "uses_real_feishu": False,
+            "uses_real_delivery_queue": bool(context.get("uses_real_delivery_queue", False)),
         },
         "summary": {
             "success": len(successful),
@@ -189,8 +288,9 @@ def build_result(
             "agent_turn_ms": summarize_latencies(agent_values),
             "delivery_ms": summarize_latencies(delivery_values),
             "max_inbound_backlog": 0,
-            "max_delivery_backlog": 0,
+            "max_delivery_backlog": int(context.get("max_delivery_backlog", 0) or 0),
         },
+        "context": context,
         "errors": [
             {"request_id": sample.request_id, "error": sample.error}
             for sample in failed[:20]
@@ -205,6 +305,16 @@ def render_markdown(result: dict[str, Any]) -> str:
     scenario = result["scenario"]
     summary = result["summary"]
     bottleneck = "mock-local 基线未发现外部服务瓶颈"
+    evidence = "该场景只模拟本地 agent/delivery 延迟，不调用真实模型、飞书、PostgreSQL 或 RabbitMQ。"
+    suggestion = "下一步运行 delivery-local / delivery-rabbitmq 场景，分离队列瓶颈。"
+    middleware = "本场景不访问外部中间件"
+    runtime_role = "mock-local script"
+    if scenario["name"] == "delivery-local":
+        bottleneck = "delivery-local 基线主要反映本地文件队列和 DeliveryRuntime flush 吞吐"
+        evidence = "该场景使用真实 DeliveryQueue、DeliveryRuntime 和 mock channel，不调用真实模型、飞书、PostgreSQL 或 RabbitMQ。"
+        suggestion = "下一步接入 delivery-rabbitmq 场景，对比 RabbitMQ 分发和本地轮询差异。"
+        middleware = "使用本地文件 DeliveryQueue，不访问 Redis/PostgreSQL/RabbitMQ"
+        runtime_role = "delivery-local script"
     if summary["error_rate"] > 0:
         bottleneck = "存在请求失败，优先检查脚本错误和本地资源"
     return "\n".join(
@@ -216,8 +326,8 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"- 机器：{meta['platform']}",
             f"- Git commit：{meta['git_commit']}",
             f"- Python 版本：{meta['python']}",
-            "- 运行角色：mock-local script",
-            "- Redis / PostgreSQL / RabbitMQ 配置：本场景不访问外部中间件",
+            f"- 运行角色：{runtime_role}",
+            f"- Redis / PostgreSQL / RabbitMQ 配置：{middleware}",
             "",
             "## 场景配置",
             f"- 场景：{scenario['name']}",
@@ -246,12 +356,12 @@ def render_markdown(result: dict[str, Any]) -> str:
             "",
             "## 瓶颈判断",
             f"- 主要瓶颈：{bottleneck}",
-            "- 证据：该场景只模拟本地 agent/delivery 延迟，不调用真实模型、飞书、PostgreSQL 或 RabbitMQ。",
-            "- 建议：下一步运行 delivery-local / delivery-rabbitmq 场景，分离队列瓶颈。",
+            f"- 证据：{evidence}",
+            f"- 建议：{suggestion}",
             "",
             "## 原始指标摘要",
             "- runtime.status：mock-local 未采集运行中网关状态",
-            "- delivery.stats：mock-local 未访问真实投递队列",
+            f"- delivery.stats：最大投递积压 {summary['max_delivery_backlog']}",
             "- metrics.summary：mock-local 未访问控制面 metrics",
             f"- errors.recent：{len(result['errors'])} 条脚本内错误",
             "",
@@ -277,6 +387,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--agent-delay-ms", type=float, default=10.0)
     parser.add_argument("--delivery-delay-ms", type=float, default=2.0)
+    parser.add_argument("--work-dir", type=Path, default=Path(".load-test-tmp"))
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
@@ -286,14 +397,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     requests = max(1, args.requests)
     concurrency = max(1, args.concurrency)
-    samples, wall_seconds = asyncio.run(
-        run_mock_local(
-            requests=requests,
-            concurrency=concurrency,
-            agent_delay_ms=max(0.0, args.agent_delay_ms),
-            delivery_delay_ms=max(0.0, args.delivery_delay_ms),
+    context: dict[str, Any] = {}
+    if args.scenario == "delivery-local":
+        samples, wall_seconds, context = asyncio.run(
+            run_delivery_local(
+                requests=requests,
+                concurrency=concurrency,
+                delivery_delay_ms=max(0.0, args.delivery_delay_ms),
+                work_dir=args.work_dir,
+            )
         )
-    )
+    else:
+        samples, wall_seconds = asyncio.run(
+            run_mock_local(
+                requests=requests,
+                concurrency=concurrency,
+                agent_delay_ms=max(0.0, args.agent_delay_ms),
+                delivery_delay_ms=max(0.0, args.delivery_delay_ms),
+            )
+        )
     result = build_result(
         scenario=args.scenario,
         requests=requests,
@@ -302,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
         samples=samples,
         agent_delay_ms=max(0.0, args.agent_delay_ms),
         delivery_delay_ms=max(0.0, args.delivery_delay_ms),
+        context=context,
     )
     basename = args.basename or f"{args.scenario}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     json_path, md_path = write_reports(result, args.report_dir, basename)

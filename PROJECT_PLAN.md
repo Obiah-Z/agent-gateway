@@ -473,7 +473,8 @@ delivery-worker
 | 子阶段 | 状态 | 主要内容 | 完成标准 |
 | --- | --- | --- | --- |
 | 20.8.2 压测脚本 MVP | 已完成 | 新增 `scripts/load_test_gateway.py`，支持 `mock-local` 场景、并发、请求数、模拟 Agent/Delivery 延迟、JSON/Markdown 输出。 | 能跑 `mock-local` 并生成报告到 `workspace/reports/load-tests/`。 |
-| 20.8.3 队列链路压测 | 待实现 | 覆盖 PostgreSQL 本地轮询和 RabbitMQ 分发两种投递路径。 | 能对比 pending/retrying/DLQ、worker 吞吐和投递 P95。 |
+| 20.8.3a 本地投递队列压测 | 已完成 | `delivery-local` 场景已接入真实 `DeliveryQueue`、`DeliveryRuntime` 和 mock channel，测量本地文件投递队列的单 worker flush 吞吐。 | 能生成本地投递队列报告，展示最大投递积压、吞吐和投递 P95。 |
+| 20.8.3b RabbitMQ 投递链路压测 | 待实现 | 增加 `delivery-rabbitmq` 场景，覆盖 RabbitMQ 分发、PostgreSQL reserve、ack 和 DLQ 统计。 | 能对比 `delivery-local` 和 `delivery-rabbitmq` 的吞吐、积压和 P95。 |
 | 20.8.4 真实链路压测 | 待实现 | 小并发测试真实模型、飞书 Webhook 和飞书发送。 | 能区分外部 API 瓶颈与网关内部瓶颈。 |
 | 20.8.5 Prometheus metrics endpoint | 待实现 | 暴露 `/metrics` 或控制面等价接口，输出核心计数和队列指标。 | Prometheus 可 scrape，指标名稳定。 |
 | 20.8.6 容量基线报告 | 待实现 | 汇总当前机器在典型配置下的吞吐、P95、错误率和瓶颈。 | `reports/` 下有可复现 Markdown 报告。 |
@@ -504,6 +505,33 @@ python scripts/load_test_gateway.py --scenario mock-local --requests 100 --concu
 
 - `mock-local` 只用于建立本地压测和报告生成基线，不能代表真实模型或飞书链路性能。
 - 队列链路压测将在 20.8.3 中接入 PostgreSQL / RabbitMQ 真实投递路径。
+
+##### 20.8.3a 本地投递队列压测结果
+
+已完成内容：
+
+- `scripts/load_test_gateway.py` 新增 `delivery-local` 场景。
+- 该场景使用真实 `DeliveryQueue`、`DeliveryRuntime` 和 mock channel，不调用真实模型、飞书、PostgreSQL、Redis 或 RabbitMQ。
+- 本地文件队列作为 fallback/audit 路径，按单 delivery worker 测量；多 worker 并发消费留给 RabbitMQ 场景验证。
+- 报告会记录最大投递积压、吞吐、Delivery P50/P95/P99 和本地队列临时目录。
+
+使用示例：
+
+```bash
+python scripts/load_test_gateway.py --scenario delivery-local --requests 100 --concurrency 1 --delivery-delay-ms 0
+```
+
+本机 smoke：
+
+```text
+requests=20 concurrency=4 delivery_delay_ms=0
+success=20 failed=0 throughput_rps≈1172 e2e_p95_ms≈0.853
+```
+
+当前边界：
+
+- `delivery-local` 的有效投递 worker 固定为 1；`--concurrency` 当前只作为报告参数保留，不用于并发扫描本地文件队列。
+- 本场景不代表 PostgreSQL/RabbitMQ 多 worker 能力；下一步 20.8.3b 需要接入 RabbitMQ 分发路径。
 
 #### 当前实现说明
 
