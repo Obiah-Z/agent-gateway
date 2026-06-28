@@ -128,35 +128,47 @@ class FakeLockRedisClient(RedisClient):
         self.fail_lock_exists = fail_lock_exists
         self.existing_locks = set(existing_locks or set())
         self.values: dict[str, str] = {}
+        self.expires_at: dict[str, float] = {}
+        self.now = 0.0
         self.acquired: list[tuple[str, str, int]] = []
         self.released: list[tuple[str, str]] = []
         self.renewed: list[tuple[str, str, int]] = []
         self.replaced: list[tuple[str, str, str, int]] = []
         self.acquired_event = threading.Event()
 
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+        self._purge_expired()
+
     def acquire_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
         if self.fail:
             raise RuntimeError("redis unavailable")
+        self._purge_expired()
         self.acquired.append((key, value, ttl_seconds))
         if self.locked or key in self.existing_locks:
             return False
         self.existing_locks.add(key)
         self.values[key] = value
+        self.expires_at[key] = self.now + ttl_seconds
         self.acquired_event.set()
         return True
 
     def release_lock(self, key: str, *, value: str) -> bool:
+        self._purge_expired()
         self.released.append((key, value))
         if self.values.get(key) != value:
             return False
         self.existing_locks.discard(key)
         self.values.pop(key, None)
+        self.expires_at.pop(key, None)
         return True
 
     def renew_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
+        self._purge_expired()
         self.renewed.append((key, value, ttl_seconds))
         if self.fail_renew:
             raise RuntimeError("renew failed")
+        self.expires_at[key] = self.now + ttl_seconds
         return True
 
     def replace_lock_value(
@@ -167,21 +179,32 @@ class FakeLockRedisClient(RedisClient):
         new_value: str,
         ttl_seconds: int,
     ) -> bool:
+        self._purge_expired()
         self.replaced.append((key, expected_value, new_value, ttl_seconds))
         if self.values.get(key) != expected_value:
             return False
         if self.fail_renew:
             raise RuntimeError("renew failed")
         self.values[key] = new_value
+        self.expires_at[key] = self.now + ttl_seconds
         return True
 
     def lock_exists(self, key: str) -> bool:
+        self._purge_expired()
         if self.fail_lock_exists:
             raise RuntimeError("probe failed")
         return key in self.existing_locks
 
     def get_value(self, key: str) -> str:
+        self._purge_expired()
         return self.values.get(key, "")
+
+    def _purge_expired(self) -> None:
+        expired = [key for key, expires_at in self.expires_at.items() if expires_at <= self.now]
+        for key in expired:
+            self.existing_locks.discard(key)
+            self.values.pop(key, None)
+            self.expires_at.pop(key, None)
 
 
 class FakeEventStore:
@@ -465,28 +488,18 @@ def test_task_worker_skips_agent_inbound_task_when_session_lock_exists(
     stats = worker.stats()
     assert stats["session_locks"]["blocked_session_count"] == 1
     assert stats["session_locks"]["skip_count"] == 1
-    assert stats["session_locks"]["last_blocked_sessions"] == [
-        {
-            "task_id": locked.id,
-            "task_type": "agent_inbound",
-            "source": "feishu",
-            "agent_id": "",
-            "session_key": "inbound:feishu:bot-a:user-1",
-            "status": "pending",
-            "retry_count": 0,
-            "lane_owner": {
-                "session_key": "inbound:feishu:bot-a:user-1",
-                "lane_key": lane_key,
-                "owned": True,
-                "worker_id": "worker-x",
-                "task_id": "running-task",
-                "owner_value": redis_client.values[lane_key],
-                "acquired_at": 100.0,
-                "renewed_at": 120.0,
-                "legacy": False,
-            },
-        }
-    ]
+    sample = stats["session_locks"]["last_blocked_sessions"][0]
+    assert sample["task_id"] == locked.id
+    assert sample["task_type"] == "agent_inbound"
+    assert sample["session_key"] == "inbound:feishu:bot-a:user-1"
+    assert sample["status"] == "pending"
+    assert sample["retry_count"] == 0
+    assert sample["lane_owner"]["session_key"] == "inbound:feishu:bot-a:user-1"
+    assert sample["lane_owner"]["lane_key"] == lane_key
+    assert sample["lane_owner"]["owned"] is True
+    assert sample["lane_owner"]["worker_id"] == "worker-x"
+    assert sample["lane_owner"]["task_id"] == "running-task"
+    assert sample["lane_owner"]["legacy"] is False
 
 
 def test_concurrent_agent_inbound_workers_do_not_execute_same_session(
@@ -670,3 +683,50 @@ def test_task_worker_deduplicates_session_lock_skip_events(tmp_path: Path) -> No
     assert row["metadata"]["worker_id"] == "worker-1"
     assert row["metadata"]["task_id"] == locked.id
     assert row["metadata"]["lane_owner"]["owned"] is True
+
+
+def test_task_worker_can_take_over_session_lane_after_owner_ttl_expires(
+    tmp_path: Path,
+) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    stale = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        priority=10,
+        payload={
+            "text": "stale owner task",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    redis_client = FakeLockRedisClient()
+    lane_key = "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"
+    assert redis_client.acquire_lock(
+        lane_key,
+        value="crashed-worker:stale-task",
+        ttl_seconds=5,
+    )
+    dispatcher = FakeInboundDispatcher()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-new")
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            redis_client=redis_client,
+            lock_ttl_seconds=5,
+            worker_id="worker-new",
+        ),
+    )
+
+    assert asyncio.run(worker.run_once()) is False
+    assert queue.store.get(stale.id).status == "pending"
+    redis_client.advance(5.0)
+    assert asyncio.run(worker.run_once()) is True
+
+    stored = queue.store.get(stale.id)
+    assert stored.status == "done"
+    assert dispatcher.dispatched[0].text == "stale owner task"

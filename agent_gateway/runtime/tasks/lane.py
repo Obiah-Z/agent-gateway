@@ -49,6 +49,9 @@ class LaneInfo:
     owner_value: str = ""
     acquired_at: float = 0.0
     renewed_at: float = 0.0
+    age_seconds: float = 0.0
+    stale: bool = False
+    ttl_seconds: int = 0
     legacy: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,6 +66,9 @@ class LaneInfo:
             "owner_value": self.owner_value,
             "acquired_at": self.acquired_at,
             "renewed_at": self.renewed_at,
+            "age_seconds": self.age_seconds,
+            "stale": self.stale,
+            "ttl_seconds": self.ttl_seconds,
             "legacy": self.legacy,
         }
 
@@ -199,7 +205,13 @@ class RedisLaneCoordinator:
             return False
         return self.redis_client.lock_exists(lane_key)
 
-    def inspect(self, session_key: str) -> LaneInfo:
+    def inspect(
+        self,
+        session_key: str,
+        *,
+        now: float | None = None,
+        stale_after_seconds: int = 0,
+    ) -> LaneInfo:
         """读取当前 session lane owner metadata。"""
 
         lane_key = self.lane_key(session_key)
@@ -208,7 +220,12 @@ class RedisLaneCoordinator:
         raw = self.redis_client.get_value(lane_key)
         if not raw:
             return LaneInfo(session_key=session_key, lane_key=lane_key, owned=False)
-        return self._decode_owner(raw, session_key=session_key, lane_key=lane_key)
+        info = self._decode_owner(raw, session_key=session_key, lane_key=lane_key)
+        return self._with_staleness(
+            info,
+            now=time.time() if now is None else float(now),
+            stale_after_seconds=max(0, int(stale_after_seconds)),
+        )
 
     def _encode_owner(
         self,
@@ -276,4 +293,31 @@ class RedisLaneCoordinator:
             acquired_at=float(payload.get("acquired_at", 0.0) or 0.0),
             renewed_at=float(payload.get("renewed_at", 0.0) or 0.0),
             legacy=False,
+        )
+
+    def _with_staleness(
+        self,
+        info: LaneInfo,
+        *,
+        now: float,
+        stale_after_seconds: int,
+    ) -> LaneInfo:
+        """根据 renewed_at 计算 lane owner 年龄和 stale 状态。"""
+
+        renewed_at = info.renewed_at or info.acquired_at
+        age_seconds = max(0.0, now - renewed_at) if renewed_at > 0 else 0.0
+        stale = bool(stale_after_seconds > 0 and age_seconds >= stale_after_seconds)
+        return LaneInfo(
+            session_key=info.session_key,
+            lane_key=info.lane_key,
+            owned=info.owned,
+            worker_id=info.worker_id,
+            task_id=info.task_id,
+            owner_value=info.owner_value,
+            acquired_at=info.acquired_at,
+            renewed_at=info.renewed_at,
+            age_seconds=age_seconds,
+            stale=stale,
+            ttl_seconds=stale_after_seconds,
+            legacy=info.legacy,
         )

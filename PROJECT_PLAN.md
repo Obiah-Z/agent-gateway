@@ -889,12 +889,12 @@ python scripts/build_capacity_baseline.py
 | 20.9.5 观测与控制面 | 已完成 | `runtime.status.tasks.session_locks` 暴露被锁 session 数、累计跳过次数和最近样例；Dashboard 中文展示后台任务锁观测；事件流记录 `agent_inbound.session_locked_skipped`。 | 排查入站延迟时能区分模型慢、worker 少、锁冲突和 session 热点。 |
 | 20.9.6 故障注入与压测 | 已完成 | 增加同 session 多消息、多 worker 抢占、Redis 探测异常、续租失败、锁跳过事件去重等自动化测试。 | 能证明同 session 不并发执行；Redis 故障时降级策略明确。 |
 | 20.9.7 RabbitMQ session 分区评估 | 已完成 | 已输出 [RabbitMQ 入站 Session 分区评估](doc/RabbitMQ入站Session分区评估.md)，评估 `hash(session_key) % N` 分区队列、轻量引用消息体、prefetch=1、hybrid worker 和迁移风险。 | 结论是暂不替换当前 Redis lock + PostgreSQL task 主链路，RabbitMQ 入站分区作为中期演进方向。 |
-| 20.9.8 per-session task lane 设计 | 进行中 | 设计并逐步实现分布式 lane ownership、worker heartbeat、超时接管、lane 迁移和热点治理。 | 从 Redis lock 演进到可观测、可续租、可接管的 per-session lane。 |
+| 20.9.8 per-session task lane 设计 | 已完成 | 已实现分布式 lane ownership、owner metadata、续租、inspect、TTL 接管和迁移策略文档。 | 从 Redis lock 演进到可观测、可续租、可接管的 per-session lane。 |
 | 20.9.8.1 最终 lane 目标落盘 | 已完成 | 根据最终形态说明，明确 RabbitMQ 负责可靠排队，Redis/PostgreSQL 负责 lane 归属与状态，worker 池执行，同 session 串行、不同 session 并行。 | PROJECT_PLAN 明确最终架构，不再把 RabbitMQ 分区和 lane ownership 混为一层。 |
 | 20.9.8.2 RedisLaneCoordinator MVP | 已完成 | 抽象 lane ownership API：acquire、renew、release、inspect，owner token 使用 `worker_id + task_id`，兼容当前 Redis lock。 | 单元测试证明同 session 只能一个 owner，续租/释放均 token-safe。 |
 | 20.9.8.3 AgentInboundTaskHandler 接入 lane coordinator | 已完成 | handler 内部已从直接调用 Redis lock 迁移到 `RedisLaneCoordinator`，保留现有 key namespace、错误消息和事件行为。 | 现有 20.9.2-20.9.6 测试继续通过。 |
 | 20.9.8.4 Worker heartbeat 与 lane metadata | 已完成 | lane ownership value 已增加 worker_id、task_id、acquired_at、renewed_at，续租会刷新 renewed_at；worker blocked session 样例和事件 metadata 已包含 lane owner inspect 信息。 | runtime.status 能看到 active lane owner 和最近续租时间。 |
-| 20.9.8.5 超时接管与迁移策略 | 待实现 | 设计并验证 owner TTL 过期后的接管、retry 任务重入、worker 崩溃恢复和热点 session 标记。 | 故障注入能证明 worker 崩溃后 lane 可由其他 worker 接管。 |
+| 20.9.8.5 超时接管与迁移策略 | 已完成 | 已输出 [分布式 Lane 接管与迁移策略](doc/分布式Lane接管与迁移策略.md)，并验证 owner TTL 过期后的接管、worker 崩溃未 release 后的 pending task 重入。 | 故障注入证明 worker 崩溃后 lane 可由其他 worker 接管。 |
 
 推荐落地顺序：
 

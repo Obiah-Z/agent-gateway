@@ -7,18 +7,28 @@ class FakeLaneRedisClient(RedisClient):
         super().__init__(enabled=enabled, url="redis://example.test:6379/0")
         self.values: dict[str, str] = {}
         self.expirations: dict[str, int] = {}
+        self.expires_at: dict[str, float] = {}
+        self.now = 0.0
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+        self._purge_expired()
 
     def acquire_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
+        self._purge_expired()
         if key in self.values:
             return False
         self.values[key] = value
         self.expirations[key] = ttl_seconds
+        self.expires_at[key] = self.now + ttl_seconds
         return True
 
     def renew_lock(self, key: str, *, value: str, ttl_seconds: int) -> bool:
+        self._purge_expired()
         if self.values.get(key) != value:
             return False
         self.expirations[key] = ttl_seconds
+        self.expires_at[key] = self.now + ttl_seconds
         return True
 
     def replace_lock_value(
@@ -29,24 +39,37 @@ class FakeLaneRedisClient(RedisClient):
         new_value: str,
         ttl_seconds: int,
     ) -> bool:
+        self._purge_expired()
         if self.values.get(key) != expected_value:
             return False
         self.values[key] = new_value
         self.expirations[key] = ttl_seconds
+        self.expires_at[key] = self.now + ttl_seconds
         return True
 
     def release_lock(self, key: str, *, value: str) -> bool:
+        self._purge_expired()
         if self.values.get(key) != value:
             return False
         self.values.pop(key, None)
         self.expirations.pop(key, None)
+        self.expires_at.pop(key, None)
         return True
 
     def lock_exists(self, key: str) -> bool:
+        self._purge_expired()
         return key in self.values
 
     def get_value(self, key: str) -> str:
+        self._purge_expired()
         return self.values.get(key, "")
+
+    def _purge_expired(self) -> None:
+        expired = [key for key, expires_at in self.expires_at.items() if expires_at <= self.now]
+        for key in expired:
+            self.values.pop(key, None)
+            self.expirations.pop(key, None)
+            self.expires_at.pop(key, None)
 
 
 def test_redis_lane_coordinator_allows_only_one_owner_per_session() -> None:
@@ -132,3 +155,39 @@ def test_redis_lane_coordinator_inspects_legacy_owner_value() -> None:
     assert info.worker_id == "worker-a"
     assert info.task_id == "task-a"
     assert info.legacy is True
+
+
+def test_redis_lane_coordinator_allows_takeover_after_ttl_expiry() -> None:
+    redis_client = FakeLaneRedisClient()
+    coordinator = RedisLaneCoordinator(redis_client)
+    owner_a = LaneOwnerToken(worker_id="worker-a", task_id="task-a")
+    owner_b = LaneOwnerToken(worker_id="worker-b", task_id="task-b")
+
+    first = coordinator.acquire("session-1", owner=owner_a, ttl_seconds=10, now=100.0)
+    blocked = coordinator.acquire("session-1", owner=owner_b, ttl_seconds=10, now=101.0)
+    redis_client.advance(10.0)
+    takeover = coordinator.acquire("session-1", owner=owner_b, ttl_seconds=10, now=111.0)
+
+    assert first is not None
+    assert blocked is None
+    assert takeover is not None
+    info = coordinator.inspect("session-1", now=112.0)
+    assert info.worker_id == "worker-b"
+    assert info.task_id == "task-b"
+
+
+def test_redis_lane_coordinator_marks_stale_owner_for_observability() -> None:
+    redis_client = FakeLaneRedisClient()
+    coordinator = RedisLaneCoordinator(redis_client)
+    owner = LaneOwnerToken(worker_id="worker-a", task_id="task-a")
+
+    ownership = coordinator.acquire("session-1", owner=owner, ttl_seconds=60, now=100.0)
+
+    assert ownership is not None
+    fresh = coordinator.inspect("session-1", now=120.0, stale_after_seconds=30)
+    stale = coordinator.inspect("session-1", now=140.0, stale_after_seconds=30)
+    assert fresh.stale is False
+    assert fresh.age_seconds == 20.0
+    assert stale.stale is True
+    assert stale.age_seconds == 40.0
+    assert stale.ttl_seconds == 30
