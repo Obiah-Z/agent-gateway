@@ -22,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agent_gateway.runtime.infra.redis_client import RedisClient
+from agent_gateway.runtime.tasks import LaneOwnerToken, RedisLaneCoordinator
 from scripts.load_test_gateway import (
     DEFAULT_REPORT_DIR,
     build_result,
@@ -32,6 +33,12 @@ from scripts.load_test_gateway import (
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run distributed lane smoke checks.")
+    parser.add_argument(
+        "--scenario",
+        choices=("inbound", "ttl-takeover"),
+        default="inbound",
+        help="smoke scenario to run",
+    )
     parser.add_argument("--requests", type=int, default=8)
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--agent-delay-ms", type=float, default=5.0)
@@ -48,10 +55,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--redis-socket-timeout-seconds", type=float, default=1.0)
     parser.add_argument("--lane-ttl-seconds", type=int, default=30)
     parser.add_argument("--lane-namespace", default="gateway:smoke:lane")
+    parser.add_argument("--takeover-session-key", default="smoke-session-ttl-takeover")
+    parser.add_argument("--takeover-wait-seconds", type=float, default=0.0)
     parser.add_argument("--work-dir", type=Path, default=Path(".load-test-tmp"))
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--basename", default="")
     return parser.parse_args(argv)
+
+
+def assert_ttl_takeover_result(result: dict) -> list[str]:
+    """Validate Redis lane TTL takeover smoke result."""
+
+    failures: list[str] = []
+    if result.get("status") != "ok":
+        failures.append(f"unexpected status: {result.get('status')}")
+    if result.get("first_owner_acquired") is not True:
+        failures.append("first owner did not acquire lane")
+    if result.get("second_owner_blocked_before_ttl") is not True:
+        failures.append("second owner was not blocked before TTL expiry")
+    if result.get("second_owner_acquired_after_ttl") is not True:
+        failures.append("second owner did not acquire lane after TTL expiry")
+    after = dict(result.get("after_takeover", {}) or {})
+    if after.get("worker_id") != result.get("second_worker_id"):
+        failures.append(
+            "lane owner did not switch to second worker: "
+            f"worker_id={after.get('worker_id')}"
+        )
+    before = dict(result.get("before_takeover", {}) or {})
+    if before.get("worker_id") != result.get("first_worker_id"):
+        failures.append(
+            "initial lane owner was not first worker: "
+            f"worker_id={before.get('worker_id')}"
+        )
+    if after.get("task_id") != result.get("second_task_id"):
+        failures.append(f"lane owner task mismatch: task_id={after.get('task_id')}")
+    if after.get("owned") is not True:
+        failures.append("lane is not owned after takeover")
+    return failures
 
 
 def assert_smoke_result(result: dict) -> list[str]:
@@ -134,6 +174,67 @@ async def run_smoke(args: argparse.Namespace) -> tuple[dict, Path, Path]:
     return result, json_path, md_path
 
 
+async def run_ttl_takeover_smoke(args: argparse.Namespace) -> dict:
+    redis = RedisClient(
+        enabled=True,
+        url=args.redis_url,
+        socket_timeout_seconds=max(0.05, args.redis_socket_timeout_seconds),
+    )
+    coordinator = RedisLaneCoordinator(redis, namespace=args.lane_namespace)
+    session_key = args.takeover_session_key
+    first_owner = LaneOwnerToken(worker_id="smoke-worker-old", task_id="smoke-task-old")
+    second_owner = LaneOwnerToken(worker_id="smoke-worker-new", task_id="smoke-task-new")
+    first = await asyncio.to_thread(
+        coordinator.acquire,
+        session_key,
+        owner=first_owner,
+        ttl_seconds=max(1, args.lane_ttl_seconds),
+    )
+    blocked = await asyncio.to_thread(
+        coordinator.acquire,
+        session_key,
+        owner=second_owner,
+        ttl_seconds=max(1, args.lane_ttl_seconds),
+    )
+    before = coordinator.inspect(session_key).to_dict()
+    wait_seconds = (
+        max(0.05, float(args.takeover_wait_seconds))
+        if args.takeover_wait_seconds
+        else max(1, args.lane_ttl_seconds) + 0.25
+    )
+    await asyncio.sleep(wait_seconds)
+    second = await asyncio.to_thread(
+        coordinator.acquire,
+        session_key,
+        owner=second_owner,
+        ttl_seconds=max(1, args.lane_ttl_seconds),
+    )
+    after = coordinator.inspect(session_key).to_dict()
+    if second is not None:
+        await asyncio.to_thread(coordinator.release, second)
+    result = {
+        "status": "ok",
+        "scenario": "ttl-takeover",
+        "session_key": session_key,
+        "lane_namespace": args.lane_namespace,
+        "lane_ttl_seconds": max(1, args.lane_ttl_seconds),
+        "wait_seconds": wait_seconds,
+        "first_worker_id": first_owner.worker_id,
+        "first_task_id": first_owner.task_id,
+        "second_worker_id": second_owner.worker_id,
+        "second_task_id": second_owner.task_id,
+        "first_owner_acquired": first is not None,
+        "second_owner_blocked_before_ttl": blocked is None,
+        "second_owner_acquired_after_ttl": second is not None,
+        "before_takeover": before,
+        "after_takeover": after,
+        "redis_health": redis.health().to_dict(),
+    }
+    result["failures"] = assert_ttl_takeover_result(result)
+    result["status"] = "ok" if not result["failures"] else "failed"
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     redis = RedisClient(
@@ -147,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        if args.scenario == "ttl-takeover":
+            takeover_result = asyncio.run(run_ttl_takeover_smoke(args))
+            print(json.dumps(takeover_result, ensure_ascii=False))
+            return 0 if not takeover_result.get("failures") else 1
         result, json_path, md_path = asyncio.run(run_smoke(args))
     except Exception as exc:
         print(json.dumps({"status": "failed", "reason": str(exc)}, ensure_ascii=False))
