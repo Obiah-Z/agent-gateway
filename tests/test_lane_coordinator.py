@@ -84,13 +84,21 @@ class FakeLaneStateRepository:
         self.writes.append(dict(row))
         return row
 
-    def release_session_lane(self, session_key: str, *, owner_token: str = "", now: float = 0.0) -> bool:
+    def release_session_lane(
+        self,
+        session_key: str,
+        *,
+        owner_token: str = "",
+        reason: str = "manual release",
+        now: float = 0.0,
+    ) -> bool:
         if self.fail:
             raise RuntimeError("state unavailable")
         self.releases.append(
             {
                 "session_key": session_key,
                 "owner_token": owner_token,
+                "reason": reason,
                 "now": now,
             }
         )

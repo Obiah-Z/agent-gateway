@@ -1580,6 +1580,7 @@ class PostgresWriteRepository:
         session_key: str,
         *,
         owner_token: str = "",
+        reason: str = "manual release",
         now: float | None = None,
     ) -> bool:
         """把指定 session lane 标记为 released。
@@ -1595,6 +1596,7 @@ class PostgresWriteRepository:
         params: dict[str, Any] = {
             "session_key": session_key,
             "owner_token": owner_token,
+            "release_metadata": {"release_reason": reason, "released_at": current},
             "now": current,
         }
         if owner_token:
@@ -1604,7 +1606,8 @@ class PostgresWriteRepository:
             "UPDATE session_lanes SET "
             "state = 'released', "
             "updated_at = %(now)s, "
-            "renewed_at = %(now)s "
+            "renewed_at = %(now)s, "
+            "metadata = metadata || %(release_metadata)s::jsonb "
             f"WHERE {' AND '.join(clauses)} "
             "RETURNING session_key"
             ") SELECT json_build_object('released', COUNT(*) > 0) AS row FROM updated"

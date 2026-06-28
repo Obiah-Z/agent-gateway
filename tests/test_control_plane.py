@@ -111,26 +111,60 @@ class FakeRedisClient:
 class FakeLaneStateRepository:
     def __init__(self) -> None:
         self.calls = []
+        self.releases = []
+        self.rows = [
+            {
+                "session_key": "agent:feishu:user-1",
+                "lane_key": "gateway:lock:agent:feishu:user-1",
+                "worker_id": "worker-a",
+                "task_id": "task-a",
+                "owner_token": "worker-a:task-a",
+                "state": "owned",
+                "ttl_seconds": 30,
+                "renewed_at": 2.0,
+            }
+        ]
 
     def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
         del cursor
         self.calls.append((table, limit, dict(filters or {})))
         if table != "session_lanes":
             return []
-        return [
-            {
-                "session_key": "agent:feishu:user-1",
-                "lane_key": "gateway:lock:agent:feishu:user-1",
-                "worker_id": "worker-a",
-                "task_id": "task-a",
-                "state": "owned",
-                "renewed_at": 2.0,
-            }
-        ]
+        filters = dict(filters or {})
+        rows = list(self.rows)
+        for key, value in filters.items():
+            if value:
+                rows = [row for row in rows if str(row.get(key, "")) == str(value)]
+        return rows[:limit]
 
     def get(self, table: str, key: str):
         del table, key
         return None
+
+    def release_session_lane(
+        self,
+        session_key: str,
+        *,
+        owner_token: str = "",
+        reason: str = "manual release",
+        now: float = 0.0,
+    ) -> bool:
+        self.releases.append(
+            {
+                "session_key": session_key,
+                "owner_token": owner_token,
+                "reason": reason,
+                "now": now,
+            }
+        )
+        for row in self.rows:
+            if row["session_key"] != session_key:
+                continue
+            if owner_token and row.get("owner_token") != owner_token:
+                continue
+            row["state"] = "released"
+            return True
+        return False
 
 
 class FakePostgresClient:
@@ -1022,6 +1056,7 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
 def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:
     settings = _build_settings(tmp_path)
     repository = FakeLaneStateRepository()
+    repository.rows[0]["state"] = "released"
     control = GatewayControlPlane(
         settings=settings,
         agents=AgentManager(),
@@ -1052,6 +1087,69 @@ def test_control_plane_lists_session_lanes_with_filters(tmp_path: Path) -> None:
             "task_id": "task-a",
         },
     )
+
+
+def test_control_plane_releases_only_stale_session_lane_by_default(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    repository.rows[0]["renewed_at"] = 100.0
+    repository.rows[0]["ttl_seconds"] = 30
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+
+    repository.rows[0]["renewed_at"] = 9999999999.0
+    fresh = control.release_session_lane(
+        session_key="agent:feishu:user-1",
+        owner_token="worker-a:task-a",
+    )
+    stale_check = control._is_session_lane_stale(
+        {"renewed_at": 100.0, "ttl_seconds": 30},
+        now=131.0,
+    )
+    repository.rows[0]["renewed_at"] = 1.0
+    stale = control.release_session_lane(
+        session_key="agent:feishu:user-1",
+        owner_token="worker-a:task-a",
+        reason="worker expired",
+    )
+
+    assert fresh["released"] is False
+    assert "not stale" in fresh["reason"]
+    assert stale_check is True
+    assert stale["released"] is True
+    assert stale["stale"] is True
+    assert repository.releases[0]["reason"] == "worker expired"
+
+
+def test_control_plane_release_session_lane_rejects_owner_mismatch(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    repository = FakeLaneStateRepository()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+
+    result = control.release_session_lane(
+        session_key="agent:feishu:user-1",
+        owner_token="other-worker:task",
+        force=True,
+    )
+
+    assert result["released"] is False
+    assert result["reason"] == "owner_token mismatch"
+    assert repository.releases == []
 
 
 def test_control_plane_health_check_reports_redis_failure(tmp_path: Path) -> None:

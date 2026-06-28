@@ -906,13 +906,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.14 故障注入补强 | 已完成 | 已补重复 RabbitMQ 入站消息幂等验证：已完成 task 的重复 broker 消息会 ack/discard，不会再次执行 handler；已补 PostgreSQL/主存储 `reserve_task_id` 短暂异常时的本地 TaskStore fallback 验证；新增 `scripts/smoke_distributed_lane.py`，用于真实 RabbitMQ + Redis lane 快速验收；本机 inbound smoke 已验证 8/8 成功、`max_same_session_concurrency=1`、broker 积压和 DLQ 为 0；本机 TTL takeover smoke 已验证旧 worker 持有 lane、新 worker TTL 前被阻塞、TTL 后成功接管且 owner metadata 切换；本机 broker-unavailable smoke 已验证 broker publish 失败后任务仍 pending，worker 通过 polling fallback 执行到 done；本机 primary-unavailable smoke 已验证主存储 `reserve_task_id` 异常时，worker 仍能按 broker task_id 通过本地 TaskStore fallback 执行到 done 并 ack broker payload；本机 worker-crash 集成 smoke 已验证旧 worker 持有 lane 后崩溃不释放，新 worker TTL 前不抢跑、TTL 后通过 `TaskWorkerRuntime` 接管并执行任务到 `done`，handler 只调用一次且 lane 最终释放。 | 已形成可复现故障注入清单，覆盖 broker 不可用、主存储短暂不可用、TTL 接管、worker crash 和重复消息幂等。 |
 | 20.9.15 PostgreSQL lane 状态基础 | 已完成 | 新增 `session_lanes` PostgreSQL 状态表，记录 session_key、lane_key、worker_id、task_id、owner_token、state、ttl_seconds、acquired_at、renewed_at、updated_at 和 metadata；`RedisLaneCoordinator` acquire/renew/release 会可选双写 `write_session_lane` / `release_session_lane`，应用装配在 PostgreSQL 写仓储启用时注入该状态仓储；`runtime.status.tasks.persisted_lanes` 和 Dashboard 后台任务卡片已展示最近持久 lane owner。 | Redis 仍作为快速互斥路径，PostgreSQL 可审计最近 lane owner、续租和释放状态；写库失败不会影响 Redis lane 主路径；运维面板能看到最近 session lane owner。 |
 | 20.9.16 Lane 治理查询入口 | 已完成 | 控制面新增 `list_session_lanes()`，WebSocket JSON-RPC 新增 `tasks.lanes`，支持按 state、session_key、worker_id、task_id 和 limit 查询 PostgreSQL `session_lanes`。 | 运维和后续恢复工具可以独立查询持久 lane owner 列表，不再只能通过 `runtime.status` 摘要观察。 |
+| 20.9.17 Stale lane 受控释放 | 已完成 | 控制面新增 `release_session_lane()`，WebSocket JSON-RPC 新增 `tasks.lanes.release`；默认只允许释放 `renewed_at + ttl_seconds` 已过期的 stale lane，`force=true` 才能释放未过期记录；可选 `owner_token` 防止误释放新 owner，PostgreSQL release 会记录 release_reason/released_at metadata。 | 运维可以安全处理持久状态中残留的 stale lane；不会直接删除 Redis 锁，运行时互斥仍依赖 Redis TTL 自动接管。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard 和 `tasks.lanes` 控制面查询；后续可继续做更完整的 lane owner 历史、恢复和人工接管视图。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询和 `tasks.lanes.release` 受控释放；后续可继续做更完整的 lane owner 历史和自动恢复策略。
 
 阶段完成标准：
 

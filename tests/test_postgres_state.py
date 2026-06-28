@@ -719,6 +719,7 @@ def test_postgres_release_session_lane_checks_owner_token(monkeypatch) -> None:
     released = repo.release_session_lane(
         "agent:feishu:user-1",
         owner_token="worker-a:task-a",
+        reason="worker expired",
         now=3.0,
     )
 
@@ -730,6 +731,7 @@ def test_postgres_release_session_lane_checks_owner_token(monkeypatch) -> None:
     assert params == {
         "session_key": "agent:feishu:user-1",
         "owner_token": "worker-a:task-a",
+        "release_metadata": {"release_reason": "worker expired", "released_at": 3.0},
         "now": 3.0,
     }
 

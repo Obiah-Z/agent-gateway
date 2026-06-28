@@ -654,6 +654,96 @@ class GatewayControlPlane:
             "filters": filters,
         }
 
+    def release_session_lane(
+        self,
+        *,
+        session_key: str,
+        owner_token: str = "",
+        force: bool = False,
+        reason: str = "manual release",
+    ) -> dict[str, Any]:
+        """受约束地释放一条持久化 session lane 状态。
+
+        默认只允许释放已 stale 的 lane；如果需要释放仍在 TTL 内的 owner，必须显式
+        传入 `force=True`，避免误操作影响活跃 worker。
+        """
+
+        normalized_session = str(session_key or "").strip()
+        if not normalized_session:
+            raise ValueError("session_key is required")
+        writer = self.state_write_repository
+        if writer is None and isinstance(self.state_repository, PostgresWriteRepository):
+            writer = self.state_repository
+        if writer is None:
+            return {
+                "ok": False,
+                "configured": False,
+                "released": False,
+                "reason": "state write repository not configured",
+            }
+        lanes = self.list_session_lanes(
+            state="owned",
+            limit=1,
+            session_key=normalized_session,
+        )
+        items = list(lanes.get("items", []) or [])
+        lane = items[0] if items else {}
+        if not lane:
+            return {
+                "ok": False,
+                "configured": True,
+                "released": False,
+                "reason": "lane not found or not owned",
+                "session_key": normalized_session,
+            }
+        if owner_token and str(lane.get("owner_token", "")) != owner_token:
+            return {
+                "ok": False,
+                "configured": True,
+                "released": False,
+                "reason": "owner_token mismatch",
+                "session_key": normalized_session,
+                "lane": lane,
+            }
+        stale = self._is_session_lane_stale(lane)
+        if not stale and not force:
+            return {
+                "ok": False,
+                "configured": True,
+                "released": False,
+                "reason": "lane is not stale; pass force=true to release",
+                "session_key": normalized_session,
+                "lane": lane,
+            }
+        try:
+            released = bool(
+                writer.release_session_lane(
+                    normalized_session,
+                    owner_token=owner_token,
+                    reason=reason,
+                    now=time.time(),
+                )
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "configured": True,
+                "released": False,
+                "reason": str(exc),
+                "session_key": normalized_session,
+                "lane": lane,
+            }
+        return {
+            "ok": released,
+            "configured": True,
+            "released": released,
+            "reason": "released" if released else "release did not match any row",
+            "session_key": normalized_session,
+            "forced": bool(force),
+            "stale": stale,
+            "lane": lane,
+        }
+
     def get_task(self, task_id: str, *, include_payload: bool = True) -> dict[str, Any]:
         """读取单条后台任务详情。"""
 
@@ -1008,6 +1098,20 @@ class GatewayControlPlane:
             "count": len(rows),
             "items": rows[:6],
         }
+
+    @staticmethod
+    def _is_session_lane_stale(lane: dict[str, Any], *, now: float | None = None) -> bool:
+        """根据 renewed_at + ttl_seconds 判断持久 lane 状态是否过期。"""
+
+        try:
+            renewed_at = float(lane.get("renewed_at", 0.0) or 0.0)
+            ttl_seconds = int(lane.get("ttl_seconds", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        if renewed_at <= 0 or ttl_seconds <= 0:
+            return False
+        current = time.time() if now is None else float(now)
+        return current >= renewed_at + ttl_seconds
 
     def get_source(self, kind: str) -> dict[str, Any]:
         """读取指定配置源文件的原始内容。"""

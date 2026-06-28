@@ -73,24 +73,57 @@ class FakeDeliveryRuntime:
 class FakeLaneStateRepository:
     def __init__(self) -> None:
         self.calls = []
+        self.releases = []
+        self.rows = [
+            {
+                "session_key": "agent:feishu:user-1",
+                "worker_id": "worker-a",
+                "task_id": "task-a",
+                "owner_token": "worker-a:task-a",
+                "state": "owned",
+                "ttl_seconds": 1,
+                "renewed_at": 1.0,
+            }
+        ]
 
     def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
         del cursor
         self.calls.append((table, limit, dict(filters or {})))
         if table != "session_lanes":
             return []
-        return [
-            {
-                "session_key": "agent:feishu:user-1",
-                "worker_id": "worker-a",
-                "task_id": "task-a",
-                "state": "owned",
-            }
-        ]
+        rows = list(self.rows)
+        for key, value in dict(filters or {}).items():
+            if value:
+                rows = [row for row in rows if str(row.get(key, "")) == str(value)]
+        return rows[:limit]
 
     def get(self, table: str, key: str):
         del table, key
         return None
+
+    def release_session_lane(
+        self,
+        session_key: str,
+        *,
+        owner_token: str = "",
+        reason: str = "manual release",
+        now: float = 0.0,
+    ) -> bool:
+        self.releases.append(
+            {
+                "session_key": session_key,
+                "owner_token": owner_token,
+                "reason": reason,
+                "now": now,
+            }
+        )
+        for row in self.rows:
+            if row["session_key"] == session_key and (
+                not owner_token or row.get("owner_token") == owner_token
+            ):
+                row["state"] = "released"
+                return True
+        return False
 
 
 class DisconnectingWebSocket:
@@ -777,3 +810,46 @@ def test_gateway_server_exposes_session_lane_list(tmp_path) -> None:
             "task_id": "",
         },
     )
+
+
+def test_gateway_server_releases_session_lane(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    agents = AgentManager()
+    bindings = BindingTable()
+    channels = ChannelManager()
+    repository = FakeLaneStateRepository()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=ProfileManager([]),
+        channels=channels,
+        state_repository=repository,
+        state_write_repository=repository,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(
+        server._m_tasks_lanes_release(
+            {
+                "session_key": "agent:feishu:user-1",
+                "owner_token": "worker-a:task-a",
+                "reason": "worker expired",
+            }
+        )
+    )
+
+    assert result["released"] is True
+    assert result["stale"] is True
+    assert repository.releases[0]["reason"] == "worker expired"
