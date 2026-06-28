@@ -572,6 +572,7 @@ class GatewayControlPlane:
                 "redis": redis,
                 "postgres": postgres,
             },
+            "health": health,
         }
 
     def _distributed_lane_readiness(

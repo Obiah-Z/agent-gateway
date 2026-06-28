@@ -397,6 +397,14 @@ GATEWAY_TASK_WORKER_ID=worker-1
 GATEWAY_TASK_WORKER_CONCURRENCY=4
 ```
 
+快速验收：
+
+```bash
+python scripts/smoke_distributed_lane.py --scenario readiness
+```
+
+该命令会检查 Redis、PostgreSQL、RabbitMQ 入站 broker、`agent_inbound` worker、持久 lane 和可靠出站投递是否满足最终分布式 lane 运行条件。
+
 ## 飞书接入
 
 项目支持两种飞书接入方式：

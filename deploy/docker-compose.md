@@ -80,9 +80,11 @@ docker compose config
 docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-init
 docker compose exec gateway agent-gateway postgres-check-schema
+docker compose exec gateway python scripts/smoke_distributed_lane.py --scenario readiness --rabbitmq-url amqp://admin:admin123@rabbitmq:5672/ --redis-url redis://redis:6379/0 --postgres-url postgresql://postgres:postgres@postgres:5432/postgres
 ```
 
 `doctor` 会检查模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。存在 `FAIL` 时会返回非零退出码。
+`readiness` smoke 会进一步确认入站任务队列、RabbitMQ 入站 broker、Redis lane ownership、PostgreSQL lane 状态、worker handler 和可靠出站投递是否满足最终分布式 lane 运行条件。
 
 如需把已有本地 JSON/JSONL 状态回填到数据库：
 
@@ -109,6 +111,7 @@ docker compose exec gateway agent-gateway postgres-migrate-local
 docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-init
 docker compose exec gateway agent-gateway postgres-check-schema
+docker compose exec gateway python scripts/smoke_distributed_lane.py --scenario readiness --rabbitmq-url amqp://admin:admin123@rabbitmq:5672/ --redis-url redis://redis:6379/0 --postgres-url postgresql://postgres:postgres@postgres:5432/postgres
 ```
 
 判定规则：
@@ -116,6 +119,7 @@ docker compose exec gateway agent-gateway postgres-check-schema
 - `doctor` 通过，说明基础配置、目录权限、依赖连接和 schema 前置条件正常。
 - `postgres-init` 负责初始化表结构，不会删除已有数据。
 - `postgres-check-schema` 用于确认表和列没有明显漂移，适合升级后核对。
+- `readiness` smoke 通过，说明当前 Compose 环境已满足分布式 lane 最终形态的关键运行条件。
 
 如果 `doctor` 失败，先看输出里的 `FAIL` 项，再决定是修 `.env`、修目录权限，还是先启动中间件。
 

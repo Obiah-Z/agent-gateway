@@ -61,6 +61,11 @@ services:
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_POSTGRES_ENABLED: "true"
       GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+      GATEWAY_INBOUND_BROKER: rabbitmq
+      GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      GATEWAY_INBOUND_RABBITMQ_PARTITIONS: "8"
+      GATEWAY_INBOUND_RABBITMQ_PREFETCH: "1"
       GATEWAY_DELIVERY_BROKER: rabbitmq
       GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
     ports:

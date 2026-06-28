@@ -924,13 +924,14 @@ python scripts/build_capacity_baseline.py
 | 20.9.32 Dashboard Lane Doctor 摘要卡片 | 已完成 | Dashboard 刷新时并行调用 `tasks.lanes.doctor`，在后台任务区顶部展示分布式 Lane 诊断状态、过期 Lane、恢复动作、Broker 积压、死信和检查项。 | 运维面板能直接看到 lane 首轮诊断结果，不需要先打开 CLI 或手动调用 JSON-RPC。 |
 | 20.9.33 分布式 Lane Readiness Gate | 已完成 | `lane_doctor` 新增 `readiness` 字段，按最终形态检查入站任务队列、RabbitMQ 入站 broker、Redis lane ownership、PostgreSQL 状态、agent_inbound worker、持久 lane、可靠出站投递和 health critical 项；CLI 与 Dashboard 展示 ready/not_ready 和失败项。 | 可以用机器可读结果判断当前实例是否真正达到最终分布式 lane 运行条件，而不是只看零散配置和健康项。 |
 | 20.9.34 Readiness Smoke 验收入口 | 已完成 | `scripts/smoke_distributed_lane.py` 新增 `--scenario readiness`，使用真实 Redis/PostgreSQL health、RabbitMQ 入站 broker stats、临时 PostgreSQL lane 记录和最小控制面装配执行 `lane_doctor.readiness`，并输出失败项。 | 可以通过一条 smoke 命令验证当前机器中间件和控制面装配是否满足最终分布式 lane 运行条件。 |
+| 20.9.35 Compose 分布式 Lane 默认部署闭环 | 已完成 | Docker Compose gateway 环境默认开启入站任务队列、RabbitMQ 入站 broker、分区和 prefetch；README、Compose 部署文档和压测清单补充 readiness smoke 命令。 | 新机器按 Compose 部署后可直接运行 readiness smoke 验证最终分布式 lane 关键条件，减少缺包或未开开关导致的误判。 |
 
 推荐落地顺序：
 
 1. 已完成 20.9.12，把 RabbitMQ 入站 broker 的分区、积压、ack/nack、DLQ 和延迟暴露到 Dashboard / Prometheus。
 2. 已补入站 broker 压测场景，验证不同 partitions、worker 数和 session 分布下的吞吐边界。
 3. 已完成故障注入：RabbitMQ 不可用、消息重复、worker crash、lane owner TTL 过期、PostgreSQL 短暂不可用。
-4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检、显式确认后的受控批量释放、lane recovery 审计事件、审计视图、运维 Runbook、lane-doctor 只读诊断命令、控制面 `tasks.lanes.doctor` 入口、Dashboard 诊断摘要卡片、最终形态 readiness gate 和 readiness smoke 验收入口；后续可继续做更完整的自动恢复策略。
+4. 已新增 PostgreSQL `session_lanes` 持久状态基础，并接入 `runtime.status`、Dashboard、`tasks.lanes` 查询、`tasks.lanes.release` 受控释放、stale lane 健康告警、实库 smoke、worker 执行生命周期事件、执行事件查询视图、lane owner 历史事件、`tasks.lanes.history` 查询、Dashboard 最近 Lane 历史展示、stale lane 恢复建议、批量恢复 dry-run 预检、显式确认后的受控批量释放、lane recovery 审计事件、审计视图、运维 Runbook、lane-doctor 只读诊断命令、控制面 `tasks.lanes.doctor` 入口、Dashboard 诊断摘要卡片、最终形态 readiness gate、readiness smoke 验收入口和 Compose 默认部署闭环；后续可继续做更完整的自动恢复策略。
 
 阶段完成标准：
 

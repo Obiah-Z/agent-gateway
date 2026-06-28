@@ -527,6 +527,7 @@ async def run_readiness_smoke(args: argparse.Namespace) -> dict:
         proactive_peer_id="cli-user",
     )
     settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
     initialize_postgres_schema(
         url=settings.postgres_url,
         connect_timeout_seconds=settings.postgres_connect_timeout_seconds,
@@ -615,10 +616,16 @@ async def run_readiness_smoke(args: argparse.Namespace) -> dict:
     )
     try:
         report = control.lane_doctor(limit=20)
+        health_checks = list(report.get("health", {}).get("checks", []) or [])
         result = {
             "status": "ok" if report.get("readiness", {}).get("ready") else "failed",
             "readiness": report.get("readiness", {}),
             "summary": report.get("summary", {}),
+            "health_failures": [
+                row
+                for row in health_checks
+                if str(row.get("status", "")) in {"critical", "warning"}
+            ],
             "redis_ok": bool(redis_health.get("ok")),
             "postgres_ok": bool(postgres_health.get("ok")),
             "rabbitmq_ok": rabbitmq_ok,
