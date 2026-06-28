@@ -7,11 +7,11 @@
 | 服务 | 镜像/来源 | 作用 | 默认绑定 |
 | --- | --- | --- | --- |
 | `gateway` | 本项目 `Dockerfile` | AI Agent Gateway 主服务 | `127.0.0.1:8765/8766/8780` |
-| `redis` | `redis:7-alpine` | 去重、幂等、限流等轻量协调 | `127.0.0.1:6379` |
-| `postgres` | `postgres:16-alpine` | 配置、任务、事件、指标、记忆和投递事实状态 | `127.0.0.1:5432` |
-| `rabbitmq` | `rabbitmq:3.13-management-alpine` | 可靠投递分发、ack、retry、DLQ | `127.0.0.1:5672`，管理台 `127.0.0.1:15672` |
+| `redis` | `redis:7-alpine` | 去重、幂等、限流等轻量协调 | 仅 Compose 内部网络 |
+| `postgres` | `postgres:16-alpine` | 配置、任务、事件、指标、记忆和投递事实状态 | 仅 Compose 内部网络 |
+| `rabbitmq` | `rabbitmq:3.13-management-alpine` | 可靠投递分发、ack、retry、DLQ | 仅 Compose 内部网络 |
 
-默认端口只绑定本机回环地址，避免 Dashboard 和中间件直接暴露公网。公网 Webhook 和 Dashboard 访问应在后续反向代理阶段通过 HTTPS 和鉴权处理。
+默认只把 Gateway 的控制面、Webhook 和 Dashboard 绑定到本机回环地址。Redis、PostgreSQL 和 RabbitMQ 不映射到宿主机端口，避免和本机已安装服务冲突，也避免中间件被误暴露。公网 Webhook 和 Dashboard 访问应在后续反向代理阶段通过 HTTPS 和鉴权处理。
 
 ## 准备配置
 
@@ -19,6 +19,15 @@
 cd ~/Desktop/claw0/gateway
 cp .env.example .env
 ```
+
+## 构建加速
+
+当前 `Dockerfile` 已默认切换为国内镜像源：
+
+- `apt` 使用清华镜像源
+- `pip` 使用清华 PyPI 镜像源
+
+如果你本机的 Docker daemon 也配置了 registry mirror，那么基础镜像拉取会更快。这个属于宿主机级别配置，不写入项目仓库。
 
 至少修改：
 
@@ -90,7 +99,42 @@ docker compose exec gateway agent-gateway postgres-migrate-local
 | Prometheus metrics | `http://127.0.0.1:8780/metrics` |
 | WebSocket 控制面 | `ws://127.0.0.1:8765` |
 | 飞书 Webhook | `http://127.0.0.1:8766/webhooks/feishu` |
-| RabbitMQ 管理台 | `http://127.0.0.1:15672`，用户 `admin`，密码 `admin123` |
+| RabbitMQ 管理台 | 默认不暴露；如需临时查看，可添加本地 override 暴露 `15672` |
+
+## 健康检查
+
+启动后建议先跑一遍下面的检查：
+
+```bash
+docker compose exec gateway agent-gateway doctor
+docker compose exec gateway agent-gateway postgres-init
+docker compose exec gateway agent-gateway postgres-check-schema
+```
+
+判定规则：
+
+- `doctor` 通过，说明基础配置、目录权限、依赖连接和 schema 前置条件正常。
+- `postgres-init` 负责初始化表结构，不会删除已有数据。
+- `postgres-check-schema` 用于确认表和列没有明显漂移，适合升级后核对。
+
+如果 `doctor` 失败，先看输出里的 `FAIL` 项，再决定是修 `.env`、修目录权限，还是先启动中间件。
+
+临时暴露 RabbitMQ 管理台时，可以新建 `docker-compose.override.yml`：
+
+```yaml
+services:
+  rabbitmq:
+    ports:
+      - "127.0.0.1:15672:15672"
+```
+
+然后执行：
+
+```bash
+docker compose up -d rabbitmq
+```
+
+如果宿主机已经有 RabbitMQ 占用 `15672`，请改用其它宿主机端口，例如 `"127.0.0.1:15673:15672"`。
 
 ## 数据持久化
 
@@ -118,6 +162,30 @@ docker compose down -v
 ```
 
 `down -v` 会删除 PostgreSQL、RabbitMQ 和 Redis 数据，生产环境不要随意执行。
+
+## 常见故障
+
+- `docker compose build` 失败：先确认 Dockerfile 是否已修复，特别是 `heredoc`、基础镜像拉取和镜像源配置。
+- `agent-gateway doctor` 报数据库失败：确认容器内的 `postgres` 已就绪，再重新执行 `postgres-init` 和 `postgres-check-schema`。
+- 飞书 Webhook 没有响应：确认飞书应用配置、验签、加密密钥、机器人可见范围和 webhook 路径。
+- RabbitMQ 连接失败：确认 `GATEWAY_RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672/`，而不是宿主机地址。
+- Redis 或 PostgreSQL 连接不上：Compose 内部应使用服务名 `redis`、`postgres`，不要写 `127.0.0.1`。
+
+## 升级步骤
+
+```bash
+cd ~/Desktop/claw0/gateway
+git pull
+docker compose up -d --build
+docker compose exec gateway agent-gateway doctor
+docker compose exec gateway agent-gateway postgres-check-schema
+```
+
+如果升级涉及数据库 schema，再补跑：
+
+```bash
+docker compose exec gateway agent-gateway postgres-init
+```
 
 ## 当前边界
 

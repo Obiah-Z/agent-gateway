@@ -132,7 +132,7 @@ agent-gateway cron-trigger <job_id> --no-flush
 
 ## Docker Compose 部署
 
-项目提供单机 Docker Compose 编排，用于同时启动 Gateway、Redis、PostgreSQL 和 RabbitMQ：
+项目提供单机 Docker Compose 编排，用于同时启动 Gateway、Redis、PostgreSQL 和 RabbitMQ。适合新机器快速拉起整套服务：
 
 ```bash
 cd ~/Desktop/claw0/gateway
@@ -155,6 +155,32 @@ WebSocket 控制面: ws://127.0.0.1:8765
 RabbitMQ 管理台:  http://127.0.0.1:15672
 ```
 
+常见检查：
+
+```bash
+docker compose ps
+docker compose logs -f gateway
+docker compose exec gateway agent-gateway doctor
+docker compose exec gateway agent-gateway postgres-check-schema
+```
+
+常见故障：
+
+- `doctor` 报 `FAIL`：先按输出修正 `.env`、目录权限、数据库连接或模型配置。
+- 飞书 Webhook 没有回复：检查 `FEISHU_WEBHOOK_*`、应用验签、加密密钥和机器人可见范围。
+- PostgreSQL 初始化失败：先确认容器内 `postgres` 已就绪，再执行 `postgres-init` 和 `postgres-check-schema`。
+- RabbitMQ 无法连接：检查 `GATEWAY_RABBITMQ_URL` 是否仍指向容器服务名 `rabbitmq`。
+
+升级步骤：
+
+```bash
+cd ~/Desktop/claw0/gateway
+git pull
+docker compose up -d --build
+docker compose exec gateway agent-gateway doctor
+docker compose exec gateway agent-gateway postgres-check-schema
+```
+
 详细说明见 [Docker Compose 部署说明](deploy/docker-compose.md)。
 
 ## systemd 部署
@@ -173,6 +199,25 @@ sudo systemctl enable agent-gateway
 
 ```bash
 agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+```
+
+常见检查：
+
+```bash
+agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+systemctl status agent-gateway
+journalctl -u agent-gateway -n 200 --no-pager
+```
+
+升级步骤：
+
+```bash
+cd ~/Desktop/claw0/gateway
+git pull
+source .venv/bin/activate
+pip install -e .
+agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+sudo systemctl restart agent-gateway
 ```
 
 详细说明见 [systemd 部署说明](deploy/systemd.md)。

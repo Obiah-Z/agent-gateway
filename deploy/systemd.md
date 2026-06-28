@@ -126,6 +126,23 @@ sudo systemctl restart agent-gateway
 sudo systemctl stop agent-gateway
 ```
 
+## 健康检查
+
+systemd 部署同样建议先执行：
+
+```bash
+cd /home/obiah/Desktop/claw0/gateway
+source .venv/bin/activate
+agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+agent-gateway --env-file /etc/agent-gateway/agent-gateway.env postgres-check-schema
+```
+
+如果 `doctor` 报错，优先检查：
+
+- `.env` 或 `/etc/agent-gateway/agent-gateway.env` 中的模型密钥和基础地址。
+- PostgreSQL、Redis、RabbitMQ 是否已启动并可连通。
+- `WorkingDirectory`、`GATEWAY_WORKSPACE_ROOT`、`GATEWAY_DATA_DIR` 是否指向实际存在的目录。
+
 ## 升级流程
 
 ```bash
@@ -143,6 +160,14 @@ sudo systemctl restart agent-gateway
 agent-gateway --env-file /etc/agent-gateway/agent-gateway.env postgres-init
 agent-gateway --env-file /etc/agent-gateway/agent-gateway.env postgres-check-schema
 ```
+
+## 常见故障
+
+- `ExecStartPre` 失败：说明 `doctor` 返回了 `FAIL`，先修配置再重启。
+- `systemctl start` 后立刻退出：查看 `journalctl -u agent-gateway -n 200 --no-pager`。
+- 飞书消息没有回复：先确认 Webhook 是否能接到请求，再看 `journal` 中的通道日志和模型错误。
+- 数据库迁移失败：先运行 `postgres-check-schema`，确认是否存在旧表结构漂移。
+- 容器外部服务连不上：systemd 场景下应使用宿主机地址，不能写 Docker 服务名。
 
 ## 当前边界
 

@@ -9,13 +9,14 @@ description = "Modular AI Agent Gateway for multi-turn conversations, tool calli
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "anthropic>=0.39.0",
+  "anthropic>=0.107.1,<0.108.0",
   "python-dotenv>=1.0.0",
   "websockets>=12.0",
   "croniter>=2.0.0",
   "python-telegram-bot>=21.0",
   "httpx>=0.27.0",
   "qrcode[pil]>=7.4.2",
+  "pycryptodome>=3.20.0",
   "redis>=5.0.0",
   "psycopg[binary]>=3.3.4",
   "pika>=1.3.2",
