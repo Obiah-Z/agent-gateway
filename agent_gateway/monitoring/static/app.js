@@ -213,6 +213,10 @@ const EVENT_LABELS = {
   "agent.turn.completed": "智能体轮次完成",
   "agent.turn.failed": "智能体轮次失败",
   "agent.task.started": "后台任务进入执行",
+  "task.worker.started": "Worker 开始执行",
+  "task.worker.completed": "Worker 执行完成",
+  "task.worker.retrying": "Worker 等待重试",
+  "task.worker.failed": "Worker 执行失败",
   "tool.call.started": "开始调用工具",
   "tool.call.completed": "工具调用完成",
   "tool.call.failed": "工具调用失败",
@@ -697,7 +701,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, taskExecutions, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -711,6 +715,7 @@ async function refreshAll() {
       rpc("errors.recent", buildErrorQuery({ limit: 40 })),
       rpc("memory.recent", { limit: 20 }),
       rpc("tasks.list", { status: "all", limit: 40 }),
+      rpc("tasks.executions", { limit: 24 }),
       rpc("metrics.summary", { limit: 60 }),
       rpc("metrics.tail", { limit: 24 }),
       rpc("alerts.active"),
@@ -727,7 +732,7 @@ async function refreshAll() {
     renderEvents(events);
     renderErrors(errors);
     renderMemories(memories);
-    renderTasks(tasks);
+    renderTasks(tasks, taskExecutions);
     renderDelivery(deliveryList);
     renderCron(cronJobs);
   } catch (error) {
@@ -1895,21 +1900,57 @@ function renderMemories(payload) {
   appendCollapseToggle(dom.memoryList, "memories", items.length, () => renderMemories(payload));
 }
 
-function renderTasks(payload) {
+function renderTasks(payload, executionsPayload = {}) {
   clearNode(dom.tasksList);
   const items = Array.isArray(payload?.items) ? payload.items : [];
+  const executions = Array.isArray(executionsPayload?.items) ? executionsPayload.items.slice().reverse() : [];
   const counts = items.reduce((acc, item) => {
     const status = normalizeStatus(item.status || "pending");
     acc[status] = (acc[status] || 0) + 1;
     return acc;
   }, {});
   dom.tasksSummary.textContent = items.length
-    ? `${items.length} 条任务 · ${counts.running || 0} 执行中 / ${counts.failed || 0} 失败`
+    ? `${items.length} 条任务 · ${executions.length} 条执行事件 · ${counts.running || 0} 执行中 / ${counts.failed || 0} 失败`
     : "暂无任务";
-  dom.tasksList.className = items.length ? "task-list" : "task-list empty";
-  if (!items.length) {
+  dom.tasksList.className = items.length || executions.length ? "task-list" : "task-list empty";
+  if (!items.length && !executions.length) {
     dom.tasksList.textContent = "最近没有后台任务。Cron、Heartbeat 或长任务 Skill 入队后会显示在这里。";
     return;
+  }
+  if (executions.length) {
+    const block = document.createElement("section");
+    block.className = "task-item task-ok";
+    const head = document.createElement("div");
+    head.className = "task-head";
+    head.appendChild(badge("ok"));
+    const title = document.createElement("div");
+    appendText(title, "strong", "最近 Worker 执行节点", "task-title");
+    appendText(title, "small", `${executions.length} 条 started/completed/retrying/failed 事件`, "task-meta");
+    head.appendChild(title);
+    block.appendChild(head);
+    const visibleExecutions = slicePanelItems(executions, "task-executions");
+    for (const event of visibleExecutions) {
+      const metadata = event.metadata || {};
+      const row = document.createElement("div");
+      row.className = `trace-event trace-event-${normalizeStatus(event.status)}`;
+      appendText(row, "span", formatShortTime(event.timestamp), "event-time");
+      appendText(row, "strong", eventLabel(event));
+      appendText(
+        row,
+        "small",
+        [
+          `worker ${metadata.worker_id || "--"}`,
+          `任务 ${shortId(metadata.task_id || event.correlation_id, 10, 4)}`,
+          `类型 ${metadata.task_type || "--"}`,
+          `会话 ${event.session_key || "--"}`,
+          metadata.duration_seconds !== undefined ? `耗时 ${metadata.duration_seconds}s` : "",
+        ].filter(Boolean).join(" · "),
+        "task-meta",
+      );
+      block.appendChild(row);
+    }
+    appendCollapseToggle(block, "task-executions", executions.length, () => renderTasks(payload, executionsPayload));
+    dom.tasksList.appendChild(block);
   }
   const visibleItems = slicePanelItems(items, "tasks");
   for (const task of visibleItems) {
@@ -1958,7 +1999,7 @@ function renderTasks(payload) {
     }
     dom.tasksList.appendChild(card);
   }
-  appendCollapseToggle(dom.tasksList, "tasks", items.length, () => renderTasks(payload));
+  appendCollapseToggle(dom.tasksList, "tasks", items.length, () => renderTasks(payload, executionsPayload));
 }
 
 function taskTitle(task) {

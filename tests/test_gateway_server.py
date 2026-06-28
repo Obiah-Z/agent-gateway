@@ -271,6 +271,16 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
         correlation_id="corr-delivery",
         error="channel unavailable",
     )
+    event_store.record(
+        "task.worker.completed",
+        status="ok",
+        component="task_worker",
+        message="worker done",
+        correlation_id="task-1",
+        agent_id="main",
+        session_key="session-1",
+        metadata={"worker_id": "worker-a", "task_id": "task-1", "task_type": "agent_inbound"},
+    )
     control = GatewayControlPlane(
         settings=settings,
         agents=agents,
@@ -289,6 +299,16 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
 
     events = asyncio.run(server._m_events_tail({"limit": 10}))
     errors = asyncio.run(server._m_errors_recent({"limit": 10}))
+    executions = asyncio.run(
+        server._m_tasks_executions(
+            {
+                "limit": 10,
+                "task_id": "task-1",
+                "session_key": "session-1",
+                "worker_id": "worker-a",
+            }
+        )
+    )
     filtered_events = asyncio.run(
         server._m_events_tail(
             {
@@ -309,8 +329,14 @@ def test_gateway_server_exposes_event_methods(tmp_path) -> None:
     )
 
     assert events["configured"] is True
-    assert [event["type"] for event in events["items"]] == ["route.resolved", "delivery.failed"]
+    assert [event["type"] for event in events["items"]] == [
+        "route.resolved",
+        "delivery.failed",
+        "task.worker.completed",
+    ]
     assert [event["type"] for event in errors["items"]] == ["delivery.failed"]
+    assert [event["type"] for event in executions["items"]] == ["task.worker.completed"]
+    assert executions["items"][0]["metadata"]["worker_id"] == "worker-a"
     assert [event["type"] for event in filtered_events["items"]] == ["delivery.failed"]
     assert [event["type"] for event in filtered_errors["items"]] == ["delivery.failed"]
 

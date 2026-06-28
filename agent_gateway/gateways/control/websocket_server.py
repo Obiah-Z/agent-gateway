@@ -146,6 +146,7 @@ class GatewayServer:
             "delivery.flush": self._m_delivery_flush,
             "delivery.republish": self._m_delivery_republish,
             "tasks.list": self._m_tasks_list,
+            "tasks.executions": self._m_tasks_executions,
             "tasks.lanes": self._m_tasks_lanes,
             "tasks.lanes.release": self._m_tasks_lanes_release,
             "tasks.get": self._m_tasks_get,
@@ -602,6 +603,19 @@ class GatewayServer:
             limit=int(params.get("limit", 50)),
             component=str(params.get("component", "")),
             correlation_id=str(params.get("correlation_id", "")),
+        )
+
+    async def _m_tasks_executions(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 后台任务执行事件 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.task_executions(
+            limit=int(params.get("limit", 50)),
+            task_id=str(params.get("task_id", "")),
+            session_key=str(params.get("session_key", "")),
+            worker_id=str(params.get("worker_id", "")),
+            event_type=str(params.get("type", "")),
+            status=str(params.get("status", "")),
         )
 
     async def _m_memory_recent(self, params: dict[str, Any]) -> dict[str, Any]:

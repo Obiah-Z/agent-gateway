@@ -308,6 +308,70 @@ class GatewayControlPlane:
             "limit": max(1, min(int(limit), 500)),
         }
 
+    def task_executions(
+        self,
+        *,
+        limit: int = 50,
+        task_id: str = "",
+        session_key: str = "",
+        worker_id: str = "",
+        event_type: str = "",
+        status: str = "",
+    ) -> dict[str, Any]:
+        """回看 TaskWorkerRuntime 执行生命周期事件。"""
+
+        safe_limit = max(1, min(int(limit), 200))
+        lookup_limit = max(safe_limit, min(safe_limit * 5, 500))
+        requested_type = str(event_type or "").strip()
+        if requested_type and not requested_type.startswith("task.worker."):
+            return {
+                "items": [],
+                "count": 0,
+                "configured": self.event_store is not None or self.state_repository is not None,
+                "limit": safe_limit,
+                "filters": {
+                    "task_id": task_id,
+                    "session_key": session_key,
+                    "worker_id": worker_id,
+                    "event_type": requested_type,
+                    "status": status,
+                },
+            }
+        events = self.tail_events(
+            limit=lookup_limit,
+            event_type=requested_type,
+            component="task_worker",
+            status=status,
+            correlation_id=task_id,
+        )
+        filtered: list[dict[str, Any]] = []
+        for row in list(events.get("items", []) or []):
+            row_type = str(row.get("type", ""))
+            if not row_type.startswith("task.worker."):
+                continue
+            if session_key and str(row.get("session_key", "")) != session_key:
+                continue
+            metadata = row.get("metadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if worker_id and str(metadata.get("worker_id", "")) != worker_id:
+                continue
+            filtered.append(row)
+        items = filtered[-safe_limit:]
+        return {
+            "items": items,
+            "count": len(items),
+            "configured": bool(events.get("configured")),
+            "limit": safe_limit,
+            "filters": {
+                "task_id": task_id,
+                "session_key": session_key,
+                "worker_id": worker_id,
+                "event_type": requested_type,
+                "status": status,
+            },
+        }
+
     def recent_errors(
         self,
         *,
