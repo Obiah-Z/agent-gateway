@@ -388,7 +388,7 @@ delivery-worker
 | 20.7.1 Docker Compose 基础编排 | 已完成 | 新增 `Dockerfile`、`.dockerignore`、`docker-compose.yml` 和 `deploy/docker-compose.md`；编排 Redis、PostgreSQL、RabbitMQ、Gateway，设置健康检查、数据卷和本机端口绑定。 | 可 `docker compose up -d --build` 拉起依赖和 Gateway；文档说明 schema 初始化、数据卷和访问地址。 |
 | 20.7.2 启动前检查命令 | 已完成 | 新增 `agent-gateway doctor` 和 `agent-gateway doctor --json`，检查 `.env`、模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。 | 启动前能输出 pass/warn/fail；存在 fail 时返回非零退出码。 |
 | 20.7.3 systemd 部署方式 | 已完成 | 新增 `deploy/systemd/agent-gateway.service`、`deploy/systemd/agent-gateway.env.example` 和 `deploy/systemd.md`，包含环境文件、doctor 预检查、重启策略、日志查看和升级流程。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
-| 20.7.4 数据卷与备份恢复 | 待实现 | 补齐 `workspace/`、`data/`、PostgreSQL、RabbitMQ、Redis 和 `.env` 的备份/恢复命令。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
+| 20.7.4 数据卷与备份恢复 | 已完成 | 已新增 `deploy/backup-restore.md`，补齐 `.env`、`config/`、`workspace/`、`data/`、PostgreSQL、RabbitMQ 和 Redis 的备份/恢复命令，并在 Compose 文档与 README 挂入口。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
 | 20.7.5 反向代理与 HTTPS | 待实现 | 增加 Nginx 或 Caddy 示例，支持飞书 Webhook HTTPS 暴露，并限制 Dashboard 访问范围。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
 | 20.7.6 部署文档整合 | 已完成 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
 

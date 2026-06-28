@@ -151,6 +151,8 @@ docker compose up -d rabbitmq
 | RabbitMQ 数据 | Docker volume `rabbitmq-data` |
 | Redis AOF 数据 | Docker volume `redis-data` |
 
+备份与恢复步骤见 [备份与恢复指南](backup-restore.md)。生产升级前至少备份 `.env`、`config/`、`workspace/`、`data/` 和 PostgreSQL dump；RabbitMQ / Redis 可按停机卷备份保留，也可在恢复后通过事实状态重建短期队列。
+
 ## 停止和清理
 
 停止服务：
