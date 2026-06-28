@@ -157,6 +157,26 @@ RabbitMQ 管理台:  http://127.0.0.1:15672
 
 详细说明见 [Docker Compose 部署说明](deploy/docker-compose.md)。
 
+## systemd 部署
+
+非 Docker 场景可以使用 systemd 托管 Gateway：
+
+```bash
+sudo mkdir -p /etc/agent-gateway
+sudo cp deploy/systemd/agent-gateway.env.example /etc/agent-gateway/agent-gateway.env
+sudo cp deploy/systemd/agent-gateway.service /etc/systemd/system/agent-gateway.service
+sudo systemctl daemon-reload
+sudo systemctl enable agent-gateway
+```
+
+启动前建议先运行：
+
+```bash
+agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+```
+
+详细说明见 [systemd 部署说明](deploy/systemd.md)。
+
 ## 配置说明
 
 | 文件 | 说明 |

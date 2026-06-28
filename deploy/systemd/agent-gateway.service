@@ -1,0 +1,25 @@
+[Unit]
+Description=AI Agent Gateway
+Documentation=file:/home/obiah/Desktop/claw0/gateway/deploy/systemd.md
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=obiah
+Group=obiah
+WorkingDirectory=/home/obiah/Desktop/claw0/gateway
+EnvironmentFile=/etc/agent-gateway/agent-gateway.env
+ExecStartPre=/home/obiah/Desktop/claw0/gateway/.venv/bin/agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+ExecStart=/home/obiah/Desktop/claw0/gateway/.venv/bin/agent-gateway --env-file /etc/agent-gateway/agent-gateway.env serve
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=30
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-gateway
+
+[Install]
+WantedBy=multi-user.target

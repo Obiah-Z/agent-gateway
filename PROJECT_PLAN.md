@@ -387,7 +387,7 @@ delivery-worker
 | --- | --- | --- | --- |
 | 20.7.1 Docker Compose 基础编排 | 已完成 | 新增 `Dockerfile`、`.dockerignore`、`docker-compose.yml` 和 `deploy/docker-compose.md`；编排 Redis、PostgreSQL、RabbitMQ、Gateway，设置健康检查、数据卷和本机端口绑定。 | 可 `docker compose up -d --build` 拉起依赖和 Gateway；文档说明 schema 初始化、数据卷和访问地址。 |
 | 20.7.2 启动前检查命令 | 已完成 | 新增 `agent-gateway doctor` 和 `agent-gateway doctor --json`，检查 `.env`、模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。 | 启动前能输出 pass/warn/fail；存在 fail 时返回非零退出码。 |
-| 20.7.3 systemd 部署方式 | 待实现 | 增加 `deploy/systemd/agent-gateway.service`、环境文件示例、重启策略和日志查看说明。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
+| 20.7.3 systemd 部署方式 | 已完成 | 新增 `deploy/systemd/agent-gateway.service`、`deploy/systemd/agent-gateway.env.example` 和 `deploy/systemd.md`，包含环境文件、doctor 预检查、重启策略、日志查看和升级流程。 | 非 Docker Linux 服务器可用 systemd 托管 Gateway。 |
 | 20.7.4 数据卷与备份恢复 | 待实现 | 补齐 `workspace/`、`data/`、PostgreSQL、RabbitMQ、Redis 和 `.env` 的备份/恢复命令。 | 文档提供可执行备份和恢复步骤，明确哪些数据不可丢。 |
 | 20.7.5 反向代理与 HTTPS | 待实现 | 增加 Nginx 或 Caddy 示例，支持飞书 Webhook HTTPS 暴露，并限制 Dashboard 访问范围。 | 飞书 Webhook 可通过 HTTPS 访问；Dashboard 不裸奔公网。 |
 | 20.7.6 部署文档整合 | 待实现 | 将部署模式、端口表、健康检查、常见故障和升级步骤整合进 README / deploy 文档。 | 新机器可按文档完成部署和基础排障。 |
@@ -458,6 +458,40 @@ docker compose exec gateway agent-gateway postgres-check-schema
 - `doctor` 是启动前轻量检查，不替代运行时 `health.check`。
 - RabbitMQ 检查会声明/探测队列拓扑，但不会发布业务消息。
 - 飞书检查当前只做配置风险提示，不主动访问飞书 OpenAPI。
+
+##### 20.7.3 systemd 部署方式结果
+
+已完成内容：
+
+- 新增 `deploy/systemd/agent-gateway.service`。
+- 新增 `deploy/systemd/agent-gateway.env.example`。
+- 新增 `deploy/systemd.md`。
+- service 默认：
+  - `WorkingDirectory=/home/obiah/Desktop/claw0/gateway`
+  - `EnvironmentFile=/etc/agent-gateway/agent-gateway.env`
+  - `ExecStartPre=agent-gateway --env-file ... doctor`
+  - `ExecStart=agent-gateway --env-file ... serve`
+  - `Restart=on-failure`
+  - 日志进入 journald。
+- README 增加 systemd 部署入口。
+
+使用示例：
+
+```bash
+sudo mkdir -p /etc/agent-gateway
+sudo cp deploy/systemd/agent-gateway.env.example /etc/agent-gateway/agent-gateway.env
+sudo cp deploy/systemd/agent-gateway.service /etc/systemd/system/agent-gateway.service
+sudo systemctl daemon-reload
+sudo systemctl enable agent-gateway
+agent-gateway --env-file /etc/agent-gateway/agent-gateway.env doctor
+sudo systemctl start agent-gateway
+```
+
+当前边界：
+
+- service 示例默认单进程 `GATEWAY_RUNTIME_ROLES=all`。
+- Redis、PostgreSQL、RabbitMQ 需要由系统包、Docker 或其他方式单独托管。
+- 飞书 Webhook HTTPS 暴露仍放到 20.7.5 反向代理阶段。
 
 #### Phase 20.8 统一观测与压测
 
