@@ -1,35 +1,33 @@
 # Docker Compose 部署说明
 
-本文档对应 Phase 20.7.1，用于在单机上通过 Docker Compose 拉起 Gateway 及其基础依赖。
+本文档用于通过 Docker Compose 启动 AI Agent Gateway 及其依赖，并统一说明三种运行方式：单进程模式、多角色模式、多 Worker 模式。
 
-## 服务组成
+## 1. 运行模式
 
-| 服务 | 镜像/来源 | 作用 | 默认绑定 |
+| 模式 | Compose 文件 | 适用场景 | 实际启动的 Gateway 服务 |
 | --- | --- | --- | --- |
-| `gateway` | 本项目 `Dockerfile` | AI Agent Gateway 主服务 | `127.0.0.1:8765/8766/8780` |
-| `redis` | `redis:7-alpine` | 去重、幂等、限流等轻量协调 | 仅 Compose 内部网络 |
-| `postgres` | `postgres:16-alpine` | 配置、任务、事件、指标、记忆和投递事实状态 | 仅 Compose 内部网络 |
-| `rabbitmq` | `rabbitmq:3.13-management-alpine` | 可靠投递分发、ack、retry、DLQ | 仅 Compose 内部网络 |
+| 单进程模式 | `docker-compose.yml` | 本地开发、最小部署、快速验证 | `gateway`，角色为 `all` |
+| 多角色模式 | `docker-compose.yml` + `docker-compose.roles.yml` | 验证入口、Worker、投递、调度、Dashboard 拆分 | `gateway-api`、`gateway-worker`、`gateway-delivery`、`gateway-scheduler`、`gateway-dashboard` |
+| 多 Worker 模式 | 再叠加 `docker-compose.workers.yml` | 长任务并行、分布式 lane 验证、吞吐压测 | 多角色服务 + `gateway-worker-1/2/3` |
 
-默认只把 Gateway 的控制面、Webhook 和 Dashboard 绑定到本机回环地址。Redis、PostgreSQL 和 RabbitMQ 不映射到宿主机端口，避免和本机已安装服务冲突，也避免中间件被误暴露。公网 Webhook 访问应通过 [反向代理与 HTTPS 部署指南](reverse-proxy.md) 配置；Dashboard 默认不要公网暴露。
+基础依赖始终由 `docker-compose.yml` 提供：
 
-## 准备配置
+| 服务 | 镜像/来源 | 作用 | 默认暴露 |
+| --- | --- | --- | --- |
+| `redis` | `redis:7-alpine` | 去重、幂等、限流、session lane ownership | Compose 内部网络 |
+| `postgres` | `postgres:16-alpine` | 配置、任务、事件、指标、记忆、投递事实状态、lane 状态 | Compose 内部网络 |
+| `rabbitmq` | `rabbitmq:3.13-management-alpine` | 入站/出站 broker、ack、retry、DLQ | Compose 内部网络 |
+
+默认端口只绑定宿主机回环地址 `127.0.0.1`，不要直接暴露公网。飞书 Webhook 的公网 HTTPS 接入参考 [反向代理与 HTTPS 部署指南](reverse-proxy.md)。
+
+## 2. 准备配置
 
 ```bash
 cd ~/Desktop/claw0/gateway
 cp .env.example .env
 ```
 
-## 构建加速
-
-当前 `Dockerfile` 已默认切换为国内镜像源：
-
-- `apt` 使用清华镜像源
-- `pip` 使用清华 PyPI 镜像源
-
-如果你本机的 Docker daemon 也配置了 registry mirror，那么基础镜像拉取会更快。这个属于宿主机级别配置，不写入项目仓库。
-
-至少修改：
+至少确认：
 
 ```env
 ANTHROPIC_API_KEY=你的模型密钥
@@ -37,7 +35,7 @@ ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 MODEL_ID=deepseek-v4-pro
 ```
 
-Compose 会覆盖容器内中间件地址：
+Compose 会在容器内覆盖中间件地址：
 
 ```env
 GATEWAY_REDIS_URL=redis://redis:6379/0
@@ -45,42 +43,33 @@ GATEWAY_POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/postgres
 GATEWAY_RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672/
 ```
 
-因此 `.env` 中保留本机 `127.0.0.1` 配置也不影响容器运行。
+所以 `.env` 中保留本机 `127.0.0.1` 配置也不影响容器运行。
 
-## 启动依赖和网关
+## 3. 构建加速
+
+当前 `Dockerfile` 已默认使用国内镜像源：
+
+- `apt` 使用清华 Debian 镜像源。
+- `pip` 使用清华 PyPI 镜像源。
+
+如果 Docker daemon 配置了 registry mirror，基础镜像拉取会更快。该配置属于宿主机级别，不写入项目仓库。
+
+## 4. 单进程模式
+
+启动：
 
 ```bash
 docker compose up -d --build
 ```
 
-如果本机 Docker 没有 Compose v2 插件，可使用旧命令：
-
-```bash
-docker-compose up -d --build
-```
-
-如果要验证入口、worker、delivery、scheduler 和 Dashboard 拆分后的最终分布式 lane 部署形态，使用 [Docker Compose 多角色部署说明](multi-role-compose.md)：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
-```
-
-查看状态：
+查看：
 
 ```bash
 docker compose ps
 docker compose logs -f gateway
 ```
 
-如需校验 Compose 语法，可以运行：
-
-```bash
-docker compose config
-```
-
-注意：`docker compose config` 会展开 `.env` 中的真实密钥，不要把完整输出粘贴到公开渠道。
-
-首次启动后初始化 PostgreSQL schema：
+初始化和验收：
 
 ```bash
 docker compose exec gateway agent-gateway doctor
@@ -89,17 +78,7 @@ docker compose exec gateway agent-gateway postgres-check-schema
 docker compose exec gateway python scripts/smoke_distributed_lane.py --scenario readiness --rabbitmq-url amqp://admin:admin123@rabbitmq:5672/ --redis-url redis://redis:6379/0 --postgres-url postgresql://postgres:postgres@postgres:5432/postgres
 ```
 
-`doctor` 会检查模型配置、目录权限、Redis、PostgreSQL、RabbitMQ、PostgreSQL schema 和公网绑定风险。存在 `FAIL` 时会返回非零退出码。
-`readiness` smoke 会进一步确认入站任务队列、RabbitMQ 入站 broker、Redis lane ownership、PostgreSQL lane 状态、worker handler 和可靠出站投递是否满足最终分布式 lane 运行条件。
-
-如需把已有本地 JSON/JSONL 状态回填到数据库：
-
-```bash
-docker compose exec gateway agent-gateway postgres-migrate-local --dry-run
-docker compose exec gateway agent-gateway postgres-migrate-local
-```
-
-## 访问地址
+访问：
 
 | 能力 | 地址 |
 | --- | --- |
@@ -107,29 +86,159 @@ docker compose exec gateway agent-gateway postgres-migrate-local
 | Prometheus metrics | `http://127.0.0.1:8780/metrics` |
 | WebSocket 控制面 | `ws://127.0.0.1:8765` |
 | 飞书 Webhook | `http://127.0.0.1:8766/webhooks/feishu` |
-| RabbitMQ 管理台 | 默认不暴露；如需临时查看，可添加本地 override 暴露 `15672` |
 
-## 健康检查
-
-启动后建议先跑一遍下面的检查：
+停止：
 
 ```bash
-docker compose exec gateway agent-gateway doctor
-docker compose exec gateway agent-gateway postgres-init
-docker compose exec gateway agent-gateway postgres-check-schema
-docker compose exec gateway python scripts/smoke_distributed_lane.py --scenario readiness --rabbitmq-url amqp://admin:admin123@rabbitmq:5672/ --redis-url redis://redis:6379/0 --postgres-url postgresql://postgres:postgres@postgres:5432/postgres
+docker compose down
 ```
 
-判定规则：
+## 5. 多角色模式
 
-- `doctor` 通过，说明基础配置、目录权限、依赖连接和 schema 前置条件正常。
-- `postgres-init` 负责初始化表结构，不会删除已有数据。
-- `postgres-check-schema` 用于确认表和列没有明显漂移，适合升级后核对。
-- `readiness` smoke 通过，说明当前 Compose 环境已满足分布式 lane 最终形态的关键运行条件。
+多角色模式把默认 `gateway=all` 拆成多个进程，更接近最终分布式 lane 架构。
 
-如果 `doctor` 失败，先看输出里的 `FAIL` 项，再决定是修 `.env`、修目录权限，还是先启动中间件。
+启动：
 
-临时暴露 RabbitMQ 管理台时，可以新建 `docker-compose.override.yml`：
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
+```
+
+最终服务：
+
+| 服务 | 角色 | 职责 | 暴露端口 |
+| --- | --- | --- | --- |
+| `gateway-api` | `api` | 飞书 Webhook、入站标准化、入站任务 enqueue | `127.0.0.1:8766` |
+| `gateway-worker` | `worker` | 消费 `agent_inbound` / Cron / Heartbeat / 后台任务，执行 AgentLoop 和工具调用 | 不暴露 |
+| `gateway-delivery` | `delivery` | 消费可靠出站投递队列并发送到飞书等通道 | 不暴露 |
+| `gateway-scheduler` | `scheduler` | 触发 Cron / Heartbeat，把任务写入队列 | 不暴露 |
+| `gateway-dashboard` | `dashboard` | Dashboard、WebSocket 控制面、观测后台 | `127.0.0.1:8765`、`127.0.0.1:8780` |
+
+查看：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml ps
+docker compose -f docker-compose.yml -f docker-compose.roles.yml logs -f gateway-api gateway-worker gateway-delivery gateway-scheduler gateway-dashboard
+```
+
+初始化和验收：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml exec gateway-api agent-gateway doctor
+docker compose -f docker-compose.yml -f docker-compose.roles.yml exec gateway-api agent-gateway postgres-init
+docker compose -f docker-compose.yml -f docker-compose.roles.yml exec gateway-api agent-gateway postgres-check-schema
+docker compose -f docker-compose.yml -f docker-compose.roles.yml exec gateway-dashboard agent-gateway lane-doctor
+docker compose -f docker-compose.yml -f docker-compose.roles.yml exec gateway-api python scripts/smoke_distributed_lane.py --scenario readiness --rabbitmq-url amqp://admin:admin123@rabbitmq:5672/ --redis-url redis://redis:6379/0 --postgres-url postgresql://postgres:postgres@postgres:5432/postgres
+```
+
+注意：
+
+- 飞书 Webhook 由 `gateway-api` 提供：`http://127.0.0.1:8766/webhooks/feishu`。
+- Dashboard 的 WebSocket 控制面由 `gateway-dashboard` 提供：`ws://127.0.0.1:8765`。
+- 如果飞书能回复但 Dashboard WebSocket 失败，优先检查 `8765` 是否映射到了 `gateway-dashboard`，而不是 `gateway-api`。
+
+停止：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml down
+```
+
+## 6. 多 Worker 模式
+
+多 Worker 模式在多角色模式基础上停用默认 `gateway-worker`，改为启动三个显式命名的 worker：
+
+```text
+gateway-worker-1  GATEWAY_TASK_WORKER_ID=gateway-worker-1
+gateway-worker-2  GATEWAY_TASK_WORKER_ID=gateway-worker-2
+gateway-worker-3  GATEWAY_TASK_WORKER_ID=gateway-worker-3
+```
+
+启动：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  up -d --build
+```
+
+查看：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  ps
+```
+
+查看 worker 日志：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  logs -f gateway-worker-1 gateway-worker-2 gateway-worker-3
+```
+
+验收：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  exec gateway-dashboard agent-gateway lane-doctor
+```
+
+停止：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  down
+```
+
+不要让多个长期 worker 共用同一个 `GATEWAY_TASK_WORKER_ID`，否则 lane owner、worker 执行事件和 Dashboard 排障信息会混在一起。
+
+## 7. Compose 文件组合规则
+
+Compose 会按 `-f` 顺序合并配置，后面的文件覆盖或扩展前面的同名服务。
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml config --services
+```
+
+预期输出包括：
+
+```text
+redis
+postgres
+rabbitmq
+gateway-api
+gateway-dashboard
+gateway-delivery
+gateway-scheduler
+gateway-worker-1
+gateway-worker-2
+gateway-worker-3
+```
+
+不会启动：
+
+```text
+gateway
+gateway-worker
+```
+
+因为它们分别被放入 `single` / `single-worker` profile，默认不启用。
+
+## 8. RabbitMQ 管理台
+
+默认不暴露 RabbitMQ 管理台。如需临时查看，可新建 `docker-compose.override.yml`：
 
 ```yaml
 services:
@@ -144,9 +253,14 @@ services:
 docker compose up -d rabbitmq
 ```
 
-如果宿主机已经有 RabbitMQ 占用 `15672`，请改用其它宿主机端口，例如 `"127.0.0.1:15673:15672"`。
+如果宿主机已有 RabbitMQ 占用 `15672`，请换端口，例如：
 
-## 数据持久化
+```yaml
+ports:
+  - "127.0.0.1:15673:15672"
+```
+
+## 9. 数据持久化
 
 | 数据 | 持久化方式 |
 | --- | --- |
@@ -157,33 +271,11 @@ docker compose up -d rabbitmq
 | RabbitMQ 数据 | Docker volume `rabbitmq-data` |
 | Redis AOF 数据 | Docker volume `redis-data` |
 
-备份与恢复步骤见 [备份与恢复指南](backup-restore.md)。生产升级前至少备份 `.env`、`config/`、`workspace/`、`data/` 和 PostgreSQL dump；RabbitMQ / Redis 可按停机卷备份保留，也可在恢复后通过事实状态重建短期队列。
+备份与恢复步骤见 [备份与恢复指南](backup-restore.md)。生产升级前至少备份 `.env`、`config/`、`workspace/`、`data/` 和 PostgreSQL dump。RabbitMQ / Redis 可按停机卷备份保留，也可在恢复后通过事实状态重建短期队列。
 
-## 停止和清理
+## 10. 升级步骤
 
-停止服务：
-
-```bash
-docker compose down
-```
-
-停止并删除中间件数据卷：
-
-```bash
-docker compose down -v
-```
-
-`down -v` 会删除 PostgreSQL、RabbitMQ 和 Redis 数据，生产环境不要随意执行。
-
-## 常见故障
-
-- `docker compose build` 失败：先确认 Dockerfile 是否已修复，特别是 `heredoc`、基础镜像拉取和镜像源配置。
-- `agent-gateway doctor` 报数据库失败：确认容器内的 `postgres` 已就绪，再重新执行 `postgres-init` 和 `postgres-check-schema`。
-- 飞书 Webhook 没有响应：确认飞书应用配置、验签、加密密钥、机器人可见范围和 webhook 路径。
-- RabbitMQ 连接失败：确认 `GATEWAY_RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672/`，而不是宿主机地址。
-- Redis 或 PostgreSQL 连接不上：Compose 内部应使用服务名 `redis`、`postgres`，不要写 `127.0.0.1`。
-
-## 升级步骤
+单进程模式：
 
 ```bash
 cd ~/Desktop/claw0/gateway
@@ -193,15 +285,44 @@ docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-check-schema
 ```
 
+多角色或多 Worker 模式：
+
+```bash
+cd ~/Desktop/claw0/gateway
+git pull
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml exec gateway-api agent-gateway doctor
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml exec gateway-api agent-gateway postgres-check-schema
+```
+
 如果升级涉及数据库 schema，再补跑：
 
 ```bash
 docker compose exec gateway agent-gateway postgres-init
 ```
 
-## 当前边界
+或在多角色模式下：
 
-- 当前 Compose 是单机编排，不是 Kubernetes 或多主高可用部署。
-- Dashboard 默认仍无鉴权，只绑定本机；不要直接改成 `0.0.0.0` 暴露公网。
-- 飞书 Webhook 生产接入需要 HTTPS，参考 [反向代理与 HTTPS 部署指南](reverse-proxy.md)；Dashboard 默认不要裸奔公网。
-- 默认 `gateway` 以 `GATEWAY_RUNTIME_ROLES=all` 运行；如需拆分 `api/worker/delivery/scheduler/dashboard`，参考 [Docker Compose 多角色部署说明](multi-role-compose.md)。拆出多个 worker 时，为每个实例配置不同的 `GATEWAY_TASK_WORKER_ID`，并按机器容量调整 `GATEWAY_TASK_WORKER_CONCURRENCY`。
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml exec gateway-api agent-gateway postgres-init
+```
+
+## 11. 常见故障
+
+- `docker compose build` 失败：先确认 Dockerfile、基础镜像拉取和镜像源配置。
+- `scripts/smoke_distributed_lane.py` 在容器内找不到：确认镜像已重新构建，当前 Dockerfile 会复制 `scripts/` 到 `/app/scripts`。
+- `doctor` 提示 `/app/.env` 不存在：通常不影响运行，Compose 已把宿主机 `.env` 注入为环境变量。
+- `postgres.schema` drift：执行 `postgres-init` 后再跑 `postgres-check-schema`。
+- 飞书 Webhook 没响应：确认飞书应用配置、验签、加密密钥、机器人可见范围和反向代理路径。
+- Dashboard WebSocket 失败但飞书能回复：多角色模式下确认 `8765` 映射到 `gateway-dashboard`。
+- RabbitMQ 连接失败：容器内地址应使用 `amqp://admin:admin123@rabbitmq:5672/`。
+- Redis 或 PostgreSQL 连接失败：Compose 内部应使用服务名 `redis`、`postgres`，不要写 `127.0.0.1`。
+- `docker compose down` 没停干净：启动时用了几个 `-f` 文件，停止时也必须带同样的 `-f` 文件。
+
+## 12. 当前边界
+
+- 当前 Compose 是单机编排，不是 Kubernetes 或跨机器高可用部署。
+- Dashboard 默认仍无内建鉴权，只绑定本机；不要直接暴露公网。
+- 飞书 Webhook 生产接入需要 HTTPS，参考 [反向代理与 HTTPS 部署指南](reverse-proxy.md)。
+- Redis、PostgreSQL、RabbitMQ 仍是单实例中间件；真正高可用需要托管服务、主从/集群或云产品。
+- 多 Worker 模式能验证分布式 lane 和并行消费，但仍运行在单台 Docker 主机上。

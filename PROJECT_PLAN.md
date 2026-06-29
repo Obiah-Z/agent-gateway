@@ -530,7 +530,7 @@ sudo systemctl start agent-gateway
 
 - README 已挂载 Docker Compose、Compose 多角色、备份恢复、反向代理 HTTPS 和项目计划入口。
 - `deploy/docker-compose.md` 说明默认单进程部署、健康检查、schema 初始化、readiness smoke、数据卷、升级和常见故障。
-- `deploy/multi-role-compose.md` 说明 `gateway-api`、`gateway-worker`、`gateway-delivery`、`gateway-scheduler`、`gateway-dashboard` 的职责、启动命令、验收命令和扩容边界。
+- `deploy/docker-compose.md` 已合并说明单进程、多角色和多 Worker 三种 Compose 部署方式，覆盖 `gateway-api`、`gateway-worker`、`gateway-delivery`、`gateway-scheduler`、`gateway-dashboard` 的职责、启动命令、验收命令和扩容边界。
 - 新增 `docker-compose.roles.yml`，可通过 Compose overlay 启动更接近最终分布式 lane 的多角色拓扑。
 
 当前边界：

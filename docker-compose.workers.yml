@@ -1,0 +1,66 @@
+# Optional multi-worker overlay for docker-compose.roles.yml.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml up -d --build
+#
+# This overlay disables the default single `gateway-worker` service and starts
+# three explicitly named workers so Dashboard/lane owner metadata remains clear.
+
+x-gateway-worker-common: &gateway-worker-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  environment: &gateway-worker-env
+    GATEWAY_RUNTIME_ROLES: worker
+    GATEWAY_TASK_WORKER_CONCURRENCY: "4"
+    GATEWAY_WORKSPACE_ROOT: /app/workspace
+    GATEWAY_DATA_DIR: /app/data
+    GATEWAY_CONFIG_DIR: /app/config
+    GATEWAY_REDIS_ENABLED: "true"
+    GATEWAY_REDIS_URL: redis://redis:6379/0
+    GATEWAY_POSTGRES_ENABLED: "true"
+    GATEWAY_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/postgres
+    GATEWAY_INBOUND_TASK_QUEUE_ENABLED: "true"
+    GATEWAY_INBOUND_BROKER: rabbitmq
+    GATEWAY_INBOUND_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+    GATEWAY_INBOUND_RABBITMQ_PARTITIONS: "8"
+    GATEWAY_INBOUND_RABBITMQ_PREFETCH: "1"
+    GATEWAY_DELIVERY_BROKER: rabbitmq
+    GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+  volumes:
+    - ./config:/app/config
+    - ./workspace:/app/workspace
+    - ./data:/app/data
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  gateway-worker:
+    profiles:
+      - single-worker
+
+  gateway-worker-1:
+    <<: *gateway-worker-common
+    environment:
+      <<: *gateway-worker-env
+      GATEWAY_TASK_WORKER_ID: gateway-worker-1
+
+  gateway-worker-2:
+    <<: *gateway-worker-common
+    environment:
+      <<: *gateway-worker-env
+      GATEWAY_TASK_WORKER_ID: gateway-worker-2
+
+  gateway-worker-3:
+    <<: *gateway-worker-common
+    environment:
+      <<: *gateway-worker-env
+      GATEWAY_TASK_WORKER_ID: gateway-worker-3

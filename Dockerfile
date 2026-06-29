@@ -40,6 +40,7 @@ ENV PIP_DEFAULT_TIMEOUT=120 \
 
 COPY pyproject.toml README.md ./
 COPY agent_gateway ./agent_gateway
+COPY scripts ./scripts
 
 RUN pip install --no-input -i https://pypi.tuna.tsinghua.edu.cn/simple --default-timeout 600 --retries 20 -e .
 

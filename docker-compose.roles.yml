@@ -37,7 +37,6 @@ services:
       GATEWAY_DELIVERY_BROKER: rabbitmq
       GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
     ports:
-      - "127.0.0.1:8765:8765"
       - "127.0.0.1:8766:8766"
     volumes:
       - ./config:/app/config
@@ -178,6 +177,7 @@ services:
       GATEWAY_DELIVERY_BROKER: rabbitmq
       GATEWAY_RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
     ports:
+      - "127.0.0.1:8765:8765"
       - "127.0.0.1:8780:8780"
     volumes:
       - ./config:/app/config
