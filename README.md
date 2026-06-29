@@ -1,59 +1,122 @@
-# AI Agent Gateway
+# 🚪 AI Agent Gateway
 
 AI Agent Gateway 是一个基于 Python 的智能体运行网关，用于承载多轮对话、工具调用、多通道接入、主动任务调度、可靠消息投递和运行观测。系统采用“入口层、任务队列、分布式 lane、Worker 池、可靠投递、状态存储、观测面板”分层设计，适合个人自动化、本地智能体运行时和可扩展 Agent 服务编排。
 
-当前模型接入使用 Anthropic Messages API 兼容协议，默认可接入 DeepSeek Anthropic 兼容接口，也可以切换到其他兼容服务。
+## ✨ 核心能力
 
-## 核心能力
+- 🔌 `多通道入口`：支持 CLI、飞书 Webhook、飞书长连接、Telegram 等消息入口，并统一转换为入站消息模型。
+- 🔁 `Agent 执行闭环`：围绕模型 `stop_reason` 处理模型回复、工具调用、工具结果回填和多轮推理。
+- 🛣️ `分布式 Lane`：按 `session_key` 获取 Redis lane ownership，保证同一会话串行执行，不同会话并行执行。
+- 👷 `后台 Worker 池`：入站消息、Cron、Heartbeat 和长任务进入任务队列，由 worker 消费执行。
+- 📮 `可靠出站投递`：回复先写入投递事实状态，再由 delivery worker 发送到飞书等通道，支持重试、死信和重建队列。
+- 🗄️ `状态外置`：PostgreSQL 承载会话、任务、事件、错误、指标、记忆索引、投递状态和 lane 状态；本地 JSON/JSONL 保留为审计与兜底。
+- 📊 `可观测运维`：Dashboard、WebSocket 控制面、Prometheus metrics、运行事件流、最近错误、任务面板、lane doctor 和 readiness smoke。
+- 🧩 `Workspace 扩展`：通过 Markdown Prompt、Memory、Skill、Cron 配置和 Agent 局部配置扩展系统行为。
 
-- `多通道入口`：支持 CLI、飞书 Webhook、飞书长连接、Telegram 等消息入口，并统一转换为入站消息模型。
-- `Agent 执行闭环`：围绕模型 `stop_reason` 处理模型回复、工具调用、工具结果回填和多轮推理。
-- `分布式 Lane`：按 `session_key` 获取 Redis lane ownership，保证同一会话串行执行，不同会话并行执行。
-- `后台 Worker 池`：入站消息、Cron、Heartbeat 和长任务进入任务队列，由 worker 消费执行。
-- `可靠出站投递`：回复先写入投递事实状态，再由 delivery worker 发送到飞书等通道，支持重试、死信和重建队列。
-- `状态外置`：PostgreSQL 承载会话、任务、事件、错误、指标、记忆索引、投递状态和 lane 状态；本地 JSON/JSONL 保留为审计与兜底。
-- `可观测运维`：Dashboard、WebSocket 控制面、Prometheus metrics、运行事件流、最近错误、任务面板、lane doctor 和 readiness smoke。
-- `Workspace 扩展`：通过 Markdown Prompt、Memory、Skill、Cron 配置和 Agent 局部配置扩展系统行为。
-
-## 架构概览
+## 🧭 架构概览
 
 ```text
-飞书 / CLI / Webhook / Telegram
-        ↓
-gateway-api / ChannelRuntime
-        ↓
-agent_inbound task
-        ↓
-RabbitMQ 入站分区 broker
-        ↓
-gateway-worker pool
-        ↓
-Redis session lane ownership
-        ↓
-AgentLoopRunner / ToolRegistry / Skill Runtime
-        ↓
-SessionStore / PostgreSQL
-        ↓
-DeliveryQueue / PostgreSQL delivery_entries
-        ↓
-RabbitMQ 出站 broker
-        ↓
-gateway-delivery
-        ↓
-飞书 / CLI / Telegram
+┌─────────────────────────────────────────────────────────────────────┐
+│                           外部入口层                                 │
+│          飞书 Webhook / 飞书长连接 / CLI / Telegram / WebSocket       │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        gateway-api / ChannelRuntime                  │
+│    验签 · 解密 · 去重 · 标准化 · 路由预处理 · 快速 ACK · 任务入队        │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ agent_inbound task
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         入站队列层                                   │
+│      PostgreSQL tasks 作为事实状态  +  RabbitMQ 分区队列承载 task_id   │
+│      partition = hash(session_key) % N                               │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                       gateway-worker pool                            │
+│    多 worker 消费任务 · Redis 获取 session lane · TTL 续租 · 崩溃接管   │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Agent 执行层                                 │
+│     AgentLoopRunner · PromptAssembler · ToolRegistry · Skill Runtime  │
+│     模型调用 · 工具调用 · 记忆检索/注入 · 会话写入                       │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         可靠出站层                                   │
+│   PostgreSQL delivery_entries 作为事实状态 + RabbitMQ 出站 broker      │
+│   delivery worker 发送 · retry · DLQ · republish                      │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                          外部通道                                    │
+│                    飞书 / CLI / Telegram / 其他通道                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+旁路观测：
+Dashboard / WebSocket Control Plane / Prometheus / Runtime Events / Lane Doctor
 ```
 
-关键约束：
+### 组件职责
+
+| 组件 | 职责 | 关键状态 |
+| --- | --- | --- |
+| `gateway-api` | 接收外部入站事件，完成验签、去重、标准化和快速入队 | channel offsets、dedup keys、inbound tasks |
+| `RabbitMQ inbound broker` | 按 `session_key` 分区投递轻量 `task_id` 引用 | partition queues、DLQ |
+| `gateway-worker` | 消费任务，获取 session lane，执行 AgentLoop 和工具调用 | lane owner、task lifecycle、session writes |
+| `Redis` | 提供 session lane ownership、TTL、续租、去重和幂等 | lane keys、dedup keys、cron keys |
+| `PostgreSQL` | 作为任务、会话、事件、投递和 lane 的事实状态源 | tasks、sessions、runtime_events、delivery_entries、session_lanes |
+| `gateway-delivery` | 消费可靠投递队列，将回复发送到飞书等外部通道 | delivery locks、retry state、DLQ |
+| `gateway-scheduler` | 触发 Cron / Heartbeat，并写入后台任务队列 | cron_runs、task entries |
+| `gateway-dashboard` | 提供 Dashboard、控制面、运行观测和人工恢复入口 | metrics、errors、lane doctor |
+
+### 核心链路
+
+`入站执行链路`：
+
+```text
+外部消息
+  -> gateway-api
+  -> InboundMessage
+  -> agent_inbound task
+  -> RabbitMQ inbound partition
+  -> gateway-worker
+  -> Redis session lane ownership
+  -> AgentLoopRunner
+  -> SessionStore / PostgreSQL
+```
+
+`出站投递链路`：
+
+```text
+Agent 回复
+  -> DeliveryQueue
+  -> PostgreSQL delivery_entries
+  -> RabbitMQ outbound broker
+  -> gateway-delivery
+  -> 飞书 / CLI / Telegram
+```
+
+### 可靠性约束
 
 - 入口层只做解析、验签、去重、标准化和入队，避免 Webhook 超时。
-- RabbitMQ 负责可靠排队、分区、ack、nack、DLQ 和削峰。
-- Redis 负责 session lane ownership、TTL、续租、去重和幂等。
-- PostgreSQL 负责事实状态、审计、查询和恢复。
-- Worker 执行 AgentLoop，长模型调用期间续租 lane；worker 崩溃后由 TTL 释放并接管。
+- RabbitMQ 只承载轻量引用，不保存完整用户正文或模型回复正文。
+- PostgreSQL 是事实状态源，RabbitMQ 清空或重启后可以从事实状态重建队列。
+- 同一 `session_key` 只能被一个 worker 持有 lane；不同 session 可以并行处理。
+- Worker 执行长模型调用期间会续租 lane；worker 崩溃后由 TTL 释放，其他 worker 接管。
+- 出站发送失败不会丢回复，失败记录会保留在投递队列，可重试、丢弃或重建 broker 引用。
+- Dashboard 和 `lane-doctor` 可以直接查看 broker 积压、stale lane、worker 执行事件、最近错误和 readiness 状态。
 
-## 快速开始
+## 🚀 快速开始
 
-### 本地运行
+### 💻 本地运行
 
 ```bash
 cd ~/Desktop/claw0/gateway
@@ -89,7 +152,7 @@ agent-gateway serve
 | WebSocket 控制面 | `ws://127.0.0.1:8765` |
 | 飞书 Webhook | `http://127.0.0.1:8766/webhooks/feishu` |
 
-### Docker Compose 单进程模式
+### 🐳 Docker Compose 单进程模式
 
 ```bash
 cd ~/Desktop/claw0/gateway
@@ -106,7 +169,7 @@ docker compose exec gateway agent-gateway postgres-check-schema
 docker compose exec gateway python scripts/smoke_distributed_lane.py --scenario readiness --rabbitmq-url amqp://admin:admin123@rabbitmq:5672/ --redis-url redis://redis:6379/0 --postgres-url postgresql://postgres:postgres@postgres:5432/postgres
 ```
 
-### Docker Compose 多角色模式
+### 🧱 Docker Compose 多角色模式
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
@@ -122,7 +185,7 @@ docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
 | `gateway-scheduler` | 触发 Cron / Heartbeat |
 | `gateway-dashboard` | Dashboard、WebSocket 控制面、观测后台 |
 
-### Docker Compose 多 Worker 模式
+### 👷 Docker Compose 多 Worker 模式
 
 ```bash
 docker compose \
@@ -164,7 +227,7 @@ docker compose \
 
 完整说明见 [Docker Compose 部署说明](deploy/docker-compose.md)。
 
-## 配置文件
+## ⚙️ 配置文件
 
 | 路径 | 说明 |
 | --- | --- |
@@ -176,7 +239,7 @@ docker compose \
 | `workspace/` | Prompt、Memory、Skills、Cron、Heartbeat、新闻源和运行工作区 |
 | `data/` | 本地 JSONL 审计、fallback 状态和运行文件 |
 
-## 运行角色
+## 🎭 运行角色
 
 `GATEWAY_RUNTIME_ROLES` 控制当前进程启动哪些运行边界：
 
@@ -191,7 +254,7 @@ docker compose \
 | `control` | 仅启动 WebSocket JSON-RPC 控制面 |
 | `observability` | 启动指标和告警采集后台 |
 
-## 飞书接入
+## 💬 飞书接入
 
 Webhook 模式推荐用于稳定部署：
 
@@ -213,7 +276,7 @@ https://你的域名/webhooks/feishu
 
 公网 HTTPS 建议通过 Caddy 或 Nginx 反向代理到宿主机 `127.0.0.1:8766`。Dashboard 和控制面默认只绑定本机，不建议裸奔公网。详见 [反向代理与 HTTPS 部署指南](deploy/reverse-proxy.md)。
 
-## Skill 与主动任务
+## 🧠 Skill 与主动任务
 
 Skill 位于：
 
@@ -241,7 +304,7 @@ GATEWAY_BACKGROUND_INBOUND_COMMANDS=/github-repo-analyzer,/space-advisor
 - GitHub 仓库分析，并将结果落地为 Markdown 报告。
 - 新闻源采集与定期摘要。
 
-## 运维命令
+## 🛠️ 运维命令
 
 启动前检查：
 
@@ -279,7 +342,7 @@ agent-gateway cron-trigger <job_id>
 agent-gateway cron-trigger <job_id> --no-flush
 ```
 
-## Dashboard 与控制面
+## 📊 Dashboard 与控制面
 
 Dashboard 默认运行在：
 
@@ -302,7 +365,7 @@ http://127.0.0.1:8780
 | `cron.list/trigger` | 主动任务查看与触发 |
 | `agents.*`、`bindings.*`、`channels.*`、`profiles.*` | 运行配置查看、修改、保存和重载 |
 
-## 压测与容量基线
+## 📈 压测与容量基线
 
 安全矩阵 dry-run：
 
@@ -333,7 +396,7 @@ workspace/reports/capacity-baseline.md
 
 详见 [20.8 压测执行清单](doc/20.8%20压测执行清单.md)。
 
-## 测试
+## ✅ 测试
 
 ```bash
 cd ~/Desktop/claw0/gateway
@@ -341,7 +404,7 @@ cd ~/Desktop/claw0/gateway
 ./.venv/bin/python -m pytest tests -q
 ```
 
-## 文档
+## 📚 文档
 
 - [项目架构说明](doc/项目架构说明.md)
 - [消息闭环实现说明](doc/消息闭环实现说明.md)
@@ -352,7 +415,7 @@ cd ~/Desktop/claw0/gateway
 - [20.8 压测执行清单](doc/20.8%20压测执行清单.md)
 - [项目计划](PROJECT_PLAN.md)
 
-## 安全说明
+## 🔐 安全说明
 
 - `.env`、数据库 dump、RabbitMQ/Redis volume 备份不能提交到公开仓库。
 - Dashboard 默认无内建鉴权，只建议绑定本机或可信内网。
