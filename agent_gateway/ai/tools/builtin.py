@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,9 +12,45 @@ from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
     """把工具传入路径解析到 workspace 内，并阻止越界访问。"""
 
-    candidate = (workspace_root / raw_path).resolve()
-    candidate.relative_to(workspace_root.resolve())
+    root = workspace_root.resolve()
+    normalized = _normalize_workspace_path(workspace_root, raw_path)
+    candidate = normalized.resolve() if normalized.is_absolute() else (root / normalized).resolve()
+    candidate.relative_to(root)
     return candidate
+
+
+def _normalize_workspace_path(workspace_root: Path, raw_path: str) -> Path:
+    """把常见 workspace 路径别名转换为当前运行环境的 workspace 路径。"""
+
+    value = str(raw_path or "").strip()
+    if not value:
+        return Path(".")
+    path = Path(value)
+    root = workspace_root.resolve()
+    if path.is_absolute():
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            pass
+        parts = path.parts
+        if "workspace" in parts and "gateway" in parts:
+            workspace_index = parts.index("workspace")
+            suffix = Path(*parts[workspace_index + 1 :])
+            return root / suffix
+        return path
+    if path.parts and path.parts[0] == "workspace":
+        return root / Path(*path.parts[1:])
+    return path
+
+
+def _rewrite_workspace_aliases(command: str, workspace_root: Path) -> str:
+    """把 shell 命令中的宿主机 workspace 绝对路径改写为当前 workspace。"""
+
+    root = str(workspace_root.resolve())
+    # Docker 内的 worker 不应该把宿主机路径写进容器私有目录。
+    return re.sub(r"/[^\s'\"`]*?/gateway/workspace", root, command)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -70,6 +107,7 @@ def register_builtin_tools(
     def bash(command: str, timeout: int = default_timeout) -> str:
         """在 workspace 内执行一条 shell 命令。"""
 
+        command = _rewrite_workspace_aliases(command, workspace_root)
         completed = subprocess.run(
             command,
             cwd=workspace_root,
