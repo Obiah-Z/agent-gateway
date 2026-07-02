@@ -341,6 +341,9 @@ class FeishuWebhookServer:
                     await self._write_json(writer, HTTPStatus.ACCEPTED, {"toast": {"type": "warning", "content": "action ignored"}})
                     return
                 inbound.metadata["correlation_id"] = correlation_id
+                if event_id:
+                    inbound.metadata.setdefault("feishu_event_id", event_id)
+                    inbound.metadata.setdefault("idempotency_key", f"feishu:{account_id}:{event_id}")
                 print(
                     "[feishu] webhook card action accepted:"
                     f" account={inbound.account_id}"
@@ -412,6 +415,9 @@ class FeishuWebhookServer:
                 return
 
             inbound.metadata["correlation_id"] = correlation_id
+            if event_id:
+                inbound.metadata.setdefault("feishu_event_id", event_id)
+                inbound.metadata.setdefault("idempotency_key", f"feishu:{account_id}:{event_id}")
             print(
                 "[feishu] webhook event accepted:"
                 f" account={inbound.account_id}"

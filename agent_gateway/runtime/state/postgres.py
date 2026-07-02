@@ -808,6 +808,18 @@ class PostgresReadRepository(StateReadRepository):
         if statuses:
             clauses.append("status = ANY(%(statuses)s)")
             params["statuses"] = list(statuses)
+        idempotency_key = str(filters.get("idempotency_key", ""))
+        if idempotency_key:
+            clauses.append("idempotency_key = %(idempotency_key)s")
+            params["idempotency_key"] = idempotency_key
+        task_type = str(filters.get("task_type", ""))
+        if task_type:
+            clauses.append("task_type = %(task_type)s")
+            params["task_type"] = task_type
+        source = str(filters.get("source", ""))
+        if source:
+            clauses.append("source = %(source)s")
+            params["source"] = source
         agent_id = str(filters.get("agent_id", ""))
         if agent_id:
             clauses.append("agent_id = %(agent_id)s")

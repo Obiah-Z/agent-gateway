@@ -522,6 +522,7 @@ class ChannelRuntime:
             return False
         if inbound.channel == "cli":
             return False
+        idempotency_key = self._build_inbound_task_idempotency_key(inbound)
         task = await asyncio.to_thread(
             self.task_queue.enqueue,
             task_type="agent_inbound",
@@ -529,6 +530,7 @@ class ChannelRuntime:
             agent_id=str(inbound.metadata.get("agent_id", "")),
             session_key=build_preroute_lane_key(inbound),
             priority=100,
+            idempotency_key=idempotency_key,
             payload=inbound_to_task_payload(inbound),
             metadata={
                 "channel": inbound.channel,
@@ -536,6 +538,7 @@ class ChannelRuntime:
                 "peer_id": inbound.peer_id,
                 "sender_id": inbound.sender_id,
                 "mode": "persistent_inbound",
+                "idempotency_key": idempotency_key,
             },
         )
         print(
@@ -546,6 +549,53 @@ class ChannelRuntime:
             f" peer={inbound.peer_id}"
         )
         return True
+
+    def _build_inbound_task_idempotency_key(self, inbound: InboundMessage) -> str:
+        """基于平台事件 ID 构造入站任务幂等键。
+
+        不使用纯文本内容做兜底，避免用户连续发送两条相同内容时被误判为重复消息。
+        """
+
+        metadata = inbound.metadata or {}
+        for key in (
+            "idempotency_key",
+            "feishu_event_id",
+            "feishu_message_id",
+            "message_id",
+            "event_id",
+        ):
+            value = str(metadata.get(key, ""))
+            if value:
+                return f"inbound:{inbound.channel}:{inbound.account_id}:{value}"
+        correlation_id = str(metadata.get("correlation_id", ""))
+        if correlation_id.startswith("feishu_"):
+            return f"inbound:{inbound.channel}:{inbound.account_id}:{correlation_id}"
+        raw_id = self._extract_stable_raw_event_id(inbound.raw)
+        if raw_id:
+            return f"inbound:{inbound.channel}:{inbound.account_id}:{raw_id}"
+        return ""
+
+    def _extract_stable_raw_event_id(self, value: Any) -> str:
+        """从原始事件结构中递归提取常见稳定事件 ID。"""
+
+        if not isinstance(value, dict):
+            return ""
+        for key in (
+            "event_id",
+            "message_id",
+            "open_message_id",
+            "msg_id",
+            "uuid",
+        ):
+            item = value.get(key)
+            if item:
+                return str(item)
+        for key in ("header", "event", "message"):
+            nested = value.get(key)
+            found = self._extract_stable_raw_event_id(nested)
+            if found:
+                return found
+        return ""
 
     def _is_background_inbound_command(self, text: str) -> bool:
         """判断用户消息是否是明确的后台长任务命令。"""

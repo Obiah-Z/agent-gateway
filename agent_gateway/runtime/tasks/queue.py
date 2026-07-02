@@ -30,7 +30,25 @@ class LocalTaskQueue:
         payload: dict | None = None,
         metadata: dict | None = None,
     ) -> TaskInstance:
-        """创建 pending 任务并写入存储。"""
+        """创建 pending 任务并写入存储。
+
+        如果调用方提供了幂等键，则同一任务只允许创建一次。重复入站时返回已有
+        task_id，避免不同接入路径或 broker 重投造成同一用户消息被重复执行。
+        """
+
+        if idempotency_key:
+            existing = self.store.find_by_idempotency_key(
+                idempotency_key=idempotency_key,
+                task_type=task_type,
+                source=source,
+            )
+            if existing is not None:
+                if existing.status in {"pending", "retrying"} and self.broker is not None:
+                    try:
+                        self.broker.publish(existing)
+                    except Exception:
+                        pass
+                return existing
 
         task = TaskInstance.create(
             task_type=task_type,

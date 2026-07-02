@@ -88,9 +88,11 @@ def test_feishu_channel_parse_event_accepts_p2p_text() -> None:
     channel = _build_channel()
     payload = {
         "token": "verify-token",
+        "header": {"event_id": "evt_1"},
         "event": {
             "sender": {"sender_id": {"open_id": "ou_user"}},
             "message": {
+                "message_id": "om_1",
                 "chat_id": "oc_chat",
                 "chat_type": "p2p",
                 "msg_type": "text",
@@ -106,6 +108,10 @@ def test_feishu_channel_parse_event_accepts_p2p_text() -> None:
     assert inbound.sender_id == "ou_user"
     assert inbound.peer_id == "ou_user"
     assert inbound.metadata["receive_id_type"] == "open_id"
+    assert inbound.metadata["feishu_event_id"] == "evt_1"
+    assert inbound.metadata["feishu_message_id"] == "om_1"
+    assert inbound.metadata["feishu_chat_id"] == "oc_chat"
+    assert inbound.metadata["feishu_message_type"] == "text"
 
 
 def test_feishu_channel_parse_event_ignores_group_message_without_mention() -> None:

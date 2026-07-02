@@ -43,6 +43,28 @@ def test_local_task_queue_publishes_to_broker_after_store_write(tmp_path: Path) 
     assert [item.id for item in broker.published] == [task.id]
 
 
+def test_local_task_queue_deduplicates_by_idempotency_key(tmp_path: Path) -> None:
+    broker = FakeTaskBroker()
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"), broker=broker)
+
+    first = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        idempotency_key="inbound:feishu:feishu-main:om_1",
+        payload={"text": "hello 1"},
+    )
+    second = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        idempotency_key="inbound:feishu:feishu-main:om_1",
+        payload={"text": "hello 1 duplicate"},
+    )
+
+    assert second.id == first.id
+    assert queue.store.list(limit=10) == [first]
+    assert [item.id for item in broker.published] == [first.id, first.id]
+
+
 def test_local_task_queue_keeps_task_pending_when_broker_publish_fails(tmp_path: Path) -> None:
     broker = FakeTaskBroker(fail=True)
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"), broker=broker)

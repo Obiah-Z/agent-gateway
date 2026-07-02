@@ -139,6 +139,17 @@ class FeishuChannel(Channel):
         user_id = sender.get("open_id", sender.get("user_id", ""))
         chat_id = message.get("chat_id", "")
         chat_type = message.get("chat_type", "")
+        message_id = str(
+            message.get("message_id")
+            or message.get("open_message_id")
+            or message.get("id")
+            or ""
+        )
+        event_id = str(
+            payload.get("event_id")
+            or (payload.get("header", {}) if isinstance(payload.get("header"), dict) else {}).get("event_id", "")
+            or ""
+        )
         is_group = chat_type == "group"
         if is_group and self.bot_open_id and not self._bot_mentioned(event):
             print(f"[feishu] ignore group event without mention: chat_id={chat_id}")
@@ -168,7 +179,15 @@ class FeishuChannel(Channel):
             is_group=is_group,
             media=media,
             raw=payload,
-            metadata={"receive_id_type": "open_id" if chat_type == "p2p" else "chat_id"},
+            metadata={
+                "receive_id_type": "open_id" if chat_type == "p2p" else "chat_id",
+                "feishu_event_id": event_id,
+                "feishu_message_id": message_id,
+                "feishu_event_type": event_type,
+                "feishu_chat_id": chat_id,
+                "feishu_chat_type": chat_type,
+                "feishu_message_type": str(message.get("msg_type", "")),
+            },
         )
 
     def parse_card_action(self, payload: dict[str, Any], token: str = "") -> InboundMessage | None:

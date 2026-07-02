@@ -49,6 +49,54 @@ class LocalTaskStore:
                 pass
         return self._read(self._task_path(task_id))
 
+    def find_by_idempotency_key(
+        self,
+        *,
+        idempotency_key: str,
+        task_type: str = "",
+        source: str = "",
+        limit: int = 500,
+    ) -> TaskInstance | None:
+        """按幂等键查找已存在任务。
+
+        入站消息可能被 webhook、长连接或 broker 重投重复送达。只要上游能提供稳定
+        的平台事件 ID，就应该复用已有 task_id，而不是创建新的任务实例。
+        """
+
+        key = str(idempotency_key or "")
+        if not key:
+            return None
+        filters = {"idempotency_key": key}
+        if task_type:
+            filters["task_type"] = task_type
+        if source:
+            filters["source"] = source
+        if self.read_backend is not None:
+            try:
+                rows = self.read_backend.list("tasks", limit=limit, filters=filters)
+                for row in rows:
+                    task = TaskInstance.from_dict(row)
+                    if task.idempotency_key == key:
+                        return task
+            except Exception:
+                pass
+        matches: list[TaskInstance] = []
+        for path in self.root.glob("*.json"):
+            task = self._read(path)
+            if task is None:
+                continue
+            if task.idempotency_key != key:
+                continue
+            if task_type and task.task_type != task_type:
+                continue
+            if source and task.source != source:
+                continue
+            matches.append(task)
+        if not matches:
+            return None
+        matches.sort(key=lambda item: item.updated_at, reverse=True)
+        return matches[0]
+
     def list(
         self,
         *,

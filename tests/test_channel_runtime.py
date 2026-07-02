@@ -748,6 +748,47 @@ def test_channel_runtime_can_persist_non_cli_inbound_to_task_queue(tmp_path) -> 
     assert dispatcher.dispatch_calls == 0
 
 
+def test_channel_runtime_deduplicates_persistent_inbound_by_message_id(tmp_path) -> None:
+    dispatcher = BackgroundTaskDispatcher()
+    task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+        task_queue=task_queue,
+        inbound_task_queue_enabled=True,
+    )
+
+    async def _run() -> None:
+        await runtime.start()
+        inbound = InboundMessage(
+            text="hello from feishu",
+            sender_id="user-1",
+            channel="feishu",
+            account_id="bot-a",
+            peer_id="user-1",
+            metadata={
+                "receive_id_type": "open_id",
+                "feishu_message_id": "om_stable_1",
+            },
+        )
+        await runtime.ingest_external(inbound)
+        await runtime.ingest_external(inbound)
+        while not task_queue.store.list(statuses=["pending"]):
+            await asyncio.sleep(0)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        await runtime.stop()
+
+    asyncio.run(_run())
+
+    queued = task_queue.store.list(statuses=["pending"])
+    assert len(queued) == 1
+    assert queued[0].idempotency_key == "inbound:feishu:bot-a:om_stable_1"
+    assert queued[0].metadata["idempotency_key"] == "inbound:feishu:bot-a:om_stable_1"
+    assert dispatcher.dispatch_calls == 0
+
+
 def test_channel_runtime_keeps_cli_inbound_synchronous_when_task_queue_enabled(tmp_path) -> None:
     dispatcher = BackgroundTaskDispatcher()
     task_queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
