@@ -595,6 +595,63 @@ def test_agent_inbound_task_retries_when_session_lock_is_held(tmp_path: Path) ->
     assert dispatcher.dispatched == []
 
 
+def test_agent_inbound_duplicate_running_task_is_not_retried(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        payload={
+            "text": "hello",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    running = queue.reserve_task_id(task.id, worker_id="worker-a")
+    assert running is not None
+    lane_key = "gateway:lock:agent_inbound:inbound:feishu:bot-a:user-1"
+    redis_client = FakeLockRedisClient(existing_locks={lane_key})
+    redis_client.values[lane_key] = json.dumps(
+        {
+            "version": 1,
+            "session_key": "inbound:feishu:bot-a:user-1",
+            "lane_key": lane_key,
+            "worker_id": "worker-a",
+            "task_id": task.id,
+            "owner_token": f"worker-a:{task.id}",
+            "acquired_at": 100.0,
+            "renewed_at": 100.0,
+        },
+        ensure_ascii=False,
+    )
+    dispatcher = FakeInboundDispatcher()
+    event_store = FakeEventStore()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-b", event_store=event_store)
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            redis_client=redis_client,
+            worker_id="worker-b",
+        ),
+    )
+
+    asyncio.run(worker._execute(running))
+    stored = queue.store.get(task.id)
+
+    assert stored.status == "running"
+    assert stored.retry_count == 0
+    assert stored.error == ""
+    assert dispatcher.dispatched == []
+    assert [row["type"] for row in event_store.rows] == [
+        "task.worker.started",
+        "task.worker.duplicate_discarded",
+    ]
+
+
 def test_agent_inbound_task_retries_when_redis_lock_unavailable(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     task = queue.enqueue(

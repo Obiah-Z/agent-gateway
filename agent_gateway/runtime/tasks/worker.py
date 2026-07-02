@@ -16,6 +16,10 @@ class RetryableTaskError(RuntimeError):
     """任务遇到临时条件失败，应进入 retrying 而不是 failed。"""
 
 
+class DuplicateRunningTaskError(RuntimeError):
+    """同一任务已经被其他 worker 持锁执行，当前副本应确认丢弃。"""
+
+
 class TaskWorkerRuntime:
     """本地后台任务 worker 运行时。
 
@@ -282,6 +286,15 @@ class TaskWorkerRuntime:
                 task,
                 status="ok",
                 message="后台任务执行完成",
+                duration_seconds=time.monotonic() - started_at,
+            )
+        except DuplicateRunningTaskError as exc:
+            self._record_task_event(
+                "task.worker.duplicate_discarded",
+                task,
+                status="warning",
+                message="后台任务重复执行副本已丢弃",
+                reason=str(exc),
                 duration_seconds=time.monotonic() - started_at,
             )
         except Exception as exc:

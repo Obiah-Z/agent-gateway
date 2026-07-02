@@ -9,7 +9,7 @@ from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 from agent_gateway.runtime.tasks.lane import LaneOwnership, LaneOwnerToken, RedisLaneCoordinator
 from agent_gateway.runtime.tasks.models import TaskInstance
-from agent_gateway.runtime.tasks.worker import RetryableTaskError
+from agent_gateway.runtime.tasks.worker import DuplicateRunningTaskError, RetryableTaskError
 
 
 def inbound_from_task(task: TaskInstance) -> InboundMessage:
@@ -98,6 +98,11 @@ class AgentInboundTaskHandler:
             except Exception as exc:
                 raise RetryableTaskError(f"agent inbound session lock unavailable: {exc}") from exc
             if ownership is None:
+                current = self.lane_coordinator.inspect(task.session_key)
+                if current.owned and current.task_id == task.id:
+                    raise DuplicateRunningTaskError(
+                        f"agent inbound task already running: {task.id}"
+                    )
                 raise RetryableTaskError(f"agent inbound session locked: {task.session_key}")
             ownership_ref["current"] = ownership
             renew_task = asyncio.create_task(
