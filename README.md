@@ -407,11 +407,10 @@ cd ~/Desktop/claw0/gateway
 ## 📚 文档
 
 - [项目架构说明](doc/项目架构说明.md)
-- [消息闭环实现说明](doc/消息闭环实现说明.md)
+- [键名与 ID 命名规范](doc/键名与ID命名规范.md)
 - [Docker Compose 部署说明](deploy/docker-compose.md)
 - [备份与恢复指南](deploy/backup-restore.md)
 - [反向代理与 HTTPS 部署指南](deploy/reverse-proxy.md)
-- [分布式 Lane 运维 Runbook](doc/分布式Lane运维Runbook.md)
 - [20.8 压测执行清单](doc/20.8%20压测执行清单.md)
 - [项目计划](PROJECT_PLAN.md)
 
