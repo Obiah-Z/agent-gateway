@@ -227,6 +227,60 @@ def test_feishu_channel_send_infers_open_id_for_proactive_message(monkeypatch) -
     assert sent[0]["params"] == {"receive_id_type": "open_id"}
 
 
+def test_feishu_channel_send_uploads_report_path_from_reply_text(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    report_path = tmp_path / "workspace" / "reports" / "github-repos" / "仓库分析-demo.md"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("# 报告\n\n内容", encoding="utf-8")
+    channel = _build_channel()
+    sent: list[dict[str, object]] = []
+
+    def fake_refresh_token() -> str:
+        return "tenant-token"
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_post(url: str, **kwargs):
+        sent.append({"url": url, **kwargs})
+        if url.endswith("/im/v1/files"):
+            return FakeResponse({"code": 0, "data": {"file_key": "file_report_1"}})
+        return FakeResponse({"code": 0, "msg": "success"})
+
+    monkeypatch.setattr(channel, "_refresh_token", fake_refresh_token)
+    monkeypatch.setattr(channel._http, "post", fake_post)
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="feishu",
+            to="ou_user",
+            text=(
+                "分析完成，报告已写入。\n"
+                "报告路径：workspace/reports/github-repos/仓库分析-demo.md"
+            ),
+            metadata={"receive_id_type": "open_id"},
+        )
+    )
+
+    assert ok is True
+    assert len(sent) == 3
+    assert sent[0]["url"].endswith("/im/v1/messages")
+    assert sent[1]["url"].endswith("/im/v1/files")
+    assert sent[1]["data"] == {"file_type": "stream", "file_name": "仓库分析-demo.md"}
+    assert sent[2]["url"].endswith("/im/v1/messages")
+    file_payload = sent[2]["json"]
+    assert isinstance(file_payload, dict)
+    assert file_payload["msg_type"] == "file"
+    assert json.loads(file_payload["content"]) == {"file_key": "file_report_1"}
+
+
 def test_feishu_channel_send_can_use_lark_cli_for_group_message(monkeypatch) -> None:
     channel = _build_channel(send_mode="lark_cli", render_mode="text")
     calls: list[list[str]] = []
@@ -262,6 +316,43 @@ def test_feishu_channel_send_can_use_lark_cli_for_group_message(monkeypatch) -> 
             "hello",
         ]
     ]
+
+
+def test_feishu_channel_lark_cli_sends_metadata_attachment(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    report_path = tmp_path / "workspace" / "reports" / "github-repos" / "仓库分析-cli.md"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("# CLI 报告", encoding="utf-8")
+    channel = _build_channel(send_mode="lark_cli", render_mode="text")
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr("agent_gateway.gateways.feishu.channel.shutil.which", lambda command: command)
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr("agent_gateway.gateways.feishu.channel.subprocess.run", fake_run)
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="feishu",
+            to="oc_chat",
+            text="报告完成",
+            metadata={
+                "receive_id_type": "chat_id",
+                "attachments": [{"path": "reports/github-repos/仓库分析-cli.md"}],
+            },
+        )
+    )
+
+    assert ok is True
+    assert len(calls) == 2
+    assert calls[0][-2:] == ["--text", "报告完成"]
+    assert calls[1][-2:] == ["--file", str(report_path.resolve())]
 
 
 def test_feishu_channel_lark_cli_send_uses_user_id_for_open_id(monkeypatch) -> None:

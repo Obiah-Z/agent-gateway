@@ -34,6 +34,8 @@ workspace/reports/github-repos/仓库分析-{owner}-{repo}.md
 
 对话回复只给简短摘要和文档路径，不要把完整报告刷屏。
 
+在飞书通道中，回复里保留 `workspace/reports/github-repos/*.md` 形式的报告路径时，Gateway 会自动识别该路径并把对应 Markdown 报告作为文件附件发送，方便用户直接下载。不要把路径改写成绝对路径或省略 `workspace/` 前缀。
+
 写文件时使用 Gateway 文件工具：
 
 - 工具：`write_file`

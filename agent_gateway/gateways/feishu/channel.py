@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 import base64
 import hashlib
+import re
 import shutil
 import subprocess
 
@@ -36,6 +37,10 @@ class FeishuChannel(Channel):
     name = "feishu"
     _CARD_FALLBACK_ERROR_CODES = {230025, 230054, 230099}
     _PERMANENT_SEND_ERROR_CODES = {99992351}
+    _REPORT_PATH_PATTERN = re.compile(
+        r"(?P<path>(?:workspace/)?reports/github-repos/[^\s`，。；,;]+\.md)",
+        re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -118,6 +123,9 @@ class FeishuChannel(Channel):
         for page_index, payload in enumerate(payloads, start=1):
             success = self._send_single_payload(token, outbound, payload, page_index, len(payloads))
             if not success:
+                return False
+        for attachment in self._collect_file_attachments(outbound):
+            if not self._send_file_attachment(token, outbound, attachment):
                 return False
         return True
 
@@ -384,6 +392,82 @@ class FeishuChannel(Channel):
         )
         return response.json()
 
+    def _upload_file_attachment(
+        self,
+        token: str,
+        attachment: dict[str, str],
+    ) -> str:
+        """上传本地文件并返回飞书 file_key。"""
+
+        path = Path(attachment["path"])
+        file_name = attachment.get("name") or path.name
+        with path.open("rb") as file_obj:
+            response = self._http.post(
+                f"{self.api_base}/im/v1/files",
+                headers={"Authorization": f"Bearer {token}"},
+                data={"file_type": attachment.get("file_type", "stream"), "file_name": file_name},
+                files={"file": (file_name, file_obj)},
+            )
+        data = response.json()
+        if data.get("code") != 0:
+            print(
+                "[feishu] file upload failed:"
+                f" account={self.account_id}"
+                f" path={path}"
+                f" code={data.get('code')}"
+                f" msg={data.get('msg', '')}"
+            )
+            return ""
+        payload = data.get("data", {})
+        if not isinstance(payload, dict):
+            return ""
+        return str(payload.get("file_key", "") or "")
+
+    def _send_file_attachment(
+        self,
+        token: str,
+        outbound: OutboundMessage,
+        attachment: dict[str, str],
+    ) -> bool:
+        """把已落地的本地文件作为飞书文件消息发送。"""
+
+        file_key = self._upload_file_attachment(token, attachment)
+        if not file_key:
+            return False
+        payload = {
+            "receive_id": outbound.to,
+            "msg_type": "file",
+            "content": json.dumps({"file_key": file_key}, ensure_ascii=False),
+        }
+        data = self._send_payload(token, outbound, payload)
+        success = data.get("code") == 0
+        if success:
+            print(
+                "[feishu] file send ok:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" file={attachment.get('name') or Path(attachment['path']).name}"
+            )
+        else:
+            print(
+                "[feishu] file send failed:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" file={attachment.get('name') or Path(attachment['path']).name}"
+                f" code={data.get('code')}"
+                f" msg={data.get('msg', '')}"
+            )
+            if self._is_permanent_send_error(data):
+                raise PermanentDeliveryError(
+                    "permanent Feishu file send failure:"
+                    f" account={self.account_id}"
+                    f" to={outbound.to}"
+                    f" receive_id_type={self._resolve_receive_id_type(outbound)}"
+                    f" code={data.get('code')}"
+                    f" msg={data.get('msg', '')}"
+                )
+        return success
+
     def _resolve_receive_id_type(self, outbound: OutboundMessage) -> str:
         """推断当前消息应该按 open_id 还是 chat_id 发送。"""
 
@@ -520,6 +604,9 @@ class FeishuChannel(Channel):
                 f" to={outbound.to}"
                 f" receive_id_type={receive_id_type}"
             )
+            for attachment in self._collect_file_attachments(outbound):
+                if not self._send_file_via_lark_cli(command, outbound, attachment):
+                    return False
             return True
         stderr = " ".join(result.stderr.split())[:500]
         stdout = " ".join(result.stdout.split())[:500]
@@ -541,6 +628,161 @@ class FeishuChannel(Channel):
                 f" stderr={stderr}"
             )
         return False
+
+    def _send_file_via_lark_cli(
+        self,
+        command: str,
+        outbound: OutboundMessage,
+        attachment: dict[str, str],
+    ) -> bool:
+        """通过 lark-cli 上传并发送一个文件附件。"""
+
+        receive_id_type = self._resolve_receive_id_type(outbound)
+        argv = [
+            command,
+            "im",
+            "+messages-send",
+            "--as",
+            self.lark_cli_identity,
+        ]
+        if receive_id_type == "open_id":
+            argv.extend(["--user-id", outbound.to])
+        else:
+            argv.extend(["--chat-id", outbound.to])
+        argv.extend(["--file", attachment["path"]])
+        try:
+            result = subprocess.run(
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                "[feishu] lark-cli file send timeout:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" file={attachment.get('name') or Path(attachment['path']).name}"
+            )
+            return False
+        if result.returncode == 0:
+            print(
+                "[feishu] lark-cli file send ok:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" file={attachment.get('name') or Path(attachment['path']).name}"
+            )
+            return True
+        stderr = " ".join(result.stderr.split())[:500]
+        stdout = " ".join(result.stdout.split())[:500]
+        print(
+            "[feishu] lark-cli file send failed:"
+            f" account={self.account_id}"
+            f" to={outbound.to}"
+            f" exit={result.returncode}"
+            f" stderr={stderr}"
+            f" stdout={stdout}"
+        )
+        return False
+
+    def _collect_file_attachments(self, outbound: OutboundMessage) -> list[dict[str, str]]:
+        """从 metadata 和回复文本中提取可发送的本地文件附件。"""
+
+        attachments: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        for raw in self._iter_metadata_attachments(outbound.metadata):
+            attachment = self._normalize_file_attachment(raw)
+            if attachment and attachment["path"] not in seen:
+                attachments.append(attachment)
+                seen.add(attachment["path"])
+
+        for match in self._REPORT_PATH_PATTERN.finditer(outbound.text):
+            attachment = self._normalize_file_attachment({"path": match.group("path")})
+            if attachment and attachment["path"] not in seen:
+                attachments.append(attachment)
+                seen.add(attachment["path"])
+
+        return attachments
+
+    def _iter_metadata_attachments(self, metadata: dict[str, Any]) -> list[Any]:
+        """兼容多个 metadata 字段名，便于不同调用方接入文件附件。"""
+
+        raw = (
+            metadata.get("attachments")
+            or metadata.get("feishu_attachments")
+            or metadata.get("files")
+            or metadata.get("feishu_files")
+            or []
+        )
+        if isinstance(raw, (str, Path)):
+            return [raw]
+        if isinstance(raw, dict):
+            return [raw]
+        if isinstance(raw, list):
+            return raw
+        return []
+
+    def _normalize_file_attachment(self, raw: Any) -> dict[str, str] | None:
+        """把路径或字典形式的附件描述转换成可发送的安全本地文件路径。"""
+
+        if isinstance(raw, (str, Path)):
+            raw_path = str(raw)
+            name = ""
+            file_type = "stream"
+        elif isinstance(raw, dict):
+            raw_path = str(raw.get("path") or raw.get("file_path") or "").strip()
+            name = str(raw.get("name") or raw.get("file_name") or "").strip()
+            file_type = str(raw.get("file_type") or "stream").strip() or "stream"
+        else:
+            return None
+        if not raw_path:
+            return None
+        path = self._resolve_attachment_path(raw_path)
+        if path is None:
+            print(
+                "[feishu] ignore unsafe attachment path:"
+                f" account={self.account_id}"
+                f" path={raw_path}"
+            )
+            return None
+        if not path.is_file():
+            print(
+                "[feishu] ignore missing attachment:"
+                f" account={self.account_id}"
+                f" path={path}"
+            )
+            return None
+        return {
+            "path": str(path),
+            "name": name or path.name,
+            "file_type": file_type,
+        }
+
+    def _resolve_attachment_path(self, raw_path: str) -> Path | None:
+        """只允许发送当前项目 workspace/reports 下的文件，避免任意文件泄漏。"""
+
+        normalized = raw_path.strip()
+        if not normalized:
+            return None
+        candidate = Path(normalized)
+        base = Path.cwd().resolve()
+        workspace = (base / "workspace").resolve()
+        reports = (workspace / "reports").resolve()
+        if not candidate.is_absolute():
+            if candidate.parts and candidate.parts[0] == "workspace":
+                candidate = base / candidate
+            else:
+                candidate = workspace / candidate
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(reports)
+        except ValueError:
+            return None
+        return resolved
 
     def _normalize_send_mode(self, value: object) -> str:
         """规范化输入值。"""
