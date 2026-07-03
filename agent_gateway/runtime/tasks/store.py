@@ -81,7 +81,7 @@ class LocalTaskStore:
             except Exception:
                 pass
         matches: list[TaskInstance] = []
-        for path in self.root.glob("*.json"):
+        for path in self._task_files():
             task = self._read(path)
             if task is None:
                 continue
@@ -115,7 +115,7 @@ class LocalTaskStore:
                 pass
         status_set = set(statuses or [])
         rows = []
-        for path in self.root.glob("*.json"):
+        for path in self._task_files():
             task = self._read(path)
             if task is None:
                 continue
@@ -243,8 +243,13 @@ class LocalTaskStore:
             return None
         try:
             return TaskInstance.from_dict(json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
+
+    def _task_files(self) -> Iterable[Path]:
+        """遍历正式任务文件，跳过原子写入过程中的临时 JSON 文件。"""
+
+        return (path for path in self.root.glob("*.json") if not path.name.startswith("."))
 
     def _task_path(self, task_id: str) -> Path:
         if not TASK_ID_PATTERN.fullmatch(task_id):

@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore
@@ -63,6 +64,26 @@ def test_local_task_queue_deduplicates_by_idempotency_key(tmp_path: Path) -> Non
     assert second.id == first.id
     assert queue.store.list(limit=10) == [first]
     assert [item.id for item in broker.published] == [first.id, first.id]
+
+
+def test_local_task_store_ignores_atomic_write_tmp_files(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    task = store.create(
+        TaskInstance.create(
+            task_type="cron",
+            source="scheduler",
+            idempotency_key="gateway:cron:server-space-advisor:slot",
+        )
+    )
+    tmp_path = store.root / ".tmp.inflight.json"
+    tmp_path.write_text("{}", encoding="utf-8")
+
+    assert [item.id for item in store.list(limit=10)] == [task.id]
+    assert store.find_by_idempotency_key(
+        idempotency_key="gateway:cron:server-space-advisor:slot",
+        task_type="cron",
+        source="scheduler",
+    ).id == task.id
 
 
 def test_local_task_queue_keeps_task_pending_when_broker_publish_fails(tmp_path: Path) -> None:
@@ -140,6 +161,8 @@ def test_local_task_queue_prefers_primary_atomic_reserve(tmp_path: Path) -> None
 
 def test_local_task_queue_falls_back_when_primary_reserve_fails(tmp_path: Path) -> None:
     class FailingWriteBackend:
+        enabled = False
+
         def reserve_task(
             self,
             *,
@@ -164,8 +187,37 @@ def test_local_task_queue_falls_back_when_primary_reserve_fails(tmp_path: Path) 
     assert reserved.metadata["worker_id"] == "worker-local"
 
 
+def test_local_task_queue_reserve_does_not_fallback_when_primary_enabled(tmp_path: Path) -> None:
+    class EmptyWriteBackend:
+        enabled = True
+
+        def reserve_task(
+            self,
+            *,
+            worker_id: str,
+            task_types: list[str],
+            blocked_session_keys: list[str],
+            now: float | None = None,
+        ):
+            del worker_id, task_types, blocked_session_keys, now
+            return None
+
+    store = LocalTaskStore(tmp_path / "tasks")
+    store.write_backend = EmptyWriteBackend()
+    queue = LocalTaskQueue(store)
+    task = queue.enqueue(task_type="cron", source="scheduler", priority=10)
+
+    reserved = queue.reserve(worker_id="worker-late", now=200.0)
+
+    assert reserved is None
+    assert store.get(task.id).status == "pending"
+    assert store.get(task.id).metadata == {}
+
+
 def test_local_task_queue_reserve_task_id_falls_back_when_primary_fails(tmp_path: Path) -> None:
     class FailingWriteBackend:
+        enabled = False
+
         def reserve_task_id(
             self,
             *,
@@ -199,6 +251,114 @@ def test_local_task_queue_reserve_task_id_falls_back_when_primary_fails(tmp_path
     assert reserved.status == "running"
     assert reserved.metadata["worker_id"] == "worker-local"
     assert store.get(task.id).status == "running"
+
+
+def test_local_task_queue_reserve_task_id_does_not_fallback_when_primary_enabled(
+    tmp_path: Path,
+) -> None:
+    class EmptyWriteBackend:
+        enabled = True
+
+        def reserve_task_id(
+            self,
+            *,
+            task_id: str,
+            worker_id: str,
+            task_types: list[str],
+            blocked_session_keys: list[str],
+            now: float | None = None,
+        ):
+            del task_id, worker_id, task_types, blocked_session_keys, now
+            return None
+
+    store = LocalTaskStore(tmp_path / "tasks")
+    store.write_backend = EmptyWriteBackend()
+    queue = LocalTaskQueue(store)
+    task = queue.enqueue(
+        task_type="cron",
+        source="scheduler",
+        session_key="system:cron:server-space-advisor",
+    )
+
+    reserved = queue.reserve_task_id(
+        task.id,
+        worker_id="worker-late",
+        task_types=["cron"],
+        now=200.0,
+    )
+
+    assert reserved is None
+    assert store.get(task.id).status == "pending"
+    assert store.get(task.id).metadata == {}
+
+
+def test_local_task_queue_shared_file_race_is_blocked_by_enabled_primary(
+    tmp_path: Path,
+) -> None:
+    class SingleWinnerWriteBackend:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.won = False
+
+        def reserve_task_id(
+            self,
+            *,
+            task_id: str,
+            worker_id: str,
+            task_types: list[str],
+            blocked_session_keys: list[str],
+            now: float | None = None,
+        ):
+            del task_types, blocked_session_keys, now
+            with self.lock:
+                if self.won:
+                    return None
+                self.won = True
+            return {
+                "id": task_id,
+                "task_type": "cron",
+                "source": "scheduler",
+                "status": "running",
+                "agent_id": "",
+                "session_key": "system:cron:server-space-advisor",
+                "priority": 100,
+                "idempotency_key": "gateway:cron:server-space-advisor:1783042200",
+                "payload": {},
+                "result_preview": "",
+                "error": "",
+                "retry_count": 0,
+                "created_at": 100.0,
+                "updated_at": 200.0,
+                "started_at": 200.0,
+                "finished_at": 0.0,
+                "metadata": {"worker_id": worker_id},
+            }
+
+    store = LocalTaskStore(tmp_path / "tasks")
+    store.write_backend = SingleWinnerWriteBackend()
+    queue = LocalTaskQueue(store)
+    task = queue.enqueue(
+        task_type="cron",
+        source="scheduler",
+        session_key="system:cron:server-space-advisor",
+        idempotency_key="gateway:cron:server-space-advisor:1783042200",
+    )
+    results: list[str] = []
+
+    def reserve(worker_id: str) -> None:
+        reserved = queue.reserve_task_id(task.id, worker_id=worker_id, task_types=["cron"])
+        if reserved is not None:
+            results.append(reserved.metadata["worker_id"])
+
+    threads = [threading.Thread(target=reserve, args=(f"worker-{idx}",)) for idx in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 1
 
 
 def test_local_task_queue_skips_blocked_session_keys(tmp_path: Path) -> None:

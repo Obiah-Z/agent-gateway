@@ -89,6 +89,8 @@ class LocalTaskQueue:
         if reserved is not None:
             self.store.write_task_to_disk(reserved)
             return reserved
+        if self._has_enabled_primary_reserve("reserve_task"):
+            return None
         candidates = self.store.list(statuses=["pending", "retrying"], limit=500)
         type_set = set(type_list)
         if type_set:
@@ -134,6 +136,8 @@ class LocalTaskQueue:
         if reserved is not None:
             self.store.write_task_to_disk(reserved)
             return reserved
+        if self._has_enabled_primary_reserve("reserve_task_id"):
+            return None
         task = self.store.get(task_id)
         if task is None:
             return None
@@ -147,6 +151,21 @@ class LocalTaskQueue:
         task.metadata = {**task.metadata, "worker_id": worker_id}
         self.store.create(task)
         return self.store.mark_running(task.id, now=now)
+
+    def _has_enabled_primary_reserve(self, method_name: str) -> bool:
+        """判断是否存在启用中的主存储抢占入口。
+
+        多 worker 模式下，PostgreSQL 是任务状态的事实来源。主存储返回 None
+        表示当前 worker 没抢到任务，不能继续降级读取共享 JSON 文件，否则会把
+        已被其他 worker 抢占的任务重复执行。只有未配置或显式 disabled 的主存储
+        才允许本地文件 fallback。
+        """
+
+        backend = getattr(self.store, "write_backend", None)
+        method = getattr(backend, method_name, None) if backend is not None else None
+        if method is None:
+            return False
+        return bool(getattr(backend, "enabled", True))
 
     def _reserve_primary(
         self,
