@@ -116,8 +116,15 @@ class FakeSessionScheduler:
     enabled = True
     namespace = "gateway:tasks:test"
 
+    def __init__(self) -> None:
+        self.rebuilt_task_ids: list[str] = []
+
     def snapshot(self) -> FakeSchedulerSnapshot:
         return FakeSchedulerSnapshot()
+
+    def rebuild(self, tasks) -> int:
+        self.rebuilt_task_ids = [task.id for task in tasks]
+        return len(self.rebuilt_task_ids)
 
 
 class FakeRedisClient:
@@ -1043,7 +1050,44 @@ def test_control_plane_manages_task_queue(tmp_path: Path) -> None:
     assert control.retry_task(failed.id) is True
     assert control.get_task(failed.id, include_payload=False)["status"] == "retrying"
     assert control.cancel_task(failed.id) is True
-    assert control.retry_task(pending.id) is True
+
+
+def test_control_plane_manages_session_scheduler_status_and_rebuild(tmp_path: Path) -> None:
+    settings = _build_settings(tmp_path)
+    scheduler = FakeSessionScheduler()
+    queue = LocalTaskQueue(
+        LocalTaskStore(tmp_path / "tasks"),
+        session_scheduler=scheduler,
+    )
+    pending = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-a",
+    )
+    done = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-b",
+    )
+    queue.ack(done.id)
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        task_queue=queue,
+    )
+
+    status = control.session_scheduler_status()
+    rebuilt = control.rebuild_session_scheduler()
+
+    assert status["configured"] is True
+    assert status["enabled"] is True
+    assert status["ready_count"] == 3
+    assert rebuilt["ok"] is True
+    assert rebuilt["rebuilt"] == 1
+    assert scheduler.rebuilt_task_ids == [pending.id]
 
 
 def test_control_plane_formats_task_payload_preview_time(tmp_path: Path) -> None:

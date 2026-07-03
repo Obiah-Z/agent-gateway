@@ -399,6 +399,43 @@ class GatewayControlPlane:
             },
         }
 
+    def session_scheduler_status(self, *, detail: bool = True, limit: int = 20) -> dict[str, Any]:
+        """查看 Redis session ready scheduler 的运行状态。"""
+
+        return self._session_scheduler_status(detail=detail, limit=limit)
+
+    def rebuild_session_scheduler(self, *, limit: int = 5000) -> dict[str, Any]:
+        """从 TaskStore / PostgreSQL 事实任务重建 Redis session 调度索引。"""
+
+        queue = self._require_task_queue()
+        scheduler = getattr(queue, "session_scheduler", None)
+        if scheduler is None or not getattr(scheduler, "enabled", False):
+            return {"ok": False, "rebuilt": 0, "configured": scheduler is not None, "enabled": False}
+        safe_limit = max(1, min(int(limit), 50_000))
+        if self.state_repository is not None:
+            rows = self.state_repository.list(
+                "tasks",
+                limit=safe_limit,
+                filters={"status": ["pending", "retrying"]},
+            )
+            tasks = []
+            for row in rows:
+                try:
+                    tasks.append(TaskInstance.from_dict(row))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        else:
+            tasks = queue.store.list(statuses=["pending", "retrying"], limit=safe_limit)
+        rebuilt = int(scheduler.rebuild(tasks))
+        return {
+            "ok": True,
+            "rebuilt": rebuilt,
+            "configured": True,
+            "enabled": True,
+            "limit": safe_limit,
+            "scheduler": self._session_scheduler_status(detail=True, limit=20),
+        }
+
     def lane_recovery_events(
         self,
         *,
@@ -1544,7 +1581,12 @@ class GatewayControlPlane:
             },
         }
 
-    def _session_scheduler_status(self) -> dict[str, Any]:
+    def _session_scheduler_status(
+        self,
+        *,
+        detail: bool = False,
+        limit: int = 20,
+    ) -> dict[str, Any]:
         """读取 Redis session ready scheduler 的轻量状态。"""
 
         scheduler = getattr(self.task_queue, "session_scheduler", None)
@@ -1558,6 +1600,8 @@ class GatewayControlPlane:
                 "namespace": str(getattr(scheduler, "namespace", "")),
             }
         try:
+            data = snapshot(detail=detail, limit=limit).to_dict()
+        except TypeError:
             data = snapshot().to_dict()
         except Exception as exc:
             return {

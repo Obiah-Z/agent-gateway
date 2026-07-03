@@ -155,6 +155,8 @@ class GatewayServer:
             "tasks.lanes.recovery.execute": self._m_tasks_lanes_recovery_execute,
             "tasks.lanes.recovery.events": self._m_tasks_lanes_recovery_events,
             "tasks.lanes.release": self._m_tasks_lanes_release,
+            "tasks.scheduler.status": self._m_tasks_scheduler_status,
+            "tasks.scheduler.rebuild": self._m_tasks_scheduler_rebuild,
             "tasks.get": self._m_tasks_get,
             "tasks.cancel": self._m_tasks_cancel,
             "tasks.retry": self._m_tasks_retry,
@@ -851,6 +853,23 @@ class GatewayServer:
             owner_token=str(params.get("owner_token", "")),
             force=bool(params.get("force", False)),
             reason=str(params.get("reason", "manual release")),
+        )
+
+    async def _m_tasks_scheduler_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 session scheduler 状态 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.session_scheduler_status(
+            detail=bool(params.get("detail", True)),
+            limit=int(params.get("limit", 20)),
+        )
+
+    async def _m_tasks_scheduler_rebuild(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 session scheduler 重建 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.rebuild_session_scheduler(
+            limit=int(params.get("limit", 5000)),
         )
 
     async def _m_tasks_get(self, params: dict[str, Any]) -> dict[str, Any]:

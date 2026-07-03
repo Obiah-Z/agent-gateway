@@ -28,6 +28,9 @@ class SessionSchedulerSnapshot:
     ready_count: int
     namespace: str
     enabled: bool
+    ready_sessions: tuple[str, ...] = ()
+    pending_buckets: tuple[dict[str, Any], ...] = ()
+    busy_owners: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """返回可被控制面或 Dashboard 展示的字典。"""
@@ -36,6 +39,9 @@ class SessionSchedulerSnapshot:
             "enabled": self.enabled,
             "namespace": self.namespace,
             "ready_count": self.ready_count,
+            "ready_sessions": list(self.ready_sessions),
+            "pending_buckets": list(self.pending_buckets),
+            "busy_owners": list(self.busy_owners),
         }
 
 
@@ -274,8 +280,8 @@ class RedisSessionReadyScheduler:
                 client.rpush(self.ready_key, session_key)
         return rebuilt
 
-    def snapshot(self) -> SessionSchedulerSnapshot:
-        """返回调度器轻量状态。"""
+    def snapshot(self, *, detail: bool = False, limit: int = 20) -> SessionSchedulerSnapshot:
+        """返回调度器状态；detail=True 时包含 ready/pending/busy 样例。"""
 
         if not self.enabled:
             return SessionSchedulerSnapshot(
@@ -283,11 +289,76 @@ class RedisSessionReadyScheduler:
                 namespace=self.namespace,
                 enabled=False,
             )
+        client = self.redis_client._get_client()
+        ready_sessions = tuple(str(item) for item in client.lrange(self.ready_key, 0, -1))
+        if not detail:
+            return SessionSchedulerSnapshot(
+                ready_count=int(client.llen(self.ready_key)),
+                namespace=self.namespace,
+                enabled=True,
+            )
+        safe_limit = max(1, int(limit))
+        pending_buckets: list[dict[str, Any]] = []
+        busy_owners: list[dict[str, Any]] = []
+        seen_sessions = list(dict.fromkeys(ready_sessions))
+        for key in self._scan_keys(f"{self.namespace}:session:*:pending", limit=safe_limit):
+            session_key = self._session_from_key(key, suffix=":pending")
+            if session_key and session_key not in seen_sessions:
+                seen_sessions.append(session_key)
+        for session_key in seen_sessions[:safe_limit]:
+            pending_key = self.pending_key(session_key)
+            pending_items = [str(item) for item in client.lrange(pending_key, 0, -1)]
+            if pending_items:
+                pending_buckets.append(
+                    {
+                        "session_key": session_key,
+                        "key": pending_key,
+                        "count": len(pending_items),
+                        "items": pending_items[:safe_limit],
+                    }
+                )
+            busy_key = self.busy_key(session_key)
+            raw_owner = str(client.get(busy_key) or "")
+            if raw_owner:
+                owner = decode_session_owner(raw_owner)
+                busy_owners.append(
+                    {
+                        "session_key": session_key,
+                        "key": busy_key,
+                        "owner": owner,
+                        "raw": raw_owner,
+                    }
+                )
         return SessionSchedulerSnapshot(
-            ready_count=int(self.redis_client._get_client().llen(self.ready_key)),
+            ready_count=int(client.llen(self.ready_key)),
             namespace=self.namespace,
             enabled=True,
+            ready_sessions=ready_sessions[:safe_limit],
+            pending_buckets=tuple(pending_buckets),
+            busy_owners=tuple(busy_owners),
         )
+
+    def _scan_keys(self, pattern: str, *, limit: int) -> list[str]:
+        """扫描少量 Redis key 用于观测，失败时返回空列表。"""
+
+        try:
+            client = self.redis_client._get_client()
+            keys: list[str] = []
+            for key in client.scan_iter(match=pattern, count=max(1, int(limit))):
+                keys.append(str(key))
+                if len(keys) >= limit:
+                    break
+            return keys
+        except Exception:
+            return []
+
+    def _session_from_key(self, key: str, *, suffix: str) -> str:
+        """从 scheduler key 反推出 session_key。"""
+
+        prefix = f"{self.namespace}:session:"
+        if not key.startswith(prefix) or not key.endswith(suffix):
+            return ""
+        return key[len(prefix) : -len(suffix)]
 
     def _encode_task_ref(self, task: TaskInstance) -> str:
         """编码 pending bucket 中的轻量任务引用。"""

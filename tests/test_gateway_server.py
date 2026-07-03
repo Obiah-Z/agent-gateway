@@ -756,6 +756,70 @@ def test_gateway_server_exposes_task_control_methods(tmp_path) -> None:
     assert retried == {"ok": True}
 
 
+def test_gateway_server_exposes_session_scheduler_methods(tmp_path) -> None:
+    class FakeScheduler:
+        enabled = True
+        namespace = "gateway:tasks:test"
+
+        def __init__(self) -> None:
+            self.rebuilt = 0
+
+        def snapshot(self, *, detail: bool = False, limit: int = 20):
+            del detail, limit
+
+            class Snapshot:
+                def to_dict(self) -> dict:
+                    return {
+                        "enabled": True,
+                        "namespace": "gateway:tasks:test",
+                        "ready_count": 1,
+                        "ready_sessions": ["session-a"],
+                        "pending_buckets": [],
+                        "busy_owners": [],
+                    }
+
+            return Snapshot()
+
+        def rebuild(self, tasks) -> int:
+            self.rebuilt = len(list(tasks))
+            return self.rebuilt
+
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    queue = LocalTaskQueue(
+        LocalTaskStore(tmp_path / "tasks"),
+        session_scheduler=FakeScheduler(),
+    )
+    queue.enqueue(task_type="agent_inbound", source="feishu", session_key="session-a")
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        task_queue=queue,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": AgentManager(), "bindings": BindingTable()})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    status = asyncio.run(server._m_tasks_scheduler_status({"detail": True}))
+    rebuilt = asyncio.run(server._m_tasks_scheduler_rebuild({}))
+
+    assert status["configured"] is True
+    assert status["ready_sessions"] == ["session-a"]
+    assert rebuilt["ok"] is True
+    assert rebuilt["rebuilt"] == 1
+
+
 def test_gateway_server_exposes_runtime_status_and_health_check(tmp_path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",

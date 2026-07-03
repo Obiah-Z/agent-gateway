@@ -68,6 +68,14 @@ class FakeRedisSchedulerClient(RedisClient):
                     deleted += 1
                 return deleted
 
+            def scan_iter(self, *, match: str, count: int):
+                del count
+                if match.endswith("*:pending"):
+                    prefix = match[: -len("*:pending")]
+                    for key in sorted(outer.lists):
+                        if key.startswith(prefix) and key.endswith(":pending"):
+                            yield key
+
             def eval(self, script: str, numkeys: int, *args: str):
                 del numkeys
                 if "local max_scan" in script:
@@ -215,3 +223,27 @@ def test_session_scheduler_rebuild_orders_pending_tasks_by_priority_and_created_
         "early|agent_inbound",
         "late|agent_inbound",
     ]
+
+
+def test_session_scheduler_snapshot_includes_ready_pending_and_busy_details() -> None:
+    redis_client = FakeRedisSchedulerClient()
+    scheduler = RedisSessionReadyScheduler(redis_client, namespace="gateway:tasks:test")
+    scheduler.enqueue(make_task("a1", "session-a"))
+    scheduler.enqueue(make_task("a2", "session-a"))
+    scheduler.enqueue(make_task("b1", "session-b"))
+    claim = scheduler.claim_next(worker_id="worker-1", now=100.0)
+
+    snapshot = scheduler.snapshot(detail=True).to_dict()
+
+    assert claim is not None
+    assert snapshot["enabled"] is True
+    assert snapshot["namespace"] == "gateway:tasks:test"
+    assert "session-b" in snapshot["ready_sessions"]
+    pending_by_session = {
+        row["session_key"]: row for row in snapshot["pending_buckets"]
+    }
+    busy_by_session = {
+        row["session_key"]: row for row in snapshot["busy_owners"]
+    }
+    assert pending_by_session["session-a"]["items"] == ["a2|agent_inbound"]
+    assert busy_by_session["session-a"]["owner"]["task_id"] == "a1"
