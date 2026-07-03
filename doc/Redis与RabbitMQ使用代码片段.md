@@ -31,9 +31,11 @@ inbound_rabbitmq_exchange: str = "agent_gateway.inbound"
 inbound_rabbitmq_queue_prefix: str = "agent_gateway.inbound.partition"
 inbound_rabbitmq_partitions: int = 8
 inbound_rabbitmq_prefetch: int = 1
+session_ready_scheduler_enabled: bool = False
+session_ready_scheduler_namespace: str = "gateway:tasks"
 ```
 
-运行时从环境变量读取这些配置，例如 `GATEWAY_REDIS_ENABLED`、`GATEWAY_DELIVERY_BROKER=rabbitmq`、`GATEWAY_INBOUND_BROKER=rabbitmq`。
+运行时从环境变量读取这些配置，例如 `GATEWAY_REDIS_ENABLED`、`GATEWAY_DELIVERY_BROKER=rabbitmq`、`GATEWAY_INBOUND_BROKER=rabbitmq`、`GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true`。
 
 源码位置：[agent_gateway/config.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/config.py:201)
 
@@ -42,6 +44,7 @@ redis_enabled=env_bool("GATEWAY_REDIS_ENABLED", False)
 redis_url=os.getenv("GATEWAY_REDIS_URL", "redis://127.0.0.1:6379/0")
 delivery_broker=os.getenv("GATEWAY_DELIVERY_BROKER", "none").strip().lower() or "none"
 inbound_broker=os.getenv("GATEWAY_INBOUND_BROKER", "none").strip().lower() or "none"
+session_ready_scheduler_enabled=env_bool("GATEWAY_SESSION_READY_SCHEDULER_ENABLED", False)
 ```
 
 ## 应用装配
@@ -76,7 +79,7 @@ if settings.delivery_broker == "rabbitmq":
     )
 ```
 
-入站任务 broker 在 `GATEWAY_INBOUND_BROKER=rabbitmq` 时接入 `LocalTaskQueue`。
+入站任务 broker 在 `GATEWAY_INBOUND_BROKER=rabbitmq` 时接入 `LocalTaskQueue`。如果同时启用 `GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true`，应用会创建 `RedisSessionReadyScheduler`，RabbitMQ 消息只负责唤醒 worker，真正执行顺序由 Redis 调度索引决定。
 
 源码位置：[agent_gateway/app.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/app.py:314)
 
@@ -94,7 +97,14 @@ if settings.inbound_broker == "rabbitmq":
         connect_timeout_seconds=settings.inbound_rabbitmq_connect_timeout_seconds,
         enabled=True,
     )
-task_queue = LocalTaskQueue(task_store, broker=task_broker)
+session_scheduler = None
+if settings.session_ready_scheduler_enabled and redis_client.enabled:
+    session_scheduler = RedisSessionReadyScheduler(
+        redis_client,
+        namespace=settings.session_ready_scheduler_namespace,
+        default_ttl_seconds=settings.inbound_session_lock_ttl_seconds,
+    )
+task_queue = LocalTaskQueue(task_store, broker=task_broker, session_scheduler=session_scheduler)
 ```
 
 ## Redis：基础封装
@@ -269,6 +279,83 @@ class RedisLaneCoordinator:
         )
         if not acquired:
             return None
+```
+
+## Redis：Session Ready Scheduler
+
+源码位置：[agent_gateway/runtime/tasks/session_scheduler.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/session_scheduler.py:39)
+
+`RedisSessionReadyScheduler` 解决的是“严格顺序调度”问题。它不是业务数据主存储，任务事实状态仍在 TaskStore / PostgreSQL；Redis 只保存热路径索引。
+
+```python
+class RedisSessionReadyScheduler:
+    """基于 Redis 的 per-session FIFO 调度索引。
+
+    PostgreSQL / TaskStore 仍是任务事实状态；Redis 只保存热路径调度索引：
+    每个 session 一个 pending bucket，全局 ready index 只保存“可运行 session”。
+    """
+```
+
+核心数据结构是三个 Redis key：
+
+```text
+gateway:tasks:sessions:ready
+gateway:tasks:session:{session_key}:pending
+gateway:tasks:session:{session_key}:busy
+```
+
+入队时，任务引用会被写入对应 session 的 pending bucket；如果该 session 当前没有 busy owner，则 session key 被放入全局 ready index。
+
+源码位置：[agent_gateway/runtime/tasks/session_scheduler.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/session_scheduler.py:158)
+
+```python
+def enqueue(self, task: TaskInstance) -> bool:
+    item = self._encode_task_ref(task)
+    pending_key = self.pending_key(task.session_key)
+    existing = client.lrange(pending_key, 0, -1)
+    if item not in set(str(value) for value in existing):
+        client.rpush(pending_key, item)
+    if task.session_key not in ready_items and not client.exists(self.busy_key(task.session_key)):
+        client.rpush(self.ready_key, task.session_key)
+    return True
+```
+
+claim 阶段通过 Lua 脚本原子完成：从 ready index 取一个 session，检查 busy owner，只弹出该 session 的队首任务，并写入带 TTL 的 busy owner。这样 A session 正在执行时，A2/A3 留在 A 的 pending bucket，B/C session 仍可以继续被其他 worker claim。
+
+源码位置：[agent_gateway/runtime/tasks/session_scheduler.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/session_scheduler.py:177)
+
+```python
+def claim_next(self, *, worker_id: str, task_types: Iterable[str] | None = None, ...):
+    result = self.redis_client._get_client().eval(
+        self.CLAIM_SCRIPT,
+        1,
+        self.ready_key,
+        self.namespace,
+        worker_id,
+        str(ttl),
+        str(current),
+        str(max_scan),
+        allowed,
+    )
+```
+
+release 阶段必须校验 owner value。只有当前 owner 匹配时才删除 busy key；如果 pending bucket 仍有任务，再把 session 放回 ready index。
+
+源码位置：[agent_gateway/runtime/tasks/session_scheduler.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/session_scheduler.py:212)
+
+```python
+def release(self, claim: SessionTaskClaim) -> bool:
+    return bool(
+        self.redis_client._get_client().eval(
+            self.RELEASE_SCRIPT,
+            3,
+            self.ready_key,
+            claim.busy_key,
+            claim.pending_key,
+            claim.session_key,
+            claim.owner_value,
+        )
+    )
 ```
 
 入站 Agent 任务处理器会创建这个 coordinator。
@@ -448,59 +535,73 @@ def _ensure_channel(self) -> Any:
 
 源码位置：[agent_gateway/runtime/tasks/queue.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/queue.py:21)
 
-任务先写入 TaskStore；如果配置了 broker，再发布轻量引用到 RabbitMQ。重复任务会通过幂等键返回已有任务，并在必要时重新发布引用。
+任务先写入 TaskStore；如果配置了 session scheduler，则同步写入 Redis pending bucket 和 ready index；如果配置了 broker，再发布轻量引用到 RabbitMQ。重复任务会通过幂等键返回已有任务，并在必要时重新写入调度索引、重新发布唤醒引用。
 
 ```python
 def enqueue(..., idempotency_key: str = "", ...):
     if idempotency_key:
         existing = self.store.find_by_idempotency_key(...)
         if existing is not None:
-            if existing.status in {"pending", "retrying"} and self.broker is not None:
-                self.broker.publish(existing)
+            if existing.status in {"pending", "retrying"}:
+                self._publish_ready(existing)
             return existing
 
     task = TaskInstance.create(...)
     created = self.store.create(task)
-    if self.broker is not None:
-        self.broker.publish(created)
+    self._publish_ready(created)
     return created
 ```
 
-worker 消费 RabbitMQ 消息后，不直接相信 broker 消息，而是回到 TaskStore 按 `task_id` 精确预占，避免过期 broker 消息重复执行已经完成或取消的任务。
+启用 session scheduler 时，worker 不再按 RabbitMQ payload 中的 `task_id` 直接执行，而是调用 `reserve_session_claim()` 从 Redis ready index 声明一个可执行 session 的队首任务，再回到 TaskStore / PostgreSQL 按 `task_id` 精确预占。未启用 scheduler 时，旧路径仍按 broker payload 的 `task_id` 预占。
 
 源码位置：[agent_gateway/runtime/tasks/queue.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/queue.py:112)
 
 ```python
-def reserve_task_id(self, task_id: str, *, worker_id: str, task_types: Iterable[str] | None = None, ...):
-    """RabbitMQ 入站消息只携带 task_id，消费端必须回到 TaskStore 做状态校验，
-    防止过期 broker 消息重复执行已经完成或取消的任务。
-    """
-    reserved = self._reserve_task_id_primary(...)
-    if reserved is not None:
-        self.store.write_task_to_disk(reserved)
-        return reserved
+def reserve_session_claim(self, *, worker_id: str, task_types: Iterable[str] | None = None, ...):
+    scheduler = self.session_scheduler
+    claim = scheduler.claim_next(worker_id=worker_id, task_types=task_types)
+    task = self.reserve_task_id(claim.task_id, worker_id=worker_id, task_types=task_types)
+    if task is not None:
+        return task, claim
+    scheduler.release(claim)
 ```
 
 ## Worker 如何消费 RabbitMQ 入站任务
 
 源码位置：[agent_gateway/runtime/tasks/worker.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/worker.py:126)
 
-`TaskWorkerRuntime` 会优先从外部分发队列消费一条任务引用。它轮询所有 partition，避免单一分区长期霸占。
+`TaskWorkerRuntime` 会优先尝试 Redis session scheduler。只有未启用 scheduler 或当前没有可 claim 的任务时，才进入 broker / 本地 reserve 路径。
+
+源码位置：[agent_gateway/runtime/tasks/worker.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/worker.py:74)
 
 ```python
-async def _run_once_from_broker(self) -> bool:
-    broker = getattr(self.queue, "broker", None)
-    if broker is None or not getattr(broker, "enabled", False):
-        return False
-    partitions = max(1, int(getattr(broker, "partitions", 1)))
-    start = self._next_broker_partition % partitions
-    for offset in range(partitions):
-        partition = (start + offset) % partitions
-        consumed = await asyncio.to_thread(
-            broker.consume_once,
-            partition,
-            self._handle_broker_payload_sync,
-        )
+async def run_once(self) -> bool:
+    scheduler_handled = await self._run_once_from_scheduler()
+    if scheduler_handled:
+        return True
+    broker_handled = await self._run_once_from_broker()
+    if broker_handled:
+        return True
+```
+
+broker 消息到达时，如果 scheduler 已启用，payload 会被视为 worker 唤醒信号。worker 会 claim Redis 中真正可执行的 session 队首任务，然后确认 broker 消息。
+
+源码位置：[agent_gateway/runtime/tasks/worker.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/worker.py:159)
+
+```python
+if scheduler is not None and getattr(scheduler, "enabled", False):
+    claimed = self.queue.reserve_session_claim(
+        worker_id=self.worker_id,
+        task_types=self.handlers.keys(),
+    )
+    if claimed is None:
+        return True
+    task, claim = claimed
+    try:
+        asyncio.run(self._execute(task))
+    finally:
+        self.queue.release_session_claim(claim)
+    return True
 ```
 
 ## 当前链路总结
@@ -512,9 +613,11 @@ async def _run_once_from_broker(self) -> bool:
   -> 统一入站消息
   -> TaskQueue.enqueue()
   -> TaskStore 持久化任务
-  -> RabbitMQInboundTaskBroker.publish(task_id 引用)
-  -> TaskWorkerRuntime.consume_once(partition)
-  -> TaskStore.reserve_task_id(task_id)
+  -> RedisSessionReadyScheduler.enqueue(session pending bucket + ready index)
+  -> RabbitMQInboundTaskBroker.publish(task_id 唤醒引用)
+  -> TaskWorkerRuntime._run_once_from_scheduler()
+  -> RedisSessionReadyScheduler.claim_next()
+  -> TaskStore.reserve_task_id(claim.task_id)
   -> RedisLaneCoordinator 获取 session 锁
   -> Agent 执行
   -> DeliveryQueue 入队出站消息
@@ -535,4 +638,3 @@ Agent 回复 / Cron 推送 / Heartbeat 推送
 Redis 解决的是“协调问题”：去重、幂等、限流、session 互斥。
 
 RabbitMQ 解决的是“分发问题”：削峰、异步解耦、分区消费、ACK/NACK、死信和队列观测。
-

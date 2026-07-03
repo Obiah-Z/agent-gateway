@@ -123,7 +123,7 @@ docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
 | Phase 18 | 部分完成 | 后台任务队列已完成；多 Agent handoff、per-agent 并发和任务优先级仍待增强。 |
 | Phase 19 | 已完成 | Docker Compose、systemd、数据卷、HTTPS、备份恢复、启动前检查。 |
 | Phase 20 | 已完成 | Redis/PostgreSQL/RabbitMQ 分布式执行基础、可靠队列、分布式 lane、部署与压测闭环。 |
-| Phase 21 | 高优先级待实现 | Redis ready index + per-session pending bucket，保证同一 session 严格 FIFO，同时不同 session 并行。 |
+| Phase 21 | 部分完成 | Redis ready index + per-session pending bucket，保证同一 session 严格 FIFO，同时不同 session 并行。 |
 
 ## 7. Phase 20 完成摘要
 
@@ -170,8 +170,9 @@ failed=0
 | 会话与记忆长期治理不足 | 数据膨胀、记忆污染 | Phase 17 |
 | 多 Agent handoff 仍偏 prompt 编排 | 协作任务缺少强状态机 | Phase 18 |
 | 多 worker 长期部署需显式配置不同 `GATEWAY_TASK_WORKER_ID` | 运维观测可能混淆 | 后续部署增强 |
-| 当前 Redis lane 只保证同一 session 不并发，不保证 retry 后严格 FIFO | `prefetch>1` 时同一 session 的 A2/A3/A4 可能被提前预取后进入 retry，后续重试顺序可能变化 | Phase 21 |
-| 模型调用耗时超过 Redis lock TTL 或续租失败 | 锁过期后，后续同 session 任务可能被其他 worker 抢到，造成同一会话并发执行、上下文乱序、重复回复或状态覆盖 | Phase 21 |
+| Redis session ready scheduler 需要显式开启 | 默认仍兼容旧路径；分布式多 worker 严格顺序模式需要 `GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true` | Phase 21.6 |
+| Scheduler busy owner 具备 TTL 与 release 校验，但 worker 级 scheduler watchdog 仍需增强 | 极长模型调用或 Redis 续租失败时仍需要更细的观测和接管策略 | Phase 21.5 |
+| Dashboard/控制面尚未展示 Redis pending bucket、ready index 和 busy owner | 排查调度索引时仍需要 Redis CLI 或日志辅助 | Phase 21.6 |
 | Redis/PostgreSQL/RabbitMQ 仍是单机中间件示例 | 不是跨机器高可用集群 | 后续基础设施阶段 |
 
 ## 9. 后续优先级
@@ -200,11 +201,11 @@ Phase 21：Redis ready index + per-session pending bucket。
 
 | 子阶段 | 状态 | 内容 | 完成标准 |
 | --- | --- | --- | --- |
-| 21.1 调度数据结构设计 | 待实现 | 定义 Redis key、value、Lua 脚本输入输出、状态迁移和重建规则。 | 文档和测试用例覆盖 claim/release/rebuild。 |
-| 21.2 SessionScheduler 接口 | 待实现 | 新增 `SessionReadyScheduler`，封装 enqueue、claim_next、release、fail、rebuild。 | 本地 fake Redis 单测可验证严格 FIFO。 |
-| 21.3 入站 enqueue 接入 | 待实现 | TaskStore 创建任务后写入 session pending bucket；ready index 只放 session，不放 task。 | A/B/C 多 session 入队后 ready index 正确。 |
-| 21.4 Worker claim 改造 | 待实现 | worker 不直接执行 RabbitMQ task_id，而是通过 scheduler claim 某 session 队首任务。 | `prefetch=4/concurrency=4` 下同 session 不乱序。 |
-| 21.5 锁 TTL 与续租治理 | 待实现 | busy owner 续租、模型长调用心跳、超时接管、过期 owner 观测事件。 | 长模型调用不会因 TTL 到期导致并发执行。 |
+| 21.1 调度数据结构设计 | 已完成 | 定义 Redis key、value、Lua 脚本输入输出、状态迁移和重建规则。 | `tests/test_session_scheduler.py` 覆盖 claim/release/rebuild。 |
+| 21.2 SessionScheduler 接口 | 已完成 | 新增 `RedisSessionReadyScheduler`，封装 enqueue、claim_next、release、renew、rebuild。 | fake Redis 单测验证严格 FIFO。 |
+| 21.3 入站 enqueue 接入 | 已完成 | TaskStore 创建任务后写入 session pending bucket；ready index 只放 session，不放 task。 | `LocalTaskQueue` 已接入 scheduler，再发布 RabbitMQ 唤醒。 |
+| 21.4 Worker claim 改造 | 已完成 | 启用 scheduler 后，worker 通过 scheduler claim session 队首任务；RabbitMQ payload 作为唤醒消息。 | 相关 worker 单测验证 scheduler 优先于直接 reserve。 |
+| 21.5 锁 TTL 与续租治理 | 部分完成 | busy owner 带 TTL，release/renew 必须校验 owner；worker 级 scheduler watchdog 和告警仍待增强。 | claim TTL 与 owner 校验已有单测，长模型调用观测待补。 |
 | 21.6 恢复与观测 | 待实现 | Dashboard/Control Plane 展示 pending bucket、ready index、busy owner、stale owner 和 rebuild 操作。 | Redis 丢数据后可从 PostgreSQL 重建调度索引。 |
 
 Redis 锁过期后果与治理：

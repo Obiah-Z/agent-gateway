@@ -13,6 +13,9 @@
 | `preroute_lane_key` | `inbound:{channel}:{account_id}:{peer_id}` | `inbound:feishu:feishu-main:ou_xxx` | 路由前入站粗分组，避免未知 Agent 阶段消息乱序。 |
 | `inbound_lane_key` | `agent:{agent_id}:session:{session_key}` | `agent:main:session:agent:main:direct:ou_xxx` | 路由后入站 lane key，保证同 Agent 会话串行。 |
 | `redis_lane_key` | `{namespace}:{session_key}` | `gateway:lock:agent_inbound:inbound:feishu:feishu-main:ou_xxx` | Redis 中实际持有的 session lane key。 |
+| `session_ready_index` | `{namespace}:sessions:ready` | `gateway:tasks:sessions:ready` | Redis session scheduler 的全局可运行 session 索引。 |
+| `session_pending_bucket` | `{namespace}:session:{session_key}:pending` | `gateway:tasks:session:agent:main:...:pending` | Redis session scheduler 中某个 session 的待执行任务队列。 |
+| `session_busy_owner` | `{namespace}:session:{session_key}:busy` | `gateway:tasks:session:agent:main:...:busy` | Redis session scheduler 中某个 session 当前队首任务的 busy owner。 |
 | `delivery_idempotency_key` | 显式 key 或 `sha256(seed)` | `d4e5...` | 出站投递幂等，避免同一回复重复发送。 |
 | `cron_idempotency_key` | `gateway:cron:{job_id}:{schedule_slot}` | `gateway:cron:system-ping:2026-07-02T10:00:00+00:00` | Cron 分布式幂等，避免多实例重复触发。 |
 | `feishu_event_dedup_key` | `gateway:feishu:event:{account_id}:{event_id}` | `gateway:feishu:event:feishu-main:evt-redis-dedup-1` | 飞书事件去重，避免 webhook / 长连接重复处理。 |
@@ -179,6 +182,67 @@ gateway:load-test:lane:{session_key}
 
 这个 key 的作用是跨 worker、跨实例保证同一个 session 同一时间只有一个 owner。
 
+## Redis Session Scheduler Key
+
+Redis session scheduler 使用独立命名空间，默认是：
+
+```text
+gateway:tasks
+```
+
+全局 ready index 保存“当前可以被 worker claim 的 session”，而不是保存任务 ID：
+
+```text
+gateway:tasks:sessions:ready
+```
+
+每个 session 有自己的 pending bucket，里面保存轻量任务引用：
+
+```text
+gateway:tasks:session:{session_key}:pending
+```
+
+示例：
+
+```text
+gateway:tasks:session:agent:main:feishu:feishu-main:direct:ou_xxx:pending
+```
+
+pending bucket 中的元素格式是：
+
+```text
+{task_id}|{task_type}
+```
+
+示例：
+
+```text
+ed9c96a187c546c2|agent_inbound
+```
+
+某个 session 正在执行队首任务时，会写入 busy owner：
+
+```text
+gateway:tasks:session:{session_key}:busy
+```
+
+busy owner value 是 JSON，至少包含：
+
+```json
+{
+  "version": 1,
+  "worker_id": "gateway-worker-1",
+  "task_id": "ed9c96a187c546c2",
+  "session_key": "agent:main:feishu:feishu-main:direct:ou_xxx",
+  "acquired_at": 1782900000.123,
+  "renewed_at": 1782900000.123
+}
+```
+
+`release` 和 `renew` 必须校验完整 owner value，不能只按 key 删除。这样可以避免旧 worker 卡顿恢复后释放新 worker 的 busy owner。
+
+调度语义如下：A session 被 claim 后，A2/A3 留在 A 的 pending bucket，A 不会再次进入 ready index；B/C session 如果不 busy，仍然可以进入 ready index 并被其他 worker 执行。A1 完成并 release 后，如果 A 的 pending bucket 非空，A 才重新进入 ready index。
+
 ## 投递幂等 Key
 
 出站投递幂等 key 由 `DeliveryQueue._build_idempotency_key()` 生成。上游显式传入 `metadata.idempotency_key` 时优先使用；没有显式 key 时，系统基于以下 seed 计算 SHA-256：
@@ -302,4 +366,3 @@ partition = int.from_bytes(sha256(session_key)[:8], "big") % partitions
 ## 命名设计原则
 
 这些 key 的设计遵循三个原则。第一，能从名称看出作用域，例如 `gateway:cron:*` 用于 Cron 幂等，`gateway:lock:agent_inbound:*` 用于入站 session lane。第二，跨系统传递时只传轻量引用，例如 RabbitMQ 只传 `task_id` 或 `delivery_id`，完整事实仍在 PostgreSQL / 本地状态层。第三，涉及分布式 ownership 的 key 必须包含可校验 token，例如 `owner_token={worker_id}:{task_id}`，释放和续租时必须匹配，不能只靠 key 存在与否判断执行权。
-
