@@ -358,6 +358,34 @@ def release(self, claim: SessionTaskClaim) -> bool:
     )
 ```
 
+worker 执行 scheduler claim 任务时会启动 watchdog 续租协程。续租成功记录 `task.scheduler.renewed`，续租失败记录 `task.scheduler.renew_failed`，但不会直接中断已经在执行的模型调用或工具调用。
+
+源码位置：[agent_gateway/runtime/tasks/worker.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/worker.py:351)
+
+```python
+async def _execute_claimed_task(self, task: TaskInstance, claim: Any) -> None:
+    renew_task = asyncio.create_task(
+        self._renew_session_claim_until_cancelled(task, claim),
+        name=f"task-session-claim-renew:{task.id}",
+    )
+    try:
+        await self._execute(task)
+    finally:
+        renew_task.cancel()
+        await renew_task
+        self.queue.release_session_claim(claim)
+```
+
+控制面在 `runtime.status` 中暴露 session scheduler 快照，用于 Dashboard 或排障脚本判断调度索引是否启用、当前 ready session 数量和命名空间。
+
+源码位置：[agent_gateway/runtime/execution/control_plane.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/execution/control_plane.py:1483)
+
+```python
+if tasks.get("configured"):
+    tasks["persisted_lanes"] = self._session_lane_status()
+    tasks["session_scheduler"] = self._session_scheduler_status()
+```
+
 入站 Agent 任务处理器会创建这个 coordinator。
 
 源码位置：[agent_gateway/runtime/tasks/handlers.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/handlers.py:56)

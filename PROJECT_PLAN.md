@@ -171,8 +171,8 @@ failed=0
 | 多 Agent handoff 仍偏 prompt 编排 | 协作任务缺少强状态机 | Phase 18 |
 | 多 worker 长期部署需显式配置不同 `GATEWAY_TASK_WORKER_ID` | 运维观测可能混淆 | 后续部署增强 |
 | Redis session ready scheduler 需要显式开启 | 默认仍兼容旧路径；分布式多 worker 严格顺序模式需要 `GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true` | Phase 21.6 |
-| Scheduler busy owner 具备 TTL 与 release 校验，但 worker 级 scheduler watchdog 仍需增强 | 极长模型调用或 Redis 续租失败时仍需要更细的观测和接管策略 | Phase 21.5 |
-| Dashboard/控制面尚未展示 Redis pending bucket、ready index 和 busy owner | 排查调度索引时仍需要 Redis CLI 或日志辅助 | Phase 21.6 |
+| Scheduler 续租失败后仍缺少自动接管策略 | 当前会记录续租失败事件并等待 TTL/后续恢复，尚未实现自动安全接管 | 后续恢复增强 |
+| Dashboard 尚未展开展示 Redis pending bucket 和 busy owner 明细 | 控制面已有 session scheduler 快照，细粒度调度详情仍需要后续面板化 | 后续观测增强 |
 | Redis/PostgreSQL/RabbitMQ 仍是单机中间件示例 | 不是跨机器高可用集群 | 后续基础设施阶段 |
 
 ## 9. 后续优先级
@@ -205,8 +205,8 @@ Phase 21：Redis ready index + per-session pending bucket。
 | 21.2 SessionScheduler 接口 | 已完成 | 新增 `RedisSessionReadyScheduler`，封装 enqueue、claim_next、release、renew、rebuild。 | fake Redis 单测验证严格 FIFO。 |
 | 21.3 入站 enqueue 接入 | 已完成 | TaskStore 创建任务后写入 session pending bucket；ready index 只放 session，不放 task。 | `LocalTaskQueue` 已接入 scheduler，再发布 RabbitMQ 唤醒。 |
 | 21.4 Worker claim 改造 | 已完成 | 启用 scheduler 后，worker 通过 scheduler claim session 队首任务；RabbitMQ payload 作为唤醒消息。 | 相关 worker 单测验证 scheduler 优先于直接 reserve。 |
-| 21.5 锁 TTL 与续租治理 | 部分完成 | busy owner 带 TTL，release/renew 必须校验 owner；worker 级 scheduler watchdog 和告警仍待增强。 | claim TTL 与 owner 校验已有单测，长模型调用观测待补。 |
-| 21.6 恢复与观测 | 待实现 | Dashboard/Control Plane 展示 pending bucket、ready index、busy owner、stale owner 和 rebuild 操作。 | Redis 丢数据后可从 PostgreSQL 重建调度索引。 |
+| 21.5 锁 TTL 与续租治理 | 已完成 | busy owner 带 TTL，release/renew 必须校验 owner；worker 执行期间启动 scheduler claim watchdog 定期续租。 | 慢任务测试覆盖执行期间续租；续租失败记录 `task.scheduler.renew_failed`。 |
+| 21.6 恢复与观测 | 部分完成 | Control Plane `runtime_status.tasks.session_scheduler` 暴露 enabled、namespace、ready_count；rebuild 方法已实现。 | Dashboard 明细展示、stale owner 自动恢复入口后续增强。 |
 
 Redis 锁过期后果与治理：
 

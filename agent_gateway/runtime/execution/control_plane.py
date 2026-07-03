@@ -1486,6 +1486,7 @@ class GatewayControlPlane:
         )
         if tasks.get("configured"):
             tasks["persisted_lanes"] = self._session_lane_status()
+            tasks["session_scheduler"] = self._session_scheduler_status()
         return {
             "agents": {
                 "count": len(agents),
@@ -1542,6 +1543,31 @@ class GatewayControlPlane:
                 },
             },
         }
+
+    def _session_scheduler_status(self) -> dict[str, Any]:
+        """读取 Redis session ready scheduler 的轻量状态。"""
+
+        scheduler = getattr(self.task_queue, "session_scheduler", None)
+        if scheduler is None:
+            return {"configured": False, "enabled": False}
+        snapshot = getattr(scheduler, "snapshot", None)
+        if snapshot is None:
+            return {
+                "configured": True,
+                "enabled": bool(getattr(scheduler, "enabled", False)),
+                "namespace": str(getattr(scheduler, "namespace", "")),
+            }
+        try:
+            data = snapshot().to_dict()
+        except Exception as exc:
+            return {
+                "configured": True,
+                "enabled": bool(getattr(scheduler, "enabled", False)),
+                "namespace": str(getattr(scheduler, "namespace", "")),
+                "error": str(exc),
+            }
+        data["configured"] = True
+        return data
 
     def health_check(self) -> dict[str, Any]:
         """执行一轮轻量健康检查。"""

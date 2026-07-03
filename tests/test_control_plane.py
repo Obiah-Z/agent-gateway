@@ -103,6 +103,23 @@ class FakeTaskWorker:
         }
 
 
+class FakeSchedulerSnapshot:
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": True,
+            "namespace": "gateway:tasks:test",
+            "ready_count": 3,
+        }
+
+
+class FakeSessionScheduler:
+    enabled = True
+    namespace = "gateway:tasks:test"
+
+    def snapshot(self) -> FakeSchedulerSnapshot:
+        return FakeSchedulerSnapshot()
+
+
 class FakeRedisClient:
     def __init__(self, health: RedisHealth) -> None:
         self._health = health
@@ -1087,7 +1104,10 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
         ),
         state_repository=FakeLaneStateRepository(),
         task_worker=FakeTaskWorker(),
-        task_queue=LocalTaskQueue(LocalTaskStore(tmp_path / "tasks")),
+        task_queue=LocalTaskQueue(
+            LocalTaskStore(tmp_path / "tasks"),
+            session_scheduler=FakeSessionScheduler(),
+        ),
         event_store=RuntimeEventStore(tmp_path / "events" / "runtime-events.jsonl"),
     )
 
@@ -1119,6 +1139,10 @@ def test_control_plane_runtime_status_and_health_check(tmp_path: Path) -> None:
     assert status["tasks"]["persisted_lanes"]["recovery_plan"]["dry_run"] is True
     assert status["tasks"]["persisted_lanes"]["recovery_plan"]["action_count"] == 1
     assert status["tasks"]["persisted_lanes"]["recovery_execution"]["executed"] is False
+    assert status["tasks"]["session_scheduler"]["configured"] is True
+    assert status["tasks"]["session_scheduler"]["enabled"] is True
+    assert status["tasks"]["session_scheduler"]["namespace"] == "gateway:tasks:test"
+    assert status["tasks"]["session_scheduler"]["ready_count"] == 3
     assert status["cron"]["count"] == 1
     assert health["ok"] is False
     assert health["status"] == "degraded"
