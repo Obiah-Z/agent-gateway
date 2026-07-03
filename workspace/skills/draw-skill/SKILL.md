@@ -25,6 +25,20 @@ description: Generate publication-ready, black-and-white draw.io (.drawio) softw
 7. Generate a `.drawio` file, not an image, unless the user explicitly asks for an export. The file must open directly in draw.io / diagrams.net.
 8. Validate the file as XML and inspect the style strings for the publication profile below.
 
+## Hard generation constraints
+
+- Do not hand-write raw `.drawio` XML in ad-hoc shell heredocs.
+- Do not create `mxCell` geometry with an `mxGeometry="{'x': ...}"` attribute. This is invalid for draw.io. Every vertex or edge must contain a child element like `<mxGeometry ... as="geometry"/>`.
+- Use `workspace/skills/draw-skill/scripts/create_academic_drawio.py` or a dedicated script under `workspace/skills/draw-skill/scripts/` to generate `.drawio` files. If the needed diagram is not covered by an existing template, extend the script first instead of writing one-off XML.
+- If validation detects missing child `mxGeometry`, overlapping critical edges, or unreadable Chinese text, regenerate the diagram with the script. Do not keep patching a malformed file.
+- For normal ISO-style flowcharts, do not use dashed boundaries, dashed grouping boxes, or dashed flow arrows. Flow lines must be solid 1 px arrows unless the selected notation explicitly requires dashed lines, such as UML return messages, UML include/extend dependencies, or BPMN message flows.
+- For flowcharts that need grouping, prefer compact section labels or concise notes. Do not surround the main flow with large lane-like dashed boxes because they create excessive whitespace and are not part of the normal flowchart notation.
+- Treat excessive internal whitespace as a generation failure. If a process box, decision diamond, or terminator has visibly loose padding around a short label, reduce padding or resize the node before returning the diagram.
+- In flowcharts, center text inside process, decision, terminator, and queue boxes unless a formal compartment/table notation requires left alignment.
+- Prefer direct straight connectors between adjacent nodes. Use orthogonal bend points only when a straight line would cross another node or make a loop unreadable.
+- Keep edge labels only on decision exits, normally `是` and `否`. Avoid explanatory labels such as "主动任务", "继续循环", or section headings unless the user explicitly requests annotations.
+- Keep neighboring flowchart nodes close enough to show a compact execution path. Large horizontal or vertical gaps are a layout failure unless required to avoid crossings.
+
 ## Gateway workspace output rules
 
 - Always write generated `.drawio` files and exported images/documents under `workspace/reports/diagrams/`.
@@ -145,6 +159,14 @@ python3 workspace/skills/draw-skill/scripts/create_academic_drawio.py deployment
 ```
 
 The script is a template helper, not a substitute for reading the relevant standard and adapting the content to the user's system.
+
+Gateway-specific template:
+
+```bash
+python3 workspace/skills/draw-skill/scripts/create_academic_drawio.py gateway-agent-flow workspace/reports/diagrams/Agent执行流程.drawio
+```
+
+Use this template when the user asks for Gateway / Agent 执行流程、消息进入 Agent 后的处理闭环、工具调用闭环、入站到出站投递流程图等内容.
 
 ## Exporting .drawio files
 

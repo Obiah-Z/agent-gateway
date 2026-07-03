@@ -25,6 +25,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         curl \
+        fonts-noto-cjk \
         gcc \
         librsvg2-bin \
         libpq-dev \

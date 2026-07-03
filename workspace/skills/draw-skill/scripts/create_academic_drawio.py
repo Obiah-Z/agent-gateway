@@ -13,7 +13,9 @@ from pathlib import Path
 
 FONT = "fontFamily=SimSun;fontSize=12;fontColor=#000000;"
 PADDING = "spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;"
+COMPACT_PADDING = "spacing=2;spacingTop=2;spacingRight=2;spacingBottom=2;spacingLeft=2;"
 NODE = "whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;" + FONT + PADDING
+COMPACT_NODE = "whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;" + FONT + COMPACT_PADDING
 TEXT = "text;html=1;strokeColor=none;fillColor=none;" + FONT
 EDGE = (
     "html=1;rounded=0;orthogonalLoop=1;jettySize=auto;"
@@ -193,6 +195,49 @@ def flowchart(path: Path) -> None:
     err2 = d.vertex("提示认证失败", 732, 300, 140, 42, NODE + "rounded=0;")
     for a, b, label in [(start, input_, ""), (input_, check, ""), (check, auth, "是"), (check, err1, "否"), (auth, ok, ""), (ok, end, "是"), (ok, err2, "否")]:
         d.edge(a, b, label)
+    d.write(path)
+
+
+def gateway_agent_flow(path: Path) -> None:
+    d = Diagram("Agent执行流程", width=1360, height=500)
+    d.title("AI Agent Gateway 执行闭环流程", x=520, y=24, w=320)
+
+    start_style = COMPACT_NODE + "rounded=1;arcSize=50;"
+    process_style = COMPACT_NODE + "rounded=0;"
+    subprocess_style = COMPACT_NODE + "rounded=0;"
+    decision_style = COMPACT_NODE + "rhombus;"
+    flow = EDGE + "endArrow=block;"
+
+    start = d.vertex("开始", 45, 145, 72, 34, start_style)
+    entry = d.vertex("任务入口", 150, 137, 82, 50, process_style)
+    task_queue = d.vertex("任务队列", 265, 137, 90, 50, process_style)
+    router = d.vertex("消息路由", 395, 137, 90, 50, process_style)
+    session = d.vertex("组装上下文", 525, 137, 105, 50, subprocess_style)
+    model = d.vertex("调用模型", 675, 137, 90, 50, process_style)
+    need_tool = d.vertex("需要\n工具?", 805, 127, 82, 70, decision_style)
+    reply = d.vertex("生成回复", 925, 137, 90, 50, process_style)
+    delivery = d.vertex("投递队列", 1045, 137, 90, 50, process_style)
+    outbound = d.vertex("通道发送", 1165, 137, 90, 50, process_style)
+    end = d.vertex("结束", 1285, 145, 72, 34, start_style)
+
+    tool = d.vertex("执行工具", 805, 270, 90, 50, process_style)
+    tool_result = d.vertex("回灌结果", 675, 270, 90, 50, process_style)
+
+    d.edge(start, entry, "", flow)
+    d.edge(entry, task_queue, "", flow)
+    d.edge(task_queue, router, "", flow)
+    d.edge(router, session, "", flow)
+    d.edge(session, model, "", flow)
+    d.edge(model, need_tool, "", flow)
+    d.edge(need_tool, reply, "否", flow)
+    d.edge(reply, delivery, "", flow)
+    d.edge(delivery, outbound, "", flow)
+    d.edge(outbound, end, "", flow)
+
+    d.edge(need_tool, tool, "是", flow)
+    d.edge(tool, tool_result, "", flow)
+    d.edge(tool_result, model, "", flow)
+
     d.write(path)
 
 
@@ -377,6 +422,7 @@ TEMPLATES = {
     "activity": activity_diagram,
     "architecture": architecture_diagram,
     "flowchart": flowchart,
+    "gateway-agent-flow": gateway_agent_flow,
     "class": class_diagram,
     "deployment": deployment_diagram,
     "er": er_diagram,

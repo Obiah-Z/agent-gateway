@@ -203,6 +203,58 @@ def test_draw_skill_create_output_is_restricted_to_shared_diagrams_dir() -> None
             raise AssertionError(f"unexpectedly allowed output path: {rejected}")
 
 
+def test_gateway_agent_flow_template_uses_valid_drawio_geometry(tmp_path: Path) -> None:
+    create_drawio = _load_draw_create_module()
+    output = tmp_path / "Agent执行流程.drawio"
+
+    create_drawio.gateway_agent_flow(output)
+
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(output).getroot()
+    cells = list(root.iter("mxCell"))
+    diagram_cells = [
+        cell
+        for cell in cells
+        if cell.attrib.get("vertex") == "1" or cell.attrib.get("edge") == "1"
+    ]
+    assert diagram_cells
+    assert all("mxGeometry" not in cell.attrib for cell in diagram_cells)
+    assert all(any(child.tag == "mxGeometry" for child in cell) for cell in diagram_cells)
+    text = output.read_text(encoding="utf-8")
+    assert "AI Agent Gateway 执行闭环流程" in text
+    assert "fontFamily=SimSun" in text
+    assert "dashed=1" not in text
+    assert "观测链路" not in text
+    assert "主动任务" not in text
+    assert "继续循环" not in text
+    values = {cell.attrib.get("value", "") for cell in diagram_cells}
+    assert "开始" in values
+    assert "结束" in values
+
+    for cell in diagram_cells:
+        if cell.attrib.get("edge") == "1":
+            assert cell.attrib.get("value", "") in {"", "是", "否"}
+            assert len(list(cell.iter("mxPoint"))) == 0
+            continue
+        if cell.attrib.get("vertex") != "1":
+            continue
+        style = cell.attrib.get("style", "")
+        value = cell.attrib.get("value", "")
+        geometry = next(child for child in cell if child.tag == "mxGeometry")
+        width = float(geometry.attrib.get("width", "0"))
+        height = float(geometry.attrib.get("height", "0"))
+        if "text;" in style or value == "AI Agent Gateway 执行闭环流程":
+            continue
+        if value in {"开始", "结束"}:
+            assert "rounded=1" in style
+            assert "arcSize=50" in style
+        assert "align=left" not in style
+        assert "verticalAlign=top" not in style
+        assert width <= 160
+        assert height <= 70
+
+
 def test_workspace_active_skills_match_pruned_skill_set() -> None:
     workspace = Path(__file__).resolve().parents[1] / "workspace"
 
