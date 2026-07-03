@@ -51,6 +51,7 @@ class TaskWorkerRuntime:
         self._last_blocked_sessions: list[dict[str, Any]] = []
         self._last_recorded_blocked_signature = ""
         self._next_broker_partition = 0
+        self._session_claim_renew_interval = 0.0
 
     def register_handler(self, task_type: str, handler: TaskHandler) -> None:
         """注册某类任务的执行函数。"""
@@ -159,18 +160,7 @@ class TaskWorkerRuntime:
         if claimed is None:
             return False
         task, claim = claimed
-        try:
-            await self._execute(task)
-        finally:
-            released = self.queue.release_session_claim(claim)
-            if not released:
-                self._record_task_event(
-                    "task.scheduler.release_failed",
-                    task,
-                    status="error",
-                    message="Redis session claim 释放失败，可能存在 owner 过期或被接管",
-                    reason="release failed",
-                )
+        await self._execute_claimed_task(task, claim)
         return True
 
     def _handle_broker_payload_sync(self, payload: dict[str, Any]) -> bool:
@@ -214,18 +204,7 @@ class TaskWorkerRuntime:
                 )
                 return True
             task, claim = claimed
-            try:
-                asyncio.run(self._execute(task))
-            finally:
-                released = self.queue.release_session_claim(claim)
-                if not released:
-                    self._record_task_event(
-                        "task.scheduler.release_failed",
-                        task,
-                        status="error",
-                        message="Redis session claim 释放失败，可能存在 owner 过期或被接管",
-                        reason="release failed",
-                    )
+            asyncio.run(self._execute_claimed_task(task, claim))
             stored = self.queue.store.get(task.id)
             self._record_broker_event(
                 "task.broker.acked",
@@ -390,6 +369,65 @@ class TaskWorkerRuntime:
                     reason=str(exc),
                     duration_seconds=time.monotonic() - started_at,
                 )
+
+    async def _execute_claimed_task(self, task: TaskInstance, claim: Any) -> None:
+        """执行 scheduler claim 任务，并在执行期间续租 busy owner。"""
+
+        renew_task = asyncio.create_task(
+            self._renew_session_claim_until_cancelled(task, claim),
+            name=f"task-session-claim-renew:{task.id}",
+        )
+        try:
+            await self._execute(task)
+        finally:
+            renew_task.cancel()
+            try:
+                await renew_task
+            except asyncio.CancelledError:
+                pass
+            released = self.queue.release_session_claim(claim)
+            if not released:
+                self._record_task_event(
+                    "task.scheduler.release_failed",
+                    task,
+                    status="error",
+                    message="Redis session claim 释放失败，可能存在 owner 过期或被接管",
+                    reason="release failed",
+                )
+
+    async def _renew_session_claim_until_cancelled(self, task: TaskInstance, claim: Any) -> None:
+        """定期续租 scheduler busy owner，覆盖长模型调用和慢工具执行。"""
+
+        interval = self._resolve_session_claim_renew_interval(
+            int(getattr(claim, "ttl_seconds", 0) or 0)
+        )
+        while True:
+            await asyncio.sleep(interval)
+            renewed = self.queue.renew_session_claim(claim)
+            if renewed:
+                self._record_task_event(
+                    "task.scheduler.renewed",
+                    task,
+                    status="ok",
+                    message="Redis session claim 已续租",
+                )
+                continue
+            self._record_task_event(
+                "task.scheduler.renew_failed",
+                task,
+                status="warning",
+                message="Redis session claim 续租失败，当前任务继续执行但后续可能触发接管",
+                reason="renew failed",
+            )
+            return
+
+    @staticmethod
+    def _resolve_session_claim_renew_interval(ttl_seconds: int) -> float:
+        """计算 scheduler claim 续租间隔，默认取 TTL 三分之一。"""
+
+        if ttl_seconds <= 0:
+            return 1.0
+        return max(0.1, min(60.0, ttl_seconds / 3.0))
 
     def _record_task_event(
         self,

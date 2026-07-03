@@ -41,6 +41,7 @@ class FakeSessionScheduler:
         self.claims = list(claims)
         self.released: list[str] = []
         self.enqueued: list[str] = []
+        self.renewed: list[str] = []
 
     def enqueue(self, task) -> bool:
         self.enqueued.append(task.id)
@@ -54,6 +55,11 @@ class FakeSessionScheduler:
 
     def release(self, claim: SessionTaskClaim) -> bool:
         self.released.append(claim.task_id)
+        return True
+
+    def renew(self, claim: SessionTaskClaim, *, ttl_seconds: int | None = None) -> bool:
+        del ttl_seconds
+        self.renewed.append(claim.task_id)
         return True
 
 
@@ -213,6 +219,42 @@ def test_task_worker_uses_session_scheduler_before_direct_reserve(tmp_path: Path
     assert store.get(b1.id).status == "done"
     assert store.get(a2.id).status == "pending"
     assert scheduler.released == [b1.id]
+
+
+def test_task_worker_renews_session_scheduler_claim_during_slow_task(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    scheduler = FakeSessionScheduler([])
+    queue = LocalTaskQueue(store, session_scheduler=scheduler)
+    task = queue.enqueue(
+        task_type="slow",
+        source="test",
+        session_key="session-a",
+        payload={"text": "slow"},
+    )
+    scheduler.claims = [
+        SessionTaskClaim(
+            task_id=task.id,
+            session_key="session-a",
+            owner_value="owner",
+            busy_key="busy:session-a",
+            pending_key="pending:session-a",
+            ttl_seconds=1,
+        )
+    ]
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+
+    async def slow_handler(_task):
+        await asyncio.sleep(0.5)
+        return "ok"
+
+    worker.register_handler("slow", slow_handler)
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert store.get(task.id).status == "done"
+    assert scheduler.renewed
+    assert scheduler.released == [task.id]
 
 
 def test_task_worker_records_broker_ack_event(tmp_path: Path) -> None:
