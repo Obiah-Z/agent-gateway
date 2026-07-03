@@ -88,6 +88,8 @@ class ChannelRuntime:
         task_queue: LocalTaskQueue | None = None,
         inbound_task_queue_enabled: bool = False,
         background_inbound_commands: tuple[str, ...] = ("/github-repo-analyzer", "/space-advisor"),
+        feishu_progress_notice_enabled: bool = True,
+        feishu_progress_notice_text: str = "已收到，正在处理。本轮结果生成后会继续推送。",
     ) -> None:
         self.dispatcher = dispatcher  # 负责路由、执行 Agent 回合并生成出站投递。
         self.channels = channels  # 当前启用的通道集合，可被控制面热替换。
@@ -100,6 +102,8 @@ class ChannelRuntime:
         self.long_task_notice_seconds = max(0.0, float(long_task_notice_seconds))
         self.task_queue = task_queue  # 可承载明确长任务命令，也可承载可配置的普通入站任务。
         self.inbound_task_queue_enabled = inbound_task_queue_enabled
+        self.feishu_progress_notice_enabled = feishu_progress_notice_enabled
+        self.feishu_progress_notice_text = feishu_progress_notice_text.strip()
         self.background_inbound_commands = tuple(
             command.strip()
             for command in background_inbound_commands
@@ -480,6 +484,7 @@ class ChannelRuntime:
         if await self._maybe_enqueue_persistent_inbound(inbound):
             await self._flush_cli_delivery_if_needed(inbound)
             return
+        await self._deliver_progress_notice(inbound, stage="direct_started")
         # dispatcher 内部会完成路由解析、Agent Loop 执行和回复对象构造。
         result = await self.dispatcher.dispatch_inbound(inbound)
         # 普通回复仍先入可靠投递队列，再由 DeliveryRuntime 发送。
@@ -644,6 +649,31 @@ class ChannelRuntime:
             # 连错误提示都投递失败时只能记录日志，不能再次抛出，否则消费者会被终止。
             print(
                 "[channel_runtime] failed to enqueue error reply:"
+                f" channel={inbound.channel}"
+                f" account={inbound.account_id}"
+                f" peer={inbound.peer_id}"
+                f" error={delivery_exc}"
+            )
+            traceback.print_exc()
+
+    async def _deliver_progress_notice(self, inbound: InboundMessage, *, stage: str) -> None:
+        """飞书准流式开始提示：先告诉用户已进入处理，再等待最终回复。"""
+
+        if not self.feishu_progress_notice_enabled:
+            return
+        if inbound.channel != "feishu" or not self.feishu_progress_notice_text:
+            return
+        try:
+            await self.dispatcher.deliver_progress(
+                self.channels,
+                inbound,
+                self.feishu_progress_notice_text,
+                stage=stage,
+            )
+            await self._flush_cli_delivery_if_needed(inbound)
+        except Exception as delivery_exc:
+            print(
+                "[channel_runtime] failed to enqueue progress notice:"
                 f" channel={inbound.channel}"
                 f" account={inbound.account_id}"
                 f" peer={inbound.peer_id}"

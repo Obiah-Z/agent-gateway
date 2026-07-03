@@ -64,6 +64,8 @@ class AgentInboundTaskHandler:
         worker_id: str = "local-worker",
         lane_coordinator: RedisLaneCoordinator | None = None,
         state_repository: object | None = None,
+        feishu_progress_notice_enabled: bool = True,
+        feishu_progress_notice_text: str = "已收到，正在处理。本轮结果生成后会继续推送。",
     ) -> None:
         self.dispatcher = dispatcher
         self.channels = channels
@@ -80,6 +82,8 @@ class AgentInboundTaskHandler:
             self.lock_ttl_seconds,
         )
         self.worker_id = worker_id
+        self.feishu_progress_notice_enabled = feishu_progress_notice_enabled
+        self.feishu_progress_notice_text = feishu_progress_notice_text.strip()
 
     async def __call__(self, task: TaskInstance) -> str:
         """按原 dispatcher 链路执行入站消息并投递最终回复。"""
@@ -111,6 +115,7 @@ class AgentInboundTaskHandler:
             )
         try:
             inbound = inbound_from_task(task)
+            await self._deliver_progress_notice(inbound)
             result = await self.dispatcher.dispatch_inbound(inbound)
             delivery_id = await self.dispatcher.deliver_reply(self.channels, result)
             if inbound.channel == "cli" and self.delivery_runtime is not None:
@@ -187,3 +192,21 @@ class AgentInboundTaskHandler:
         if raw_value is not None:
             return max(0.1, float(raw_value))
         return max(1.0, min(60.0, ttl_seconds / 3.0))
+
+    async def _deliver_progress_notice(self, inbound: InboundMessage) -> None:
+        """向飞书用户发送一次开始处理提示，形成准流式反馈。"""
+
+        if not self.feishu_progress_notice_enabled:
+            return
+        if inbound.channel != "feishu" or not self.feishu_progress_notice_text:
+            return
+        try:
+            await self.dispatcher.deliver_progress(
+                self.channels,
+                inbound,
+                self.feishu_progress_notice_text,
+                stage="worker_started",
+            )
+        except Exception:
+            # 进度提示是体验增强，失败时不能影响真正的任务执行和最终回复。
+            pass

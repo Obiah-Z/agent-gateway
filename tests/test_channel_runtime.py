@@ -19,6 +19,9 @@ from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore
 
 
 class FakeDispatcher:
+    def __init__(self) -> None:
+        self.progress_notices: list[tuple[InboundMessage, str, str]] = []
+
     async def dispatch_inbound(self, inbound: InboundMessage, *, forced_agent_id: str = ""):
         del forced_agent_id
         return type(
@@ -40,6 +43,20 @@ class FakeDispatcher:
     async def deliver_reply(self, channels: ChannelManager, result) -> str:
         del channels, result
         return "delivery-1"
+
+    async def deliver_progress(
+        self,
+        channels: ChannelManager,
+        inbound: InboundMessage,
+        text: str,
+        *,
+        stage: str = "started",
+    ) -> str:
+        del channels
+        if not hasattr(self, "progress_notices"):
+            self.progress_notices = []
+        self.progress_notices.append((inbound, text, stage))
+        return f"progress-delivery-{len(self.progress_notices)}"
 
 
 class FakeDeliveryRuntime:
@@ -207,6 +224,53 @@ def test_pending_inbound_exposes_preroute_lane_key() -> None:
     )
 
     assert pending.preroute_lane_key == "inbound:feishu:bot-a:chat-1"
+
+
+def test_channel_runtime_sends_feishu_progress_notice_before_direct_dispatch() -> None:
+    dispatcher = FakeDispatcher()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+    )
+    inbound = InboundMessage(
+        text="hello",
+        sender_id="user-1",
+        channel="feishu",
+        account_id="bot-a",
+        peer_id="user-1",
+        metadata={"receive_id_type": "open_id"},
+    )
+
+    asyncio.run(runtime._handle_inbound(inbound))
+
+    assert dispatcher.progress_notices == [
+        (
+            inbound,
+            "已收到，正在处理。本轮结果生成后会继续推送。",
+            "direct_started",
+        )
+    ]
+
+
+def test_channel_runtime_does_not_send_progress_notice_for_cli() -> None:
+    dispatcher = FakeDispatcher()
+    runtime = ChannelRuntime(
+        dispatcher=dispatcher,
+        channels=ChannelManager(),
+        delivery_runtime=FakeDeliveryRuntime(),
+    )
+    inbound = InboundMessage(
+        text="hello",
+        sender_id="cli-user",
+        channel="cli",
+        account_id="cli-local",
+        peer_id="cli-user",
+    )
+
+    asyncio.run(runtime._handle_inbound(inbound))
+
+    assert dispatcher.progress_notices == []
 
 
 def test_channel_runtime_restart_drains_queued_messages_before_swap() -> None:

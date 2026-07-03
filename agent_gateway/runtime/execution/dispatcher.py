@@ -231,6 +231,36 @@ class GatewayDispatcher:
         )
         return delivery_id
 
+    async def deliver_progress(
+        self,
+        channels: ChannelManager,
+        inbound: InboundMessage,
+        text: str,
+        *,
+        stage: str = "started",
+    ) -> str:
+        """把准流式进度提示写入可靠投递队列。
+
+        进度提示不绕过 DeliveryRuntime，避免飞书 API 短暂失败时丢失用户反馈。
+        """
+
+        metadata = dict(inbound.metadata)
+        metadata.update(
+            {
+                "account_id": inbound.account_id,
+                "sender_id": inbound.sender_id,
+                "kind": "progress",
+                "progress_stage": stage,
+            }
+        )
+        target = ProactiveTarget(
+            channel=inbound.channel,
+            account_id=inbound.account_id,
+            peer_id=inbound.peer_id,
+            agent_id=str(inbound.metadata.get("agent_id", "main")) or "main",
+        )
+        return await self.deliver_text(channels, target, text, metadata=metadata)
+
     async def deliver_text(
         self,
         channels: ChannelManager,

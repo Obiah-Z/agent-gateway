@@ -364,6 +364,8 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
             ),
             worker_id=task_worker.worker_id,
             state_repository=primary_write,
+            feishu_progress_notice_enabled=settings.feishu_progress_notice_enabled,
+            feishu_progress_notice_text=settings.feishu_progress_notice_text,
         ),
     )
     delivery_runtime = DeliveryRuntime(
@@ -493,6 +495,8 @@ async def serve(app: GatewayApplication) -> None:
         task_queue=app.task_queue,
         inbound_task_queue_enabled=app.settings.inbound_task_queue_enabled,
         background_inbound_commands=app.settings.background_inbound_commands,
+        feishu_progress_notice_enabled=app.settings.feishu_progress_notice_enabled,
+        feishu_progress_notice_text=app.settings.feishu_progress_notice_text,
     )
     app.control_plane.channel_runtime = channel_runtime
     server = GatewayServer(

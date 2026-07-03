@@ -337,6 +337,7 @@ class FakeInboundDispatcher:
     def __init__(self, *, delay_seconds: float = 0.0) -> None:
         self.dispatched: list[InboundMessage] = []
         self.delivered = 0
+        self.progress_notices: list[tuple[InboundMessage, str, str]] = []
         self.delay_seconds = delay_seconds
 
     async def dispatch_inbound(self, inbound: InboundMessage, *, forced_agent_id: str = ""):
@@ -363,6 +364,18 @@ class FakeInboundDispatcher:
         del channels, result
         self.delivered += 1
         return "delivery-1"
+
+    async def deliver_progress(
+        self,
+        channels: ChannelManager,
+        inbound: InboundMessage,
+        text: str,
+        *,
+        stage: str = "started",
+    ) -> str:
+        del channels
+        self.progress_notices.append((inbound, text, stage))
+        return f"progress-delivery-{len(self.progress_notices)}"
 
 
 class FakeLockRedisClient(RedisClient):
@@ -506,6 +519,44 @@ def test_task_worker_executes_agent_inbound_task(tmp_path: Path) -> None:
     assert dispatcher.dispatched[0].text.startswith("/github-repo-analyzer ")
     assert dispatcher.dispatched[0].metadata["receive_id_type"] == "open_id"
     assert dispatcher.dispatched[0].metadata["background_task_id"] == task.id
+    assert dispatcher.progress_notices == [
+        (
+            dispatcher.dispatched[0],
+            "已收到，正在处理。本轮结果生成后会继续推送。",
+            "worker_started",
+        )
+    ]
+
+
+def test_agent_inbound_task_can_disable_feishu_progress_notice(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        payload={
+            "text": "hello",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    dispatcher = FakeInboundDispatcher()
+    worker = TaskWorkerRuntime(queue)
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            feishu_progress_notice_enabled=False,
+        ),
+    )
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert dispatcher.delivered == 1
+    assert dispatcher.progress_notices == []
 
 
 def test_agent_inbound_task_uses_redis_session_lock(tmp_path: Path) -> None:
