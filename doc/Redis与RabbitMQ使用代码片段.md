@@ -386,6 +386,30 @@ if tasks.get("configured"):
     tasks["session_scheduler"] = self._session_scheduler_status()
 ```
 
+控制面还提供独立的 scheduler 状态和重建入口。`tasks.scheduler.status` 返回 ready session、pending bucket 和 busy owner 明细；`tasks.scheduler.rebuild` 从 `pending/retrying` 任务事实状态重建 Redis 索引。
+
+源码位置：[agent_gateway/runtime/execution/control_plane.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/execution/control_plane.py:401)
+
+```python
+def session_scheduler_status(self, *, detail: bool = True, limit: int = 20) -> dict[str, Any]:
+    return self._session_scheduler_status(detail=detail, limit=limit)
+
+def rebuild_session_scheduler(self, *, limit: int = 5000) -> dict[str, Any]:
+    queue = self._require_task_queue()
+    tasks = queue.store.list(statuses=["pending", "retrying"], limit=safe_limit)
+    rebuilt = int(scheduler.rebuild(tasks))
+    return {"ok": True, "rebuilt": rebuilt, "scheduler": self._session_scheduler_status(detail=True)}
+```
+
+WebSocket JSON-RPC 方法：
+
+```text
+tasks.scheduler.status
+tasks.scheduler.rebuild
+```
+
+Dashboard 的后台任务栏会展示会话调度器状态，并提供“从任务状态重建 Redis 调度索引”按钮。这个操作只重建调度引用，不会重新执行任务。
+
 入站 Agent 任务处理器会创建这个 coordinator。
 
 源码位置：[agent_gateway/runtime/tasks/handlers.py](/home/obiah/Desktop/claw0/gateway/agent_gateway/runtime/tasks/handlers.py:56)

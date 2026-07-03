@@ -123,7 +123,7 @@ docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
 | Phase 18 | 部分完成 | 后台任务队列已完成；多 Agent handoff、per-agent 并发和任务优先级仍待增强。 |
 | Phase 19 | 已完成 | Docker Compose、systemd、数据卷、HTTPS、备份恢复、启动前检查。 |
 | Phase 20 | 已完成 | Redis/PostgreSQL/RabbitMQ 分布式执行基础、可靠队列、分布式 lane、部署与压测闭环。 |
-| Phase 21 | 部分完成 | Redis ready index + per-session pending bucket，保证同一 session 严格 FIFO，同时不同 session 并行。 |
+| Phase 21 | 已完成 | Redis ready index + per-session pending bucket，保证同一 session 严格 FIFO，同时不同 session 并行。 |
 
 ## 7. Phase 20 完成摘要
 
@@ -170,9 +170,8 @@ failed=0
 | 会话与记忆长期治理不足 | 数据膨胀、记忆污染 | Phase 17 |
 | 多 Agent handoff 仍偏 prompt 编排 | 协作任务缺少强状态机 | Phase 18 |
 | 多 worker 长期部署需显式配置不同 `GATEWAY_TASK_WORKER_ID` | 运维观测可能混淆 | 后续部署增强 |
-| Redis session ready scheduler 需要显式开启 | 默认仍兼容旧路径；分布式多 worker 严格顺序模式需要 `GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true` | Phase 21.6 |
-| Scheduler 续租失败后仍缺少自动接管策略 | 当前会记录续租失败事件并等待 TTL/后续恢复，尚未实现自动安全接管 | 后续恢复增强 |
-| Dashboard 尚未展开展示 Redis pending bucket 和 busy owner 明细 | 控制面已有 session scheduler 快照，细粒度调度详情仍需要后续面板化 | 后续观测增强 |
+| Redis session ready scheduler 需要显式开启 | 默认仍兼容旧路径；分布式多 worker 严格顺序模式需要 `GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true` | 运维配置 |
+| Scheduler 续租失败后不强行中断当前模型调用 | 当前会记录续租失败事件并等待 TTL/后续恢复，自动抢占正在执行的外部调用仍需谨慎设计 | 后续恢复增强 |
 | Redis/PostgreSQL/RabbitMQ 仍是单机中间件示例 | 不是跨机器高可用集群 | 后续基础设施阶段 |
 
 ## 9. 后续优先级
@@ -206,7 +205,7 @@ Phase 21：Redis ready index + per-session pending bucket。
 | 21.3 入站 enqueue 接入 | 已完成 | TaskStore 创建任务后写入 session pending bucket；ready index 只放 session，不放 task。 | `LocalTaskQueue` 已接入 scheduler，再发布 RabbitMQ 唤醒。 |
 | 21.4 Worker claim 改造 | 已完成 | 启用 scheduler 后，worker 通过 scheduler claim session 队首任务；RabbitMQ payload 作为唤醒消息。 | 相关 worker 单测验证 scheduler 优先于直接 reserve。 |
 | 21.5 锁 TTL 与续租治理 | 已完成 | busy owner 带 TTL，release/renew 必须校验 owner；worker 执行期间启动 scheduler claim watchdog 定期续租。 | 慢任务测试覆盖执行期间续租；续租失败记录 `task.scheduler.renew_failed`。 |
-| 21.6 恢复与观测 | 部分完成 | Control Plane `runtime_status.tasks.session_scheduler` 暴露 enabled、namespace、ready_count；rebuild 方法已实现。 | Dashboard 明细展示、stale owner 自动恢复入口后续增强。 |
+| 21.6 恢复与观测 | 已完成 | Control Plane / WebSocket 暴露 scheduler status 和 rebuild；Dashboard 展示 ready session、pending bucket、busy owner，并提供重建按钮。 | Redis 调度索引丢失后可从 pending/retrying 任务事实状态重建。 |
 
 Redis 锁过期后果与治理：
 

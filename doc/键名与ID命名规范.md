@@ -243,6 +243,8 @@ busy owner value 是 JSON，至少包含：
 
 调度语义如下：A session 被 claim 后，A2/A3 留在 A 的 pending bucket，A 不会再次进入 ready index；B/C session 如果不 busy，仍然可以进入 ready index 并被其他 worker 执行。A1 完成并 release 后，如果 A 的 pending bucket 非空，A 才重新进入 ready index。
 
+如果 Redis 调度索引丢失，可以通过控制面 `tasks.scheduler.rebuild` 从 `pending/retrying` 任务事实状态重建这些 key。重建只恢复调度引用，不改变 TaskStore / PostgreSQL 中的任务事实状态，也不会重新执行已完成任务。
+
 ## 投递幂等 Key
 
 出站投递幂等 key 由 `DeliveryQueue._build_idempotency_key()` 生成。上游显式传入 `metadata.idempotency_key` 时优先使用；没有显式 key 时，系统基于以下 seed 计算 SHA-256：
