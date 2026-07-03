@@ -701,7 +701,7 @@ async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, taskExecutions, laneDoctor, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, taskExecutions, laneDoctor, schedulerStatus, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -717,6 +717,7 @@ async function refreshAll() {
       rpc("tasks.list", { status: "all", limit: 40 }),
       rpc("tasks.executions", { limit: 24 }),
       rpc("tasks.lanes.doctor", { limit: 12 }),
+      rpc("tasks.scheduler.status", { detail: true, limit: 12 }),
       rpc("metrics.summary", { limit: 60 }),
       rpc("metrics.tail", { limit: 24 }),
       rpc("alerts.active"),
@@ -733,7 +734,7 @@ async function refreshAll() {
     renderEvents(events);
     renderErrors(errors);
     renderMemories(memories);
-    renderTasks(tasks, taskExecutions, laneDoctor);
+    renderTasks(tasks, taskExecutions, laneDoctor, schedulerStatus || runtime.tasks?.session_scheduler || {});
     renderDelivery(deliveryList);
     renderCron(cronJobs);
   } catch (error) {
@@ -1952,10 +1953,13 @@ function renderMemories(payload) {
   appendCollapseToggle(dom.memoryList, "memories", items.length, () => renderMemories(payload));
 }
 
-function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
+function renderTasks(payload, executionsPayload = {}, laneDoctor = {}, schedulerStatus = {}) {
   clearNode(dom.tasksList);
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const executions = Array.isArray(executionsPayload?.items) ? executionsPayload.items.slice().reverse() : [];
+  const schedulerReadySessions = Array.isArray(schedulerStatus?.ready_sessions) ? schedulerStatus.ready_sessions : [];
+  const schedulerPendingBuckets = Array.isArray(schedulerStatus?.pending_buckets) ? schedulerStatus.pending_buckets : [];
+  const schedulerBusyOwners = Array.isArray(schedulerStatus?.busy_owners) ? schedulerStatus.busy_owners : [];
   const doctorSummary = laneDoctor?.summary || {};
   const doctorChecks = Array.isArray(laneDoctor?.checks) ? laneDoctor.checks : [];
   const readiness = laneDoctor?.readiness || {};
@@ -1967,12 +1971,87 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
     return acc;
   }, {});
   dom.tasksSummary.textContent = items.length
-    ? `${items.length} 条任务 · ${executions.length} 条执行事件 · ${counts.running || 0} 执行中 / ${counts.failed || 0} 失败`
+    ? `${items.length} 条任务 · ${executions.length} 条执行事件 · ${counts.running || 0} 执行中 / ${counts.failed || 0} 失败 · 调度 ready ${schedulerStatus?.ready_count ?? 0}`
     : "暂无任务";
-  dom.tasksList.className = items.length || executions.length || doctorChecks.length ? "task-list" : "task-list empty";
-  if (!items.length && !executions.length && !doctorChecks.length) {
+  dom.tasksList.className = items.length || executions.length || doctorChecks.length || schedulerStatus?.configured ? "task-list" : "task-list empty";
+  if (!items.length && !executions.length && !doctorChecks.length && !schedulerStatus?.configured) {
     dom.tasksList.textContent = "最近没有后台任务。Cron、Heartbeat 或长任务 Skill 入队后会显示在这里。";
     return;
+  }
+  if (schedulerStatus?.configured) {
+    const status = schedulerStatus.enabled ? "ok" : "warning";
+    const block = document.createElement("section");
+    block.className = `task-item task-${status}`;
+    const head = document.createElement("div");
+    head.className = "task-head";
+    head.appendChild(badge(status));
+    const title = document.createElement("div");
+    appendText(title, "strong", "会话调度器", "task-title");
+    appendText(
+      title,
+      "small",
+      [
+        `命名空间 ${schedulerStatus.namespace || "--"}`,
+        `ready session ${schedulerStatus.ready_count ?? 0}`,
+        `pending bucket ${schedulerPendingBuckets.length}`,
+        `busy owner ${schedulerBusyOwners.length}`,
+      ].join(" · "),
+      "task-meta",
+    );
+    head.appendChild(title);
+    block.appendChild(head);
+    if (schedulerStatus.error) {
+      appendText(block, "pre", schedulerStatus.error, "event-error");
+    }
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    appendButton(actions, "从任务状态重建 Redis 调度索引", "button button-small", rebuildSessionScheduler);
+    block.appendChild(actions);
+    const visibleReady = slicePanelItems(schedulerReadySessions, "session-scheduler-ready");
+    for (const sessionKey of visibleReady) {
+      const row = document.createElement("div");
+      row.className = "trace-event trace-event-ok";
+      appendText(row, "strong", "可运行会话");
+      appendText(row, "small", sessionKey || "--", "task-meta");
+      block.appendChild(row);
+    }
+    appendCollapseToggle(block, "session-scheduler-ready", schedulerReadySessions.length, () => {
+      renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
+    });
+    const visiblePending = slicePanelItems(schedulerPendingBuckets, "session-scheduler-pending");
+    for (const bucket of visiblePending) {
+      const row = document.createElement("div");
+      row.className = "trace-event trace-event-warning";
+      appendText(row, "strong", `待执行 bucket：${bucket.count ?? 0} 条`);
+      appendText(
+        row,
+        "small",
+        `会话 ${bucket.session_key || "--"} · ${Array.isArray(bucket.items) ? bucket.items.slice(0, 3).join("，") : "--"}`,
+        "task-meta",
+      );
+      block.appendChild(row);
+    }
+    appendCollapseToggle(block, "session-scheduler-pending", schedulerPendingBuckets.length, () => {
+      renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
+    });
+    const visibleBusy = slicePanelItems(schedulerBusyOwners, "session-scheduler-busy");
+    for (const busy of visibleBusy) {
+      const owner = busy.owner || {};
+      const row = document.createElement("div");
+      row.className = "trace-event trace-event-ok";
+      appendText(row, "strong", `执行中 owner：${owner.worker_id || "--"}`);
+      appendText(
+        row,
+        "small",
+        `任务 ${shortId(owner.task_id || "", 10, 4)} · 会话 ${busy.session_key || owner.session_key || "--"} · 续租 ${formatTimestamp(owner.renewed_at)}`,
+        "task-meta",
+      );
+      block.appendChild(row);
+    }
+    appendCollapseToggle(block, "session-scheduler-busy", schedulerBusyOwners.length, () => {
+      renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
+    });
+    dom.tasksList.appendChild(block);
   }
   if (doctorChecks.length) {
     const status = normalizeStatus(laneDoctor.status || (laneDoctor.ok ? "ok" : "warning"));
@@ -2008,7 +2087,7 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
         block.appendChild(row);
       }
       appendCollapseToggle(block, "lane-readiness-failures", failedReadiness.length, () => {
-        renderTasks(payload, executionsPayload, laneDoctor);
+        renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
       });
     }
     const visibleChecks = slicePanelItems(doctorChecks, "lane-doctor-checks");
@@ -2028,7 +2107,7 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
       block.appendChild(row);
     }
     appendCollapseToggle(block, "lane-doctor-checks", doctorChecks.length, () => {
-      renderTasks(payload, executionsPayload, laneDoctor);
+      renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
     });
     dom.tasksList.appendChild(block);
   }
@@ -2065,7 +2144,7 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
       block.appendChild(row);
     }
     appendCollapseToggle(block, "task-executions", executions.length, () => {
-      renderTasks(payload, executionsPayload, laneDoctor);
+      renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
     });
     dom.tasksList.appendChild(block);
   }
@@ -2117,7 +2196,7 @@ function renderTasks(payload, executionsPayload = {}, laneDoctor = {}) {
     dom.tasksList.appendChild(card);
   }
   appendCollapseToggle(dom.tasksList, "tasks", items.length, () => {
-    renderTasks(payload, executionsPayload, laneDoctor);
+    renderTasks(payload, executionsPayload, laneDoctor, schedulerStatus);
   });
 }
 
@@ -2284,6 +2363,23 @@ async function retryTask(taskId) {
   try {
     const result = await rpc("tasks.retry", { task_id: taskId });
     showToast(result.ok ? `已请求重试任务 ${taskId}` : `任务 ${taskId} 当前状态不可重试`, result.ok ? "success" : "warning");
+    await refreshAll();
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function rebuildSessionScheduler() {
+  const confirmed = confirmAction(
+    "确认重建 Redis 会话调度索引？",
+    "该操作会从 pending / retrying 任务事实状态重新生成 ready index 和 per-session pending bucket，不会重新执行任务。",
+  );
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const result = await rpc("tasks.scheduler.rebuild", { limit: 5000 });
+    showToast(result.ok ? `已重建 ${result.rebuilt ?? 0} 条调度引用` : "会话调度器未启用", result.ok ? "success" : "warning");
     await refreshAll();
   } catch (error) {
     showAlert(error.message);
