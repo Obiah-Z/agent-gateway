@@ -55,3 +55,22 @@ def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
 
     assert result == "[exit=0]"
     assert (tmp_path / "reports" / "from-bash.md").read_text(encoding="utf-8") == "report"
+
+
+def test_bash_rewrites_host_gateway_project_absolute_path(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "bash",
+        {
+            "command": (
+                "mkdir -p /home/obiah/Desktop/claw0/gateway/workspace/reports "
+                "&& test -d /home/obiah/Desktop/claw0/gateway/workspace "
+                "&& printf ok > /home/obiah/Desktop/claw0/gateway/workspace/reports/project-path.md"
+            )
+        },
+    )
+
+    assert result == "[exit=0]"
+    assert (tmp_path / "reports" / "project-path.md").read_text(encoding="utf-8") == "ok"

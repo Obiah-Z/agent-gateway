@@ -46,11 +46,23 @@ def _normalize_workspace_path(workspace_root: Path, raw_path: str) -> Path:
 
 
 def _rewrite_workspace_aliases(command: str, workspace_root: Path) -> str:
-    """把 shell 命令中的宿主机 workspace 绝对路径改写为当前 workspace。"""
+    """把 shell 命令中的宿主机 gateway/workspace 绝对路径改写为当前运行路径。"""
 
-    root = str(workspace_root.resolve())
-    # Docker 内的 worker 不应该把宿主机路径写进容器私有目录。
-    return re.sub(r"/[^\s'\"`]*?/gateway/workspace", root, command)
+    workspace = str(workspace_root.resolve())
+    gateway = str(workspace_root.resolve().parent)
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        marker = "/gateway/workspace"
+        if marker in raw:
+            suffix = raw.split(marker, 1)[1]
+            return f"{workspace}{suffix}"
+        suffix = raw.split("/gateway", 1)[1]
+        return f"{gateway}{suffix}"
+
+    # Docker 内的 worker 不应该把宿主机绝对路径写进容器私有目录；项目根路径和
+    # workspace 路径都要重写，否则模型用宿主机路径 ls/cat 会白白消耗工具轮次。
+    return re.sub(r"/[^\s'\"`]*?/gateway(?:/workspace)?(?:/[^\s'\"`]*)?", replace, command)
 
 
 def _truncate(text: str, limit: int) -> str:

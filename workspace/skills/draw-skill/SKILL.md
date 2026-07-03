@@ -29,9 +29,11 @@ description: Generate publication-ready, black-and-white draw.io (.drawio) softw
 
 - Always write generated `.drawio` files and exported images/documents under `workspace/reports/diagrams/`.
 - Never write final diagram artifacts to `/tmp`, a container-local private path, or a worker-specific directory. In Docker multi-worker mode, `/app/workspace` is the shared bind mount visible to API, worker, delivery, scheduler, and dashboard roles.
+- Use `workspace/...` relative paths in tool calls and final answers. Do not use host absolute paths such as `/home/.../gateway/...`; Docker workers run under `/app`, and the gateway tool layer maps `workspace/...` to the correct shared workspace.
 - Use stable relative paths in the answer, for example `workspace/reports/diagrams/网关架构图.drawio` and `workspace/reports/diagrams/网关架构图.png`.
 - If the user wants the diagram sent through Feishu, include the exported file path in the final answer or in delivery metadata. Feishu upload only sends files inside `workspace/reports/`, so `workspace/reports/diagrams/` is the required location.
 - Prefer Chinese file names when the user requests Chinese output. Keep extensions lowercase: `.drawio`, `.png`, `.svg`, `.pdf`, `.jpg`.
+- If `.drawio` has been generated and PNG/PDF export fails because an optional renderer is missing, stop retrying and return the `.drawio` path plus any available `.svg` path. Do not run `apt-get`, install desktop packages, or repeatedly probe renderers inside the agent turn.
 
 ## Publication profile
 
@@ -146,7 +148,7 @@ The script is a template helper, not a substitute for reading the relevant stand
 
 ## Exporting .drawio files
 
-When the user asks to export, convert, render, or save a `.drawio` file as an image/document, use `scripts/export_drawio.py`. It resolves input files under the shared workspace and writes exports to `workspace/reports/diagrams/`.
+When the user asks to export, convert, render, or save a `.drawio` file as an image/document, use `scripts/export_drawio.py`. It resolves input files under the shared workspace and writes exports to `workspace/reports/diagrams/`. Prefer `workspace/...` paths in commands.
 
 Supported export formats include `png`, `jpg`, `svg`, and `pdf`. Basic commands:
 
@@ -183,6 +185,8 @@ After exporting, confirm the output file exists and is non-empty, for example:
 ```bash
 test -s /path/to/output.png
 ```
+
+If the script reports that PNG/PDF export is unavailable, return the generated `.drawio` or `.svg` file path immediately instead of attempting package installation.
 
 ## Validation checklist
 

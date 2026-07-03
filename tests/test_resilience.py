@@ -5,7 +5,7 @@ import pytest
 from agent_gateway.runtime.execution.resilience import AuthProfile, FailoverReason, ProfileManager, classify_failure
 from agent_gateway.runtime.execution.resilience import ResilienceRunner
 from agent_gateway.config import GatewaySettings
-from agent_gateway.ai.tools.registry import ToolRegistry
+from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
 def test_classify_failure_categories() -> None:
@@ -108,3 +108,52 @@ def test_resilience_runner_does_not_cool_down_profile_for_bad_request(monkeypatc
     assert "reason=bad_request" in str(exc_info.value)
     assert manager.snapshot()[0]["cooldown_remaining"] == 0.0
     assert manager.snapshot()[0]["failure_reason"] == "bad_request"
+
+
+def test_resilience_runner_returns_generated_artifact_on_max_iterations(monkeypatch) -> None:
+    tools = ToolRegistry()
+    tools.register(
+        RegisteredTool(
+            name="write_file",
+            description="write file",
+            input_schema={"type": "object", "properties": {}},
+            handler=lambda **kwargs: "Wrote diagram to workspace/reports/diagrams/Agent执行流程.svg",
+        )
+    )
+    runner = ResilienceRunner(
+        GatewaySettings(max_iterations=1),
+        ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")]),
+        tools,
+    )
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            del kwargs
+            return type(
+                "FakeResponse",
+                (),
+                {
+                    "stop_reason": "tool_use",
+                    "content": [
+                        type(
+                            "FakeBlock",
+                            (),
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "write_file",
+                                "input": {"file_path": "workspace/reports/diagrams/Agent执行流程.svg"},
+                            },
+                        )()
+                    ],
+                },
+            )()
+
+    fake_client = type("FakeClient", (), {"messages": FakeMessages()})()
+    monkeypatch.setattr(runner, "_build_client", lambda profile: fake_client)
+
+    result = runner.run("system", [{"role": "user", "content": "画流程图"}], model="m1")
+
+    assert result.stop_reason == "max_iterations"
+    assert "[max iterations reached]" not in result.text
+    assert "workspace/reports/diagrams/Agent执行流程.svg" in result.text

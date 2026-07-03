@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -26,6 +27,12 @@ from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.state.context import ContextGuard
 from agent_gateway.ai.tools.registry import ToolRegistry
+
+
+_REPORT_ARTIFACT_PATTERN = re.compile(
+    r"(?P<path>(?:workspace/)?reports/[^\s`，。；,;]+"
+    r"\.(?:md|drawio|png|jpg|jpeg|svg|pdf))"
+)
 
 
 class FailoverReason(Enum):
@@ -366,12 +373,73 @@ class ResilienceRunner:
                 )
             current_messages.append({"role": "user", "content": tool_results})
 
+        artifact_paths = self._collect_report_artifact_paths(current_messages)
+        if artifact_paths:
+            return {
+                "text": self._format_max_iterations_artifact_reply(artifact_paths),
+                "stop_reason": "max_iterations",
+                "messages": current_messages,
+                "tool_calls": tool_calls,
+            }
+
         return {
             "text": "[max iterations reached]",
             "stop_reason": "max_iterations",
             "messages": current_messages,
             "tool_calls": tool_calls,
         }
+
+    def _collect_report_artifact_paths(self, messages: list[dict[str, Any]]) -> list[str]:
+        """从最近的模型/工具消息中提取已生成的报告或图表路径。
+
+        max_iterations 常发生在文件已经写完后模型仍继续调用工具。这里不改变执行闭环，
+        只把可验证的 `workspace/reports/...` 产物路径带回上层，让通道继续发送附件。
+        """
+
+        paths: list[str] = []
+        seen: set[str] = set()
+        for message in messages:
+            for text in self._iter_content_text(message.get("content")):
+                for match in _REPORT_ARTIFACT_PATTERN.finditer(text):
+                    path = match.group("path")
+                    if not path.startswith("workspace/"):
+                        path = f"workspace/{path}"
+                    if path not in seen:
+                        paths.append(path)
+                        seen.add(path)
+        return paths
+
+    def _iter_content_text(self, content: Any) -> list[str]:
+        """兼容 Anthropic content block、tool_result 和纯文本消息。"""
+
+        if isinstance(content, str):
+            return [content]
+        if not isinstance(content, list):
+            return []
+        texts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                texts.append(block)
+                continue
+            if not isinstance(block, dict):
+                continue
+            block_text = block.get("text") if block.get("type") == "text" else block.get("content")
+            if isinstance(block_text, str):
+                texts.append(block_text)
+            elif isinstance(block_text, list):
+                texts.extend(self._iter_content_text(block_text))
+        return texts
+
+    def _format_max_iterations_artifact_reply(self, artifact_paths: list[str]) -> str:
+        """生成可发送给用户的降级回复，保留附件路径供飞书通道识别。"""
+
+        lines = [
+            "本轮任务已生成文件，但模型在收尾阶段继续调用工具并达到最大迭代次数。",
+            "已生成的文件：",
+        ]
+        lines.extend(f"- {path}" for path in artifact_paths)
+        lines.append("你可以先查看上述文件；我会停止继续重试，避免重复执行。")
+        return "\n".join(lines)
 
     def _record_tool_event(
         self,

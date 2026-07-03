@@ -8,11 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN printf '%s\n' \
-    'deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main contrib non-free non-free-firmware' \
-    'deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware' \
-    'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' \
-    > /etc/apt/sources.list
-RUN printf '%s\n' \
     'Types: deb' \
     'URIs: https://mirrors.tuna.tsinghua.edu.cn/debian/' \
     'Suites: trixie trixie-updates' \
@@ -31,6 +26,7 @@ RUN apt-get update \
         bash \
         curl \
         gcc \
+        librsvg2-bin \
         libpq-dev \
         postgresql-client \
     && rm -rf /var/lib/apt/lists/*

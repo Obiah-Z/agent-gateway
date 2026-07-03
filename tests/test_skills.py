@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent_gateway.ai.context.skills import SkillsManager
 
@@ -132,6 +133,58 @@ def test_draw_skill_export_output_is_restricted_to_shared_diagrams_dir() -> None
             assert "workspace/reports/diagrams" in str(exc)
         else:
             raise AssertionError(f"unexpectedly allowed output path: {rejected}")
+
+
+def test_draw_skill_fallback_svg_export_without_drawio_cli(tmp_path: Path) -> None:
+    export_drawio = _load_draw_export_module()
+    output = tmp_path / "fallback.svg"
+
+    export_drawio.fallback_svg_export(
+        Path(__file__).resolve().parents[1]
+        / "workspace"
+        / "reports"
+        / "diagrams"
+        / "示例流程图.drawio",
+        output,
+    )
+
+    content = output.read_text(encoding="utf-8")
+    assert content.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    assert "<svg" in content
+    assert "<rect" in content or "<polygon" in content
+
+
+def test_draw_skill_uses_fallback_when_drawio_creates_no_output(tmp_path: Path, monkeypatch) -> None:
+    export_drawio = _load_draw_export_module()
+    repo_root = Path(__file__).resolve().parents[1]
+    input_path = repo_root / "workspace" / "reports" / "diagrams" / "示例流程图.drawio"
+    output_path = repo_root / "workspace" / "reports" / "diagrams" / "fallback-no-output-test.svg"
+
+    class FakeResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(export_drawio, "drawio_command", lambda: "drawio")
+    monkeypatch.setattr(export_drawio.subprocess, "run", lambda *args, **kwargs: FakeResult())
+    try:
+        assert not export_drawio.run_drawio_export(
+            SimpleNamespace(
+                format="svg",
+                recursive=False,
+                page=None,
+                all_pages=False,
+                transparent=False,
+                border=None,
+                scale=None,
+                width=None,
+                height=None,
+            ),
+            input_path,
+            output_path,
+        )
+    finally:
+        output_path.unlink(missing_ok=True)
 
 
 def test_draw_skill_create_output_is_restricted_to_shared_diagrams_dir() -> None:
