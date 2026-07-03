@@ -7,6 +7,7 @@ from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.domain.models import AgentReply, InboundMessage, RouteResolution
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
+from agent_gateway.runtime.tasks.session_scheduler import SessionTaskClaim
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
 
 
@@ -31,6 +32,40 @@ class FakeInboundTaskBroker:
 
     def stats(self) -> dict:
         return {"backend": "fake", "messages": len(self.payloads)}
+
+
+class FakeSessionScheduler:
+    enabled = True
+
+    def __init__(self, claims: list[SessionTaskClaim | None]) -> None:
+        self.claims = list(claims)
+        self.released: list[str] = []
+        self.enqueued: list[str] = []
+
+    def enqueue(self, task) -> bool:
+        self.enqueued.append(task.id)
+        return True
+
+    def claim_next(self, **kwargs):
+        del kwargs
+        if not self.claims:
+            return None
+        return self.claims.pop(0)
+
+    def release(self, claim: SessionTaskClaim) -> bool:
+        self.released.append(claim.task_id)
+        return True
+
+
+def make_claim(task_id: str, session_key: str) -> SessionTaskClaim:
+    return SessionTaskClaim(
+        task_id=task_id,
+        session_key=session_key,
+        owner_value=f"owner:{task_id}",
+        busy_key=f"busy:{session_key}",
+        pending_key=f"pending:{session_key}",
+        ttl_seconds=60,
+    )
 
 
 def test_task_worker_run_once_acknowledges_success(tmp_path: Path) -> None:
@@ -146,6 +181,38 @@ def test_task_worker_consumes_broker_task_reference_by_id(tmp_path: Path) -> Non
     assert store.get(target.id).status == "done"
     assert store.get(target.id).result_preview == "echo:target"
     assert store.get(skipped.id).status == "pending"
+
+
+def test_task_worker_uses_session_scheduler_before_direct_reserve(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    scheduler = FakeSessionScheduler([])
+    queue = LocalTaskQueue(store, session_scheduler=scheduler)
+    a2 = queue.enqueue(
+        task_type="echo",
+        source="test",
+        session_key="session-a",
+        priority=1,
+        payload={"text": "a2"},
+    )
+    b1 = queue.enqueue(
+        task_type="echo",
+        source="test",
+        session_key="session-b",
+        priority=100,
+        payload={"text": "b1"},
+    )
+    scheduler.claims = [make_claim(b1.id, "session-b")]
+    calls: list[str] = []
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    worker.register_handler("echo", lambda item: calls.append(item.payload["text"]) or item.payload["text"])
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert calls == ["b1"]
+    assert store.get(b1.id).status == "done"
+    assert store.get(a2.id).status == "pending"
+    assert scheduler.released == [b1.id]
 
 
 def test_task_worker_records_broker_ack_event(tmp_path: Path) -> None:

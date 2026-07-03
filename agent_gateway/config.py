@@ -101,6 +101,8 @@ class GatewaySettings:
     inbound_max_lane_queue_size: int = 20
     inbound_long_task_notice_seconds: float = 15.0
     inbound_task_queue_enabled: bool = False
+    session_ready_scheduler_enabled: bool = False
+    session_ready_scheduler_namespace: str = "gateway:tasks"
     inbound_session_lock_ttl_seconds: int = 300
     inbound_session_lock_renew_interval_seconds: float = 0.0
     task_worker_id: str = "local-worker"
@@ -312,6 +314,15 @@ class GatewaySettings:
                 float(os.getenv("GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS", "15")),
             ),
             inbound_task_queue_enabled=env_bool("GATEWAY_INBOUND_TASK_QUEUE_ENABLED", False),
+            session_ready_scheduler_enabled=env_bool(
+                "GATEWAY_SESSION_READY_SCHEDULER_ENABLED",
+                False,
+            ),
+            session_ready_scheduler_namespace=os.getenv(
+                "GATEWAY_SESSION_READY_SCHEDULER_NAMESPACE",
+                "gateway:tasks",
+            ).strip()
+            or "gateway:tasks",
             inbound_session_lock_ttl_seconds=max(
                 1,
                 int(os.getenv("GATEWAY_INBOUND_SESSION_LOCK_TTL_SECONDS", "300")),

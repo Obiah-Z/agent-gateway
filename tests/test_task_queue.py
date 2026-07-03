@@ -16,6 +16,17 @@ class FakeTaskBroker:
         self.published.append(task)
 
 
+class FakeSessionScheduler:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.enqueued: list[str] = []
+
+    def enqueue(self, task: TaskInstance) -> bool:
+        self.enqueued.append(task.id)
+        return True
+
+
 def test_local_task_queue_enqueues_and_reserves_by_priority(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     slow = queue.enqueue(task_type="cron", source="scheduler", priority=100)
@@ -41,6 +52,25 @@ def test_local_task_queue_publishes_to_broker_after_store_write(tmp_path: Path) 
     )
 
     assert queue.store.get(task.id).status == "pending"
+    assert [item.id for item in broker.published] == [task.id]
+
+
+def test_local_task_queue_writes_session_scheduler_before_broker_wakeup(tmp_path: Path) -> None:
+    broker = FakeTaskBroker()
+    scheduler = FakeSessionScheduler()
+    queue = LocalTaskQueue(
+        LocalTaskStore(tmp_path / "tasks"),
+        broker=broker,
+        session_scheduler=scheduler,
+    )
+
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="session-a",
+    )
+
+    assert scheduler.enqueued == [task.id]
     assert [item.id for item in broker.published] == [task.id]
 
 

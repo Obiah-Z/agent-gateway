@@ -4,6 +4,7 @@ import time
 from typing import Any, Iterable
 
 from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
+from agent_gateway.runtime.tasks.session_scheduler import SessionTaskClaim
 from agent_gateway.runtime.tasks.store import LocalTaskStore
 
 
@@ -14,9 +15,16 @@ class LocalTaskQueue:
     后续 Redis Streams、RabbitMQ 或 PostgreSQL backend 应保持同样接口。
     """
 
-    def __init__(self, store: LocalTaskStore, *, broker: Any | None = None) -> None:
+    def __init__(
+        self,
+        store: LocalTaskStore,
+        *,
+        broker: Any | None = None,
+        session_scheduler: Any | None = None,
+    ) -> None:
         self.store = store
         self.broker = broker
+        self.session_scheduler = session_scheduler
 
     def enqueue(
         self,
@@ -43,11 +51,8 @@ class LocalTaskQueue:
                 source=source,
             )
             if existing is not None:
-                if existing.status in {"pending", "retrying"} and self.broker is not None:
-                    try:
-                        self.broker.publish(existing)
-                    except Exception:
-                        pass
+                if existing.status in {"pending", "retrying"}:
+                    self._publish_ready(existing)
                 return existing
 
         task = TaskInstance.create(
@@ -61,12 +66,85 @@ class LocalTaskQueue:
             metadata=metadata or {},
         )
         created = self.store.create(task)
-        if self.broker is not None:
+        self._publish_ready(created)
+        return created
+
+    def reserve_session_claim(
+        self,
+        *,
+        worker_id: str,
+        task_types: Iterable[str] | None = None,
+        ttl_seconds: int | None = None,
+        max_claim_attempts: int = 16,
+        now: float | None = None,
+    ) -> tuple[TaskInstance, SessionTaskClaim] | None:
+        """通过 Redis session 调度器声明并预占一个 session 队首任务。"""
+
+        scheduler = self.session_scheduler
+        if scheduler is None or not getattr(scheduler, "enabled", False):
+            return None
+        attempts = max(1, int(max_claim_attempts))
+        for _ in range(attempts):
+            claim = scheduler.claim_next(
+                worker_id=worker_id,
+                task_types=task_types,
+                ttl_seconds=ttl_seconds,
+                now=now,
+            )
+            if claim is None:
+                return None
+            task = self.reserve_task_id(
+                claim.task_id,
+                worker_id=worker_id,
+                task_types=task_types,
+                now=now,
+            )
+            if task is not None:
+                return task, claim
+            scheduler.release(claim)
+        return None
+
+    def release_session_claim(self, claim: SessionTaskClaim) -> bool:
+        """释放 Redis session claim；未启用 scheduler 时视为成功。"""
+
+        scheduler = self.session_scheduler
+        if scheduler is None or not getattr(scheduler, "enabled", False):
+            return True
+        try:
+            return bool(scheduler.release(claim))
+        except Exception:
+            return False
+
+    def renew_session_claim(
+        self,
+        claim: SessionTaskClaim,
+        *,
+        ttl_seconds: int | None = None,
+    ) -> bool:
+        """续租 Redis session claim，用于长模型调用期间保持 busy owner。"""
+
+        scheduler = self.session_scheduler
+        if scheduler is None or not getattr(scheduler, "enabled", False):
+            return True
+        try:
+            return bool(scheduler.renew(claim, ttl_seconds=ttl_seconds))
+        except Exception:
+            return False
+
+    def _publish_ready(self, task: TaskInstance) -> None:
+        """把任务写入调度索引并发布 broker 唤醒消息。"""
+
+        scheduler = self.session_scheduler
+        if scheduler is not None and getattr(scheduler, "enabled", False):
             try:
-                self.broker.publish(created)
+                scheduler.enqueue(task)
             except Exception:
                 pass
-        return created
+        if self.broker is not None:
+            try:
+                self.broker.publish(task)
+            except Exception:
+                pass
 
     def reserve(
         self,

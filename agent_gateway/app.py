@@ -50,7 +50,12 @@ from agent_gateway.runtime.execution.roles import build_runtime_role_plan
 from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker, RabbitMQInboundTaskBroker
 from agent_gateway.runtime.infra.redis_client import RedisClient
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
-from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
+from agent_gateway.runtime.tasks import (
+    LocalTaskQueue,
+    LocalTaskStore,
+    RedisSessionReadyScheduler,
+    TaskWorkerRuntime,
+)
 from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
@@ -324,7 +329,18 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
             connect_timeout_seconds=settings.inbound_rabbitmq_connect_timeout_seconds,
             enabled=True,
         )
-    task_queue = LocalTaskQueue(task_store, broker=task_broker)
+    session_scheduler = None
+    if settings.session_ready_scheduler_enabled and redis_client.enabled:
+        session_scheduler = RedisSessionReadyScheduler(
+            redis_client,
+            namespace=settings.session_ready_scheduler_namespace,
+            default_ttl_seconds=settings.inbound_session_lock_ttl_seconds,
+        )
+    task_queue = LocalTaskQueue(
+        task_store,
+        broker=task_broker,
+        session_scheduler=session_scheduler,
+    )
     dispatcher = GatewayDispatcher(
         agents,
         bindings,

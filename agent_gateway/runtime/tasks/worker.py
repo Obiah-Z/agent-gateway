@@ -90,6 +90,9 @@ class TaskWorkerRuntime:
 
         if not self.handlers:
             return False
+        scheduler_handled = await self._run_once_from_scheduler()
+        if scheduler_handled:
+            return True
         broker_handled = await self._run_once_from_broker()
         if broker_handled:
             return True
@@ -143,6 +146,33 @@ class TaskWorkerRuntime:
                 return True
         return False
 
+    async def _run_once_from_scheduler(self) -> bool:
+        """通过 Redis session 调度器声明一个可执行 session 队首任务。"""
+
+        scheduler = getattr(self.queue, "session_scheduler", None)
+        if scheduler is None or not getattr(scheduler, "enabled", False):
+            return False
+        claimed = self.queue.reserve_session_claim(
+            worker_id=self.worker_id,
+            task_types=self.handlers.keys(),
+        )
+        if claimed is None:
+            return False
+        task, claim = claimed
+        try:
+            await self._execute(task)
+        finally:
+            released = self.queue.release_session_claim(claim)
+            if not released:
+                self._record_task_event(
+                    "task.scheduler.release_failed",
+                    task,
+                    status="error",
+                    message="Redis session claim 释放失败，可能存在 owner 过期或被接管",
+                    reason="release failed",
+                )
+        return True
+
     def _handle_broker_payload_sync(self, payload: dict[str, Any]) -> bool:
         """同步 broker handler：预占指定任务并在线程内执行异步 handler。"""
 
@@ -168,6 +198,48 @@ class TaskWorkerRuntime:
                 reason="handler not registered",
             )
             return False
+        scheduler = getattr(self.queue, "session_scheduler", None)
+        if scheduler is not None and getattr(scheduler, "enabled", False):
+            claimed = self.queue.reserve_session_claim(
+                worker_id=self.worker_id,
+                task_types=self.handlers.keys(),
+            )
+            if claimed is None:
+                self._record_broker_event(
+                    "task.broker.acked",
+                    payload=payload,
+                    status="ok",
+                    message="入站 broker 唤醒消息已确认，当前没有可声明的 session 队首任务",
+                    reason="no schedulable session",
+                )
+                return True
+            task, claim = claimed
+            try:
+                asyncio.run(self._execute(task))
+            finally:
+                released = self.queue.release_session_claim(claim)
+                if not released:
+                    self._record_task_event(
+                        "task.scheduler.release_failed",
+                        task,
+                        status="error",
+                        message="Redis session claim 释放失败，可能存在 owner 过期或被接管",
+                        reason="release failed",
+                    )
+            stored = self.queue.store.get(task.id)
+            self._record_broker_event(
+                "task.broker.acked",
+                payload={
+                    **payload,
+                    "task_id": task.id,
+                    "partition": partition,
+                    "session_key": session_key or task.session_key,
+                },
+                status="ok" if stored is not None and stored.status == "done" else "warning",
+                message="入站 broker 唤醒消息已通过 session 调度器执行并确认",
+                reason=f"task status: {getattr(stored, 'status', 'unknown')}",
+            )
+            return True
         blocked_session_keys = self._blocked_session_keys()
         task = self.queue.reserve_task_id(
             task_id,
