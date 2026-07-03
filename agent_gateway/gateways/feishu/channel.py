@@ -38,7 +38,7 @@ class FeishuChannel(Channel):
     _CARD_FALLBACK_ERROR_CODES = {230025, 230054, 230099}
     _PERMANENT_SEND_ERROR_CODES = {99992351}
     _REPORT_PATH_PATTERN = re.compile(
-        r"(?P<path>(?:workspace/)?reports/github-repos/[^\s`，。；,;]+\.md)",
+        r"(?P<path>(?:workspace/)?reports/(?:github-repos/[^\s`，。；,;]+\.md|diagrams/[^\s`，。；,;]+\.(?:drawio|png|jpg|jpeg|svg|pdf)))",
         re.IGNORECASE,
     )
 

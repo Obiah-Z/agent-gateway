@@ -1,0 +1,49 @@
+<mxfile host="app.diagrams.net" agent="draw-skill" version="24.7.17">
+  <diagram id="architecture" name="architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t2" value="架构图：电商系统容器视图" style="text;html=1;strokeColor=none;fillColor=none;fontFamily=SimSun;fontSize=12;fontColor=#000000;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="30" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v3" value="电商系统边界" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=0;dashed=1;align=left;verticalAlign=top;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="120" width="670" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="v4" value="用户&#10;[Person]" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="80" y="240" width="150" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="v5" value="API Gateway&#10;[Container]&#10;认证、限流、路由" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="180" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="v6" value="Web 应用&#10;[Container]&#10;前端页面" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="360" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="v7" value="订单服务&#10;[Container]&#10;订单业务逻辑" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="700" y="180" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="v8" value="订单数据库&#10;[Container]&#10;存储订单数据" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;shape=cylinder3d;boundedLbl=1;backgroundOutline=1;size=15;" vertex="1" parent="1">
+          <mxGeometry x="700" y="360" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="v9" value="消息队列&#10;[External System]&#10;异步事件" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="260" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="访问 HTTPS" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v4" target="v6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="调用 API" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v6" target="v5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="转发请求" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v5" target="v7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="读写数据" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v7" target="v8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="发布事件" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v7" target="v9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

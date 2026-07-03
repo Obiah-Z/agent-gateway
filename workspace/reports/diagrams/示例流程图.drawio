@@ -1,0 +1,58 @@
+<mxfile host="app.diagrams.net" agent="draw-skill" version="24.7.17">
+  <diagram id="flowchart" name="flowchart">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t2" value="流程图：登录校验" style="text;html=1;strokeColor=none;fillColor=none;fontFamily=SimSun;fontSize=12;fontColor=#000000;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="485" y="35" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v3" value="开始" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=50;" vertex="1" parent="1">
+          <mxGeometry x="80" y="190" width="90" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="v4" value="输入账号和密码" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;shape=parallelogram;perimeter=parallelogramPerimeter;fixedSize=1;" vertex="1" parent="1">
+          <mxGeometry x="220" y="186" width="150" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="v5" value="格式正确？" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rhombus;" vertex="1" parent="1">
+          <mxGeometry x="420" y="174" width="112" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="v6" value="认证账号" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="585" y="186" width="120" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="v7" value="认证通过？" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rhombus;" vertex="1" parent="1">
+          <mxGeometry x="755" y="174" width="112" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="v8" value="进入系统" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=1;arcSize=50;" vertex="1" parent="1">
+          <mxGeometry x="925" y="190" width="100" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="v9" value="提示格式错误" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="395" y="300" width="140" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="v10" value="提示认证失败" style="whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;spacing=4;spacingTop=3;spacingRight=4;spacingBottom=3;spacingLeft=4;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="732" y="300" width="140" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v3" target="v4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v4" target="v5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="是" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v5" target="v6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="否" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v5" target="v9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v6" target="v7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="是" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v7" target="v8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" value="否" style="html=1;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#000000;strokeWidth=1;fontFamily=SimSun;fontSize=12;fontColor=#000000;endArrow=block;" edge="1" parent="1" source="v7" target="v10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,6 +1,39 @@
+import importlib.util
 from pathlib import Path
 
 from agent_gateway.ai.context.skills import SkillsManager
+
+
+def _load_draw_export_module():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "workspace"
+        / "skills"
+        / "draw-skill"
+        / "scripts"
+        / "export_drawio.py"
+    )
+    spec = importlib.util.spec_from_file_location("draw_skill_export_drawio", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_draw_create_module():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "workspace"
+        / "skills"
+        / "draw-skill"
+        / "scripts"
+        / "create_academic_drawio.py"
+    )
+    spec = importlib.util.spec_from_file_location("draw_skill_create_academic_drawio", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_skills_manager_discovers_skill(tmp_path: Path) -> None:
@@ -66,7 +99,58 @@ def test_workspace_github_repo_analyzer_skill_is_discoverable() -> None:
     assert "/github-repo-analyzer" in prompt
 
 
-def test_workspace_content_creation_skills_are_discoverable() -> None:
+def test_workspace_draw_skill_is_discoverable() -> None:
+    workspace = Path(__file__).resolve().parents[1] / "workspace"
+
+    manager = SkillsManager(workspace)
+    manager.discover()
+
+    names = {skill.name for skill in manager.skills}
+    assert "draw-skill" in names
+    prompt = manager.format_prompt_block()
+    assert "draw.io" in prompt
+    assert "workspace/reports/diagrams" in prompt
+
+
+def test_draw_skill_export_output_is_restricted_to_shared_diagrams_dir() -> None:
+    export_drawio = _load_draw_export_module()
+    repo_root = Path(__file__).resolve().parents[1]
+    input_path = repo_root / "workspace" / "reports" / "diagrams" / "示例架构图.drawio"
+
+    allowed = export_drawio.resolve_output(
+        input_path,
+        "workspace/reports/diagrams/导出.png",
+        "png",
+        recursive=False,
+    )
+
+    assert allowed == repo_root / "workspace" / "reports" / "diagrams" / "导出.png"
+    for rejected in ("workspace/reports/other/导出.png", "/tmp/导出.png"):
+        try:
+            export_drawio.resolve_output(input_path, rejected, "png", recursive=False)
+        except SystemExit as exc:
+            assert "workspace/reports/diagrams" in str(exc)
+        else:
+            raise AssertionError(f"unexpectedly allowed output path: {rejected}")
+
+
+def test_draw_skill_create_output_is_restricted_to_shared_diagrams_dir() -> None:
+    create_drawio = _load_draw_create_module()
+    repo_root = Path(__file__).resolve().parents[1]
+
+    allowed = create_drawio.resolve_output("workspace/reports/diagrams/新图.drawio")
+
+    assert allowed == repo_root / "workspace" / "reports" / "diagrams" / "新图.drawio"
+    for rejected in ("workspace/reports/other/新图.drawio", "/tmp/新图.drawio", "workspace/reports/diagrams/新图.png"):
+        try:
+            create_drawio.resolve_output(rejected)
+        except SystemExit as exc:
+            assert "workspace/reports/diagrams" in str(exc) or ".drawio" in str(exc)
+        else:
+            raise AssertionError(f"unexpectedly allowed output path: {rejected}")
+
+
+def test_workspace_active_skills_match_pruned_skill_set() -> None:
     workspace = Path(__file__).resolve().parents[1] / "workspace"
 
     manager = SkillsManager(workspace)
@@ -74,14 +158,15 @@ def test_workspace_content_creation_skills_are_discoverable() -> None:
 
     names = {skill.name for skill in manager.skills}
     assert {
+        "draw-skill",
+        "github-repo-analyzer",
+        "github-skill-finder",
+        "server-space-advisor",
+    }.issubset(names)
+    assert {
         "article-writing",
         "content-distribution",
         "frontend-slides",
         "video-editing",
         "audio-media",
-    }.issubset(names)
-    prompt = manager.format_prompt_block()
-    assert "/article" in prompt
-    assert "/slides" in prompt
-    assert "/video-edit" in prompt
-    assert "/audio-media" in prompt
+    }.isdisjoint(names)

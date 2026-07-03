@@ -1,0 +1,4 @@
+interface:
+  display_name: "Academic Draw.io Diagrams"
+  short_description: "Generate paper-ready software engineering diagrams"
+  default_prompt: "Use $draw-skill to create a black-and-white academic .drawio software engineering diagram."

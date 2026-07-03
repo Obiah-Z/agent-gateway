@@ -281,6 +281,58 @@ def test_feishu_channel_send_uploads_report_path_from_reply_text(
     assert json.loads(file_payload["content"]) == {"file_key": "file_report_1"}
 
 
+def test_feishu_channel_send_uploads_diagram_path_from_reply_text(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    diagram_path = tmp_path / "workspace" / "reports" / "diagrams" / "网关架构图.png"
+    diagram_path.parent.mkdir(parents=True)
+    diagram_path.write_bytes(b"fake-png")
+    channel = _build_channel()
+    sent: list[dict[str, object]] = []
+
+    def fake_refresh_token() -> str:
+        return "tenant-token"
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_post(url: str, **kwargs):
+        sent.append({"url": url, **kwargs})
+        if url.endswith("/im/v1/files"):
+            return FakeResponse({"code": 0, "data": {"file_key": "file_diagram_1"}})
+        return FakeResponse({"code": 0, "msg": "success"})
+
+    monkeypatch.setattr(channel, "_refresh_token", fake_refresh_token)
+    monkeypatch.setattr(channel._http, "post", fake_post)
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="feishu",
+            to="ou_user",
+            text=(
+                "绘图完成。\n"
+                "图片路径：workspace/reports/diagrams/网关架构图.png"
+            ),
+            metadata={"receive_id_type": "open_id"},
+        )
+    )
+
+    assert ok is True
+    assert len(sent) == 3
+    assert sent[1]["url"].endswith("/im/v1/files")
+    assert sent[1]["data"] == {"file_type": "stream", "file_name": "网关架构图.png"}
+    file_payload = sent[2]["json"]
+    assert isinstance(file_payload, dict)
+    assert file_payload["msg_type"] == "file"
+    assert json.loads(file_payload["content"]) == {"file_key": "file_diagram_1"}
+
+
 def test_feishu_channel_send_can_use_lark_cli_for_group_message(monkeypatch) -> None:
     channel = _build_channel(send_mode="lark_cli", render_mode="text")
     calls: list[list[str]] = []
