@@ -64,6 +64,7 @@ class AgentInboundTaskHandler:
         worker_id: str = "local-worker",
         lane_coordinator: RedisLaneCoordinator | None = None,
         state_repository: object | None = None,
+        use_lane_lock: bool = True,
         feishu_progress_notice_enabled: bool = True,
         feishu_progress_notice_text: str = "已收到，正在处理。本轮结果生成后会继续推送。",
     ) -> None:
@@ -82,6 +83,7 @@ class AgentInboundTaskHandler:
             self.lock_ttl_seconds,
         )
         self.worker_id = worker_id
+        self.use_lane_lock = use_lane_lock
         self.feishu_progress_notice_enabled = feishu_progress_notice_enabled
         self.feishu_progress_notice_text = feishu_progress_notice_text.strip()
 
@@ -92,7 +94,7 @@ class AgentInboundTaskHandler:
         ownership: LaneOwnership | None = None
         ownership_ref: dict[str, LaneOwnership] = {}
         renew_task: asyncio.Task[None] | None = None
-        if self.lane_coordinator.enabled and task.session_key.strip():
+        if self.use_lane_lock and self.lane_coordinator.enabled and task.session_key.strip():
             try:
                 ownership = self.lane_coordinator.acquire(
                     task.session_key,
@@ -139,6 +141,8 @@ class AgentInboundTaskHandler:
 
         if not self.lane_coordinator.enabled:
             return False
+        if not self.use_lane_lock:
+            return False
         try:
             return self.lane_coordinator.is_owned(task.session_key)
         except Exception:
@@ -149,6 +153,8 @@ class AgentInboundTaskHandler:
         """返回任务 session lane 的当前 owner 信息。"""
 
         if not self.lane_coordinator.enabled:
+            return {}
+        if not self.use_lane_lock:
             return {}
         try:
             return self.lane_coordinator.inspect(task.session_key).to_dict()

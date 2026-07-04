@@ -257,6 +257,43 @@ def test_task_worker_renews_session_scheduler_claim_during_slow_task(tmp_path: P
     assert scheduler.released == [task.id]
 
 
+def test_task_worker_does_not_fallback_reserve_agent_inbound_when_scheduler_enabled(
+    tmp_path: Path,
+) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    scheduler = FakeSessionScheduler([])
+    queue = LocalTaskQueue(store, session_scheduler=scheduler)
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        payload={
+            "text": "queued",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    dispatcher = FakeInboundDispatcher()
+    worker = TaskWorkerRuntime(queue, worker_id="worker-1")
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            redis_client=FakeLockRedisClient(),
+            use_lane_lock=False,
+        ),
+    )
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is False
+    assert store.get(task.id).status == "pending"
+    assert dispatcher.dispatched == []
+
+
 def test_task_worker_records_broker_ack_event(tmp_path: Path) -> None:
     store = LocalTaskStore(tmp_path / "tasks")
     queue = LocalTaskQueue(store)
@@ -717,6 +754,39 @@ def test_agent_inbound_task_uses_redis_session_lock(tmp_path: Path) -> None:
             redis_client.released[0][1],
         )
     ]
+
+
+def test_agent_inbound_task_can_skip_legacy_lane_lock_when_scheduler_claimed(
+    tmp_path: Path,
+) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    task = queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        session_key="inbound:feishu:bot-a:user-1",
+        payload={
+            "text": "hello",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    redis_client = FakeLockRedisClient()
+    dispatcher = FakeInboundDispatcher()
+    handler = AgentInboundTaskHandler(
+        dispatcher,
+        ChannelManager(),
+        redis_client=redis_client,
+        worker_id="worker-1",
+        use_lane_lock=False,
+    )
+
+    result = asyncio.run(handler(task))
+
+    assert result == "agent inbound delivered: delivery-1"
+    assert redis_client.acquired == []
+    assert dispatcher.dispatched[0].text == "hello"
 
 
 def test_agent_inbound_task_retries_when_session_lock_is_held(tmp_path: Path) -> None:

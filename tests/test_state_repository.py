@@ -58,6 +58,7 @@ def test_build_state_repository_returns_local_backend(tmp_path: Path) -> None:
         config_dir=tmp_path / "config",
         data_dir=tmp_path / "data",
         workspace_root=tmp_path / "workspace",
+        postgres_enabled=False,
     )
     settings.ensure_directories()
     bundle = build_state_repository(
@@ -116,6 +117,7 @@ def test_build_state_repository_enables_migration_backup_sink(tmp_path: Path) ->
         config_dir=tmp_path / "config",
         data_dir=tmp_path / "data",
         workspace_root=tmp_path / "workspace",
+        postgres_enabled=False,
     )
     settings.ensure_directories()
     sessions = SessionStore(settings.sessions_dir)

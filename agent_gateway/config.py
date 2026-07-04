@@ -59,21 +59,21 @@ class GatewaySettings:
     anthropic_base_url: str = ""
     model_id: str = "deepseek-v4-pro"
     runtime_roles: tuple[str, ...] = ("all",)
-    redis_enabled: bool = False
+    redis_enabled: bool = True
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_socket_timeout_seconds: float = 1.0
     redis_cron_rate_limit_per_minute: int = 0
-    postgres_enabled: bool = False
+    postgres_enabled: bool = True
     postgres_url: str = "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
     postgres_connect_timeout_seconds: float = 2.0
-    delivery_broker: str = "none"
+    delivery_broker: str = "rabbitmq"
     rabbitmq_url: str = "amqp://admin:admin123@127.0.0.1:5672/"
     rabbitmq_exchange: str = "agent_gateway.delivery"
     rabbitmq_queue: str = "agent_gateway.delivery.outbound"
     rabbitmq_dead_letter_exchange: str = "agent_gateway.delivery.dlx"
     rabbitmq_dead_letter_queue: str = "agent_gateway.delivery.dead"
     rabbitmq_connect_timeout_seconds: float = 2.0
-    inbound_broker: str = "none"
+    inbound_broker: str = "rabbitmq"
     inbound_rabbitmq_url: str = "amqp://admin:admin123@127.0.0.1:5672/"
     inbound_rabbitmq_exchange: str = "agent_gateway.inbound"
     inbound_rabbitmq_queue_prefix: str = "agent_gateway.inbound.partition"
@@ -100,8 +100,8 @@ class GatewaySettings:
     inbound_max_queue_size: int = 200
     inbound_max_lane_queue_size: int = 20
     inbound_long_task_notice_seconds: float = 15.0
-    inbound_task_queue_enabled: bool = False
-    session_ready_scheduler_enabled: bool = False
+    inbound_task_queue_enabled: bool = True
+    session_ready_scheduler_enabled: bool = True
     session_ready_scheduler_namespace: str = "gateway:tasks"
     inbound_session_lock_ttl_seconds: int = 300
     inbound_session_lock_renew_interval_seconds: float = 0.0
@@ -200,7 +200,7 @@ class GatewaySettings:
             anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", ""),
             model_id=os.getenv("MODEL_ID", "claude-opus-4-6"),
             runtime_roles=parse_runtime_roles(os.getenv("GATEWAY_RUNTIME_ROLES", "all")),
-            redis_enabled=env_bool("GATEWAY_REDIS_ENABLED", False),
+            redis_enabled=env_bool("GATEWAY_REDIS_ENABLED", True),
             redis_url=os.getenv("GATEWAY_REDIS_URL", "redis://127.0.0.1:6379/0"),
             redis_socket_timeout_seconds=max(
                 0.05,
@@ -210,7 +210,7 @@ class GatewaySettings:
                 0,
                 int(os.getenv("GATEWAY_REDIS_CRON_RATE_LIMIT_PER_MINUTE", "0")),
             ),
-            postgres_enabled=env_bool("GATEWAY_POSTGRES_ENABLED", False),
+            postgres_enabled=env_bool("GATEWAY_POSTGRES_ENABLED", True),
             postgres_url=os.getenv(
                 "GATEWAY_POSTGRES_URL",
                 "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
@@ -219,7 +219,8 @@ class GatewaySettings:
                 0.2,
                 float(os.getenv("GATEWAY_POSTGRES_CONNECT_TIMEOUT_SECONDS", "2.0")),
             ),
-            delivery_broker=os.getenv("GATEWAY_DELIVERY_BROKER", "none").strip().lower() or "none",
+            delivery_broker=os.getenv("GATEWAY_DELIVERY_BROKER", "rabbitmq").strip().lower()
+            or "rabbitmq",
             rabbitmq_url=os.getenv(
                 "GATEWAY_RABBITMQ_URL",
                 "amqp://admin:admin123@127.0.0.1:5672/",
@@ -244,7 +245,8 @@ class GatewaySettings:
                 0.2,
                 float(os.getenv("GATEWAY_RABBITMQ_CONNECT_TIMEOUT_SECONDS", "2.0")),
             ),
-            inbound_broker=os.getenv("GATEWAY_INBOUND_BROKER", "none").strip().lower() or "none",
+            inbound_broker=os.getenv("GATEWAY_INBOUND_BROKER", "rabbitmq").strip().lower()
+            or "rabbitmq",
             inbound_rabbitmq_url=os.getenv(
                 "GATEWAY_INBOUND_RABBITMQ_URL",
                 os.getenv("GATEWAY_RABBITMQ_URL", "amqp://admin:admin123@127.0.0.1:5672/"),
@@ -313,10 +315,10 @@ class GatewaySettings:
                 0.0,
                 float(os.getenv("GATEWAY_INBOUND_LONG_TASK_NOTICE_SECONDS", "15")),
             ),
-            inbound_task_queue_enabled=env_bool("GATEWAY_INBOUND_TASK_QUEUE_ENABLED", False),
+            inbound_task_queue_enabled=env_bool("GATEWAY_INBOUND_TASK_QUEUE_ENABLED", True),
             session_ready_scheduler_enabled=env_bool(
                 "GATEWAY_SESSION_READY_SCHEDULER_ENABLED",
-                False,
+                True,
             ),
             session_ready_scheduler_namespace=os.getenv(
                 "GATEWAY_SESSION_READY_SCHEDULER_NAMESPACE",

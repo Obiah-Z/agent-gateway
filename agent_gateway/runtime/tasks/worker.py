@@ -97,10 +97,16 @@ class TaskWorkerRuntime:
         broker_handled = await self._run_once_from_broker()
         if broker_handled:
             return True
+        task_types = self.handlers.keys()
+        scheduler = getattr(self.queue, "session_scheduler", None)
+        if scheduler is not None and getattr(scheduler, "enabled", False):
+            task_types = [name for name in self.handlers if name != "agent_inbound"]
+            if not task_types:
+                return False
         blocked_session_keys = self._blocked_session_keys()
         task = self.queue.reserve(
             worker_id=self.worker_id,
-            task_types=self.handlers.keys(),
+            task_types=task_types,
             blocked_session_keys=blocked_session_keys,
         )
         if task is None:

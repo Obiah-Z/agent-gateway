@@ -17,6 +17,27 @@ from agent_gateway.runtime.domain.models import AgentConfig, Binding
 from agent_gateway.runtime.execution.resilience import AuthProfile
 
 
+def test_gateway_settings_default_to_distributed_runtime(monkeypatch) -> None:
+    for name in (
+        "GATEWAY_REDIS_ENABLED",
+        "GATEWAY_POSTGRES_ENABLED",
+        "GATEWAY_DELIVERY_BROKER",
+        "GATEWAY_INBOUND_TASK_QUEUE_ENABLED",
+        "GATEWAY_SESSION_READY_SCHEDULER_ENABLED",
+        "GATEWAY_INBOUND_BROKER",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = GatewaySettings.from_env()
+
+    assert settings.redis_enabled is True
+    assert settings.postgres_enabled is True
+    assert settings.delivery_broker == "rabbitmq"
+    assert settings.inbound_task_queue_enabled is True
+    assert settings.session_ready_scheduler_enabled is True
+    assert settings.inbound_broker == "rabbitmq"
+
+
 def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(

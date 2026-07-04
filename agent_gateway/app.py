@@ -380,6 +380,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
             ),
             worker_id=task_worker.worker_id,
             state_repository=primary_write,
+            use_lane_lock=session_scheduler is None,
             feishu_progress_notice_enabled=settings.feishu_progress_notice_enabled,
             feishu_progress_notice_text=settings.feishu_progress_notice_text,
         ),
