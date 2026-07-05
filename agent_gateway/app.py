@@ -533,7 +533,7 @@ async def serve(app: GatewayApplication) -> None:
         channel_runtime=channel_runtime,
         state_dir=app.settings.feishu_webhook_dir,
         signature_window_seconds=app.settings.feishu_signature_window_seconds,
-        dedup_ttl_seconds=app.settings.feishu_event_dedup_ttl_seconds,
+        dedup_ttl_seconds=app.settings.webhook_event_dedup_ttl_seconds,
         event_store=app.event_store,
         redis_client=app.redis_client,
         state_write_repository=app.state_repository.write,

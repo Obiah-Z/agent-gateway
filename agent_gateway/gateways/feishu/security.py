@@ -1,4 +1,4 @@
-"""飞书请求安全与审计辅助。"""
+"""Webhook 请求安全、去重与飞书审计辅助。"""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-class FeishuEventDeduplicator:
-    """基于本地状态文件的事件去重器。"""
+class WebhookEventDeduplicator:
+    """基于本地状态文件的通用 Webhook 事件去重器。"""
 
     def __init__(self, state_dir: Path, *, ttl_seconds: int = 86400) -> None:
         """初始化实例。"""
@@ -82,15 +82,15 @@ class FeishuEventDeduplicator:
             self._seen.pop(event_id, None)
 
 
-class RedisFeishuEventDeduplicator:
-    """基于 Redis `SET NX EX` 的飞书事件去重器。"""
+class RedisWebhookEventDeduplicator:
+    """基于 Redis `SET NX EX` 的通用 Webhook 事件去重器。"""
 
     def __init__(
         self,
         redis_client: Any,
         *,
         ttl_seconds: int = 86400,
-        key_prefix: str = "gateway:feishu:event",
+        key_prefix: str = "gateway:webhook:event",
     ) -> None:
         """初始化实例。"""
 
@@ -115,8 +115,8 @@ class RedisFeishuEventDeduplicator:
         )
 
 
-class PostgresFeishuEventDeduplicator:
-    """基于 PostgreSQL 唯一键的飞书事件去重器。"""
+class PostgresWebhookEventDeduplicator:
+    """基于 PostgreSQL 唯一键的通用 Webhook 事件去重器。"""
 
     def __init__(self, repository: Any, *, ttl_seconds: int = 86400) -> None:
         """初始化实例。"""
@@ -131,7 +131,7 @@ class PostgresFeishuEventDeduplicator:
             return True
         current = now if now is not None else time.time()
         return bool(
-            self.repository.mark_feishu_event_if_new(
+            self.repository.mark_webhook_event_if_new(
                 event_id,
                 seen_at=current,
                 expires_at=current + self.ttl_seconds,
@@ -139,10 +139,10 @@ class PostgresFeishuEventDeduplicator:
         )
 
 
-class FallbackFeishuEventDeduplicator:
+class FallbackWebhookEventDeduplicator:
     """优先使用主去重器，主去重器失败时回退到本地去重器。"""
 
-    def __init__(self, primary: Any, fallback: FeishuEventDeduplicator) -> None:
+    def __init__(self, primary: Any, fallback: WebhookEventDeduplicator) -> None:
         """初始化实例。"""
 
         self.primary = primary

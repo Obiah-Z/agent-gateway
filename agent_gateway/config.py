@@ -123,7 +123,7 @@ class GatewaySettings:
     feishu_webhook_port: int = 8766
     feishu_webhook_path: str = "/webhooks/feishu"
     feishu_signature_window_seconds: int = 300
-    feishu_event_dedup_ttl_seconds: int = 86400
+    webhook_event_dedup_ttl_seconds: int = 86400
     feishu_progress_notice_enabled: bool = True
     feishu_progress_notice_text: str = "已收到，正在处理。本轮结果生成后会继续推送。"
     feishu_onboarding_bot_link: str = ""
@@ -362,8 +362,8 @@ class GatewaySettings:
             feishu_signature_window_seconds=int(
                 os.getenv("FEISHU_SIGNATURE_WINDOW_SECONDS", "300")
             ),
-            feishu_event_dedup_ttl_seconds=int(
-                os.getenv("FEISHU_EVENT_DEDUP_TTL_SECONDS", "86400")
+            webhook_event_dedup_ttl_seconds=int(
+                os.getenv("GATEWAY_WEBHOOK_EVENT_DEDUP_TTL_SECONDS", "86400")
             ),
             feishu_progress_notice_enabled=env_bool(
                 "GATEWAY_FEISHU_PROGRESS_NOTICE_ENABLED",

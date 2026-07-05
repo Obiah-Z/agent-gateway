@@ -191,6 +191,20 @@ def _build_postgres_schema_migration_statements(
                 ),
             ]
         )
+    if "webhook_dedup_entries" in spec_names:
+        statements.append(
+            """
+DO $$
+BEGIN
+  IF to_regclass('public.feishu_dedup_entries') IS NOT NULL THEN
+    INSERT INTO "webhook_dedup_entries" ("event_id", "seen_at", "expires_at", "metadata")
+    SELECT "event_id", "seen_at", "expires_at", "metadata"
+    FROM "feishu_dedup_entries"
+    ON CONFLICT ("event_id") DO NOTHING;
+  END IF;
+END $$;
+""".strip()
+        )
     return statements
 
 
@@ -444,7 +458,7 @@ class PostgresReadRepository(StateReadRepository):
             return self._list_channels(limit=limit, filters=filters)
         if table == "delivery_entries":
             return self._list_delivery_entries(limit=limit, filters=filters)
-        if table in {"feishu_dedup_entries", "feishu_webhook_events"}:
+        if table in {"webhook_dedup_entries", "feishu_webhook_events"}:
             return self._list_generic_rows(table, limit=limit, filters=filters)
         if table == "feishu_onboarding_sessions":
             return self._list_generic_rows(table, limit=limit, filters=filters)
@@ -590,7 +604,7 @@ class PostgresReadRepository(StateReadRepository):
         if table == "delivery_entries" and filters.get("state"):
             clauses.append("state = %(state)s")
             params["state"] = str(filters["state"])
-        if table == "feishu_dedup_entries":
+        if table == "webhook_dedup_entries":
             event_id = str(filters.get("event_id", ""))
             if event_id:
                 clauses.append("event_id = %(event_id)s")
@@ -965,7 +979,7 @@ class PostgresReadRepository(StateReadRepository):
             "metrics",
             "memory_entries",
             "config_audits",
-            "feishu_dedup_entries",
+            "webhook_dedup_entries",
             "feishu_webhook_events",
             "feishu_onboarding_sessions",
             "channel_offsets",
@@ -994,7 +1008,7 @@ class PostgresReadRepository(StateReadRepository):
             "metrics": "id",
             "memory_entries": "id",
             "config_audits": "id",
-            "feishu_dedup_entries": "event_id",
+            "webhook_dedup_entries": "event_id",
             "feishu_webhook_events": "id",
             "feishu_onboarding_sessions": "session_id",
             "channel_offsets": "key",
@@ -1023,7 +1037,7 @@ class PostgresReadRepository(StateReadRepository):
             "metrics": "timestamp",
             "memory_entries": "created_at",
             "config_audits": "created_at",
-            "feishu_dedup_entries": "seen_at",
+            "webhook_dedup_entries": "seen_at",
             "feishu_webhook_events": "received_at",
             "feishu_onboarding_sessions": "updated_at",
             "channel_offsets": "updated_at",
@@ -1069,8 +1083,8 @@ class PostgresWriteRepository:
             return self._append_runtime_event(row)
         if table == "memory_entries":
             return self._append_memory_entry(row)
-        if table == "feishu_dedup_entries":
-            return self._append_feishu_dedup_entry(row)
+        if table == "webhook_dedup_entries":
+            return self._append_webhook_dedup_entry(row)
         if table == "feishu_webhook_events":
             return self._append_feishu_webhook_event(row)
         if table == "feishu_onboarding_sessions":
@@ -1140,8 +1154,8 @@ class PostgresWriteRepository:
             return self._upsert_runtime_event(row)
         if table == "memory_entries":
             return self._upsert_memory_entry(row)
-        if table == "feishu_dedup_entries":
-            return self._upsert_feishu_dedup_entry(row)
+        if table == "webhook_dedup_entries":
+            return self._upsert_webhook_dedup_entry(row)
         if table == "feishu_webhook_events":
             return self._upsert_feishu_webhook_event(row)
         if table == "feishu_onboarding_sessions":
@@ -1185,8 +1199,8 @@ class PostgresWriteRepository:
             return self._delete_runtime_event(key)
         if table == "memory_entries":
             return self._delete_memory_entry(key)
-        if table == "feishu_dedup_entries":
-            return self._delete_feishu_dedup_entry(key)
+        if table == "webhook_dedup_entries":
+            return self._delete_webhook_dedup_entry(key)
         if table == "feishu_webhook_events":
             return self._delete_feishu_webhook_event(key)
         if table == "feishu_onboarding_sessions":
@@ -1497,14 +1511,17 @@ class PostgresWriteRepository:
         payload = row.get("row", row)
         return payload if isinstance(payload, dict) else None
 
-    def mark_feishu_event_if_new(
+    def mark_webhook_event_if_new(
         self,
         event_id: str,
         *,
         seen_at: float,
         expires_at: float,
     ) -> bool:
-        """原子写入飞书事件去重键，首次写入返回 True。"""
+        """原子写入通用 Webhook 事件去重键，首次写入返回 True。
+
+        初始化 schema 时会把旧库的飞书专属去重表迁移到通用表。
+        """
 
         if not event_id:
             return True
@@ -1516,14 +1533,14 @@ class PostgresWriteRepository:
         }
         sql = (
             "WITH inserted AS ("
-            "INSERT INTO feishu_dedup_entries (event_id, seen_at, expires_at, metadata) "
+            "INSERT INTO webhook_dedup_entries (event_id, seen_at, expires_at, metadata) "
             "SELECT event_id, seen_at, expires_at, metadata "
-            "FROM json_populate_record(NULL::feishu_dedup_entries, %(row)s::json) "
+            "FROM json_populate_record(NULL::webhook_dedup_entries, %(row)s::json) "
             "ON CONFLICT (event_id) DO NOTHING "
             "RETURNING event_id"
             ") SELECT json_build_object('inserted', COUNT(*) > 0) AS row FROM inserted"
         )
-        rows = self.query("feishu_dedup_entries", sql=sql, params={"row": payload})
+        rows = self.query("webhook_dedup_entries", sql=sql, params={"row": payload})
         if not rows:
             return False
         row = rows[0].get("row", rows[0])
@@ -1913,21 +1930,21 @@ class PostgresWriteRepository:
         self.query("memory_entries", sql=sql, params={"id": key})
         return True
 
-    def _append_feishu_dedup_entry(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _append_webhook_dedup_entry(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row)
         if not payload.get("event_id"):
-            raise ValueError("missing primary key for feishu_dedup_entries: event_id")
-        sql = self._build_upsert_sql("feishu_dedup_entries")
-        rows = self.query("feishu_dedup_entries", sql=sql, params={"row": payload})
+            raise ValueError("missing primary key for webhook_dedup_entries: event_id")
+        sql = self._build_upsert_sql("webhook_dedup_entries")
+        rows = self.query("webhook_dedup_entries", sql=sql, params={"row": payload})
         return rows[0] if rows else payload
 
-    def _upsert_feishu_dedup_entry(self, row: dict[str, Any]) -> dict[str, Any]:
-        return self._append_feishu_dedup_entry(row)
+    def _upsert_webhook_dedup_entry(self, row: dict[str, Any]) -> dict[str, Any]:
+        return self._append_webhook_dedup_entry(row)
 
-    def _delete_feishu_dedup_entry(self, key: str) -> bool:
+    def _delete_webhook_dedup_entry(self, key: str) -> bool:
         self.query(
-            "feishu_dedup_entries",
-            sql="DELETE FROM feishu_dedup_entries WHERE event_id = %(id)s",
+            "webhook_dedup_entries",
+            sql="DELETE FROM webhook_dedup_entries WHERE event_id = %(id)s",
             params={"id": key},
         )
         return True
@@ -2239,7 +2256,6 @@ class PostgresWriteRepository:
             "metrics",
             "memory_entries",
             "config_audits",
-            "feishu_dedup_entries",
             "feishu_webhook_events",
             "feishu_onboarding_sessions",
             "channel_offsets",
@@ -2268,7 +2284,7 @@ class PostgresWriteRepository:
             "metrics": "id",
             "memory_entries": "id",
             "config_audits": "id",
-            "feishu_dedup_entries": "event_id",
+            "webhook_dedup_entries": "event_id",
             "feishu_webhook_events": "id",
             "feishu_onboarding_sessions": "session_id",
             "channel_offsets": "key",
@@ -2498,7 +2514,7 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
         indexes=(("entity_type", "entity_id", "created_at"),),
     ),
     PostgresTableSpec(
-        name="feishu_dedup_entries",
+        name="webhook_dedup_entries",
         primary_key="event_id",
         time_column="seen_at",
         columns=("event_id", "seen_at", "expires_at", "metadata"),

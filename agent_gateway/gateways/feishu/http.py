@@ -18,12 +18,12 @@ from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.gateways.wework.channel import WeWorkChannel
 from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime
 from agent_gateway.gateways.feishu.security import (
-    FeishuEventDeduplicator,
     FeishuSignatureVerifier,
     FeishuWebhookAuditLog,
-    FallbackFeishuEventDeduplicator,
-    PostgresFeishuEventDeduplicator,
-    RedisFeishuEventDeduplicator,
+    FallbackWebhookEventDeduplicator,
+    PostgresWebhookEventDeduplicator,
+    RedisWebhookEventDeduplicator,
+    WebhookEventDeduplicator,
     extract_event_id,
 )
 from agent_gateway.runtime.observability.events import RuntimeEventStore, new_correlation_id
@@ -54,22 +54,22 @@ class FeishuWebhookServer:
         self.channels = channels
         self.channel_runtime = channel_runtime
         self.audit = FeishuWebhookAuditLog(state_dir, repository=state_write_repository)
-        local_dedup = FeishuEventDeduplicator(
+        local_dedup = WebhookEventDeduplicator(
             state_dir / "dedup",
             ttl_seconds=dedup_ttl_seconds,
         )
         fallback_dedup: Any = local_dedup
         if state_write_repository is not None and getattr(state_write_repository, "enabled", False):
-            fallback_dedup = FallbackFeishuEventDeduplicator(
-                PostgresFeishuEventDeduplicator(
+            fallback_dedup = FallbackWebhookEventDeduplicator(
+                PostgresWebhookEventDeduplicator(
                     state_write_repository,
                     ttl_seconds=dedup_ttl_seconds,
                 ),
                 local_dedup,
             )
         if redis_client is not None and getattr(redis_client, "enabled", False):
-            self.dedup = FallbackFeishuEventDeduplicator(
-                RedisFeishuEventDeduplicator(
+            self.dedup = FallbackWebhookEventDeduplicator(
+                RedisWebhookEventDeduplicator(
                     redis_client,
                     ttl_seconds=dedup_ttl_seconds,
                 ),

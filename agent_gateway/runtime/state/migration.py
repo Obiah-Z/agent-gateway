@@ -362,15 +362,15 @@ def _backfill_feishu_webhook(
         return
     seen_file = feishu_webhook_dir / "dedup" / "seen-events.jsonl"
     if seen_file.exists():
-        for row in _iter_jsonl(seen_file, buffer.report, "feishu_dedup_entries"):
+        for row in _iter_jsonl(seen_file, buffer.report, "webhook_dedup_entries"):
             event_id = str(row.get("event_id", ""))
             if not event_id:
-                buffer.report.skip("feishu_dedup_entries")
+                buffer.report.skip("webhook_dedup_entries")
                 continue
             seen_at = float(row.get("seen_at", 0.0) or 0.0)
             expires_at = float(row.get("expires_at", 0.0) or 0.0)
             buffer.add(
-                "feishu_dedup_entries",
+                "webhook_dedup_entries",
                 {
                     "event_id": event_id,
                     "seen_at": seen_at,
