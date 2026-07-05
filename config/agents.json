@@ -86,6 +86,33 @@
       }
     },
     {
+      "id": "wework-main",
+      "name": "WeWorkQABot",
+      "personality": "稳重、简洁、适合企业微信办公场景",
+      "model": "",
+      "dm_scope": "per-account-channel-peer",
+      "extra_system": "你是企业微信自建应用接入 Gateway 的办公问答助手。优先用简洁中文直接回答，适合企业内部日常咨询、信息整理和轻量任务协助。除非用户明确要求联网核验、查询长期记忆或执行工具，否则不要主动调用工具；回答默认控制在 3 到 6 句话。",
+      "tool_policy": {
+        "mode": "allowlist",
+        "tool_names": [
+          "get_current_time",
+          "memory_search",
+          "web_search",
+          "fetch_url"
+        ]
+      },
+      "memory_policy": {
+        "enabled": true,
+        "auto_recall": false,
+        "top_k": 2
+      },
+      "prompt_policy": {
+        "prompt_dir": "agents/wework-main",
+        "use_global_files": true,
+        "skills_enabled": true
+      }
+    },
+    {
       "id": "feishu-user-ou-7d7ecc3911714f2cf6905b0d7215ca5e",
       "name": "我的飞书助手",
       "personality": "亲和、简洁、耐心，适合飞书日常对话",

@@ -24,6 +24,14 @@
       "priority": 50
     },
     {
+      "_comment": "企业微信主应用专用路由：来自 account_id=wework-main 的消息会交给企业微信办公问答 Agent。",
+      "agent_id": "wework-main",
+      "tier": 3,
+      "match_key": "account_id",
+      "match_value": "wework-main",
+      "priority": 50
+    },
+    {
       "_comment": "飞书长连接本地快速接入：启用 feishu-long-local 后，消息默认进入 main Agent；后续可改为专属 Agent。",
       "agent_id": "main",
       "tier": 3,
