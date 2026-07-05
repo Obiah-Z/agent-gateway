@@ -18,7 +18,7 @@
 | `session_busy_owner` | `{namespace}:session:{session_key}:busy` | `gateway:tasks:session:agent:main:...:busy` | Redis session scheduler 中某个 session 当前队首任务的 busy owner。 |
 | `delivery_idempotency_key` | 显式 key 或 `sha256(seed)` | `d4e5...` | 出站投递幂等，避免同一回复重复发送。 |
 | `cron_idempotency_key` | `gateway:cron:{job_id}:{schedule_slot}` | `gateway:cron:system-ping:2026-07-02T10:00:00+00:00` | Cron 分布式幂等，避免多实例重复触发。 |
-| `feishu_event_dedup_key` | `gateway:feishu:event:{account_id}:{event_id}` | `gateway:feishu:event:feishu-main:evt-redis-dedup-1` | 飞书事件去重，避免 webhook / 长连接重复处理。 |
+| `webhook_event_dedup_key` | `gateway:webhook:event:{account_id}:{event_id}` | `gateway:webhook:event:feishu-main:evt-redis-dedup-1` | 通用 Webhook 事件去重，覆盖飞书、企业微信等平台重复回调。 |
 | `correlation_id` | `{prefix}_{uuid4.hex[:16]}` | `evt_a1b2c3d4e5f60708` | 串联一次入站、Agent、工具、投递和事件链路。 |
 | `rabbitmq_delivery_queue` | 配置值 | `agent_gateway.delivery.outbound` | 出站投递 RabbitMQ 主队列。 |
 | `rabbitmq_inbound_partition_queue` | `{queue_prefix}.{partition}` | `agent_gateway.inbound.partition.3` | 入站任务按 session 分区后的 RabbitMQ 队列。 |
@@ -290,21 +290,21 @@ gateway:cron:health-check:2026-07-02T12:00:00+00:00
 
 这个 key 用于避免多实例 scheduler 在同一个计划时间重复触发同一个 cron job。
 
-## 飞书事件去重 Key
+## Webhook 事件去重 Key
 
-飞书事件会经过 Redis 去重，测试中可见 key 格式：
+飞书、企业微信等 Webhook 事件会经过 Redis 去重，测试中可见 key 格式：
 
 ```text
-gateway:feishu:event:{account_id}:{event_id}
+gateway:webhook:event:{account_id}:{event_id}
 ```
 
 示例：
 
 ```text
-gateway:feishu:event:feishu-main:evt-redis-dedup-1
+gateway:webhook:event:feishu-main:evt-redis-dedup-1
 ```
 
-这个 key 用于处理飞书 webhook 重试、长连接重连、重复推送等场景。首次 `SET NX EX` 成功时才处理事件，重复事件会被忽略。
+这个 key 用于处理平台 webhook 重试、长连接重连、重复推送等场景。首次 `SET NX EX` 成功时才处理事件，重复事件会被忽略。
 
 ## Correlation ID
 
