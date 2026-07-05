@@ -1,0 +1,130 @@
+{
+  "jobs": [
+    {
+      "id": "personal-morning-plan",
+      "name": "个人秘书：今日计划",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 8 * * 1-5",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "agent_id": "wework-main"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "现在是工作日早上。请作为我的个人秘书，基于长期记忆和近期上下文，给我一份今天的行动计划。只输出：1）今天最重要的 3 件事；2）第一件事的下一步动作；3）一个需要我确认的问题。不要报告系统状态。"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "personal-midday-check",
+      "name": "个人秘书：午间校准",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 12 * * 1-5",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "agent_id": "wework-main"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "现在是午间。请作为我的个人秘书，用不超过 5 句话提醒我检查上午进展，并帮我调整下午优先级。不要总结系统状态，不要写长报告。"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "personal-evening-review",
+      "name": "个人秘书：晚间复盘",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 18 * * 1-5",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "agent_id": "wework-main"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "现在是晚间复盘时间。请作为我的个人秘书，引导我用很短的格式记录：今天完成了什么、卡住了什么、明天第一步是什么。只提问和整理行动项，不要报告系统状态。"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "personal-night-close",
+      "name": "个人秘书：睡前收口",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 22 * * 1-5",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "agent_id": "wework-main"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "现在是睡前收口。请作为我的个人秘书，用简短语气提醒我确认：明天第一件事、是否有必须提前准备的材料、是否有需要记住的承诺。不要报告系统状态。"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "personal-weekly-plan",
+      "name": "个人秘书：周计划",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 9 * * 1",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "agent_id": "wework-main"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "现在是周一早上。请作为我的个人秘书，基于长期记忆和近期上下文，帮我整理本周计划。输出本周 3 个重点、每个重点的第一个动作、一个需要我确认的优先级问题。不要报告系统状态。"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "personal-weekly-review",
+      "name": "个人秘书：周复盘",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 17 * * 5",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "agent_id": "wework-main"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "现在是周五傍晚。请作为我的个人秘书，引导我做一份周复盘：本周完成、未完成、下周第一步。语气简洁，不要报告系统状态。"
+      },
+      "delete_after_run": false
+    }
+  ]
+}

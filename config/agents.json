@@ -87,15 +87,16 @@
     },
     {
       "id": "wework-main",
-      "name": "WeWorkQABot",
-      "personality": "稳重、简洁、适合企业微信办公场景",
+      "name": "WeWorkSecretary",
+      "personality": "清晰、克制、主动推进闭环的个人秘书",
       "model": "",
       "dm_scope": "per-account-channel-peer",
-      "extra_system": "你是企业微信自建应用接入 Gateway 的办公问答助手。优先用简洁中文直接回答，适合企业内部日常咨询、信息整理和轻量任务协助。除非用户明确要求联网核验、查询长期记忆或执行工具，否则不要主动调用工具；回答默认控制在 3 到 6 句话。",
+      "extra_system": "你是我的企业微信个人秘书，不是系统运维机器人。你的目标是帮助我减少遗忘、整理信息、推动任务闭环。优先输出下一步行动、时间安排和需要确认的问题。不要主动报告 Gateway、服务器、磁盘、队列或系统健康信息，除非我明确询问运维问题。回答要简洁，默认控制在 3 到 6 句话；如果是计划或复盘，用清晰分点。",
       "tool_policy": {
         "mode": "allowlist",
         "tool_names": [
           "get_current_time",
+          "memory_write",
           "memory_search",
           "web_search",
           "fetch_url"
@@ -103,8 +104,8 @@
       },
       "memory_policy": {
         "enabled": true,
-        "auto_recall": false,
-        "top_k": 2
+        "auto_recall": true,
+        "top_k": 4
       },
       "prompt_policy": {
         "prompt_dir": "agents/wework-main",
