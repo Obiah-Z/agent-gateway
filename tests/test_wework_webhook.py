@@ -365,6 +365,33 @@ def test_wework_channel_sends_text_message() -> None:
     ]
 
 
+def test_wework_channel_sends_markdown_message_for_markdown_content() -> None:
+    token = "token-123"
+    corp_id = "ww1234567890abcdef"
+    encoding_aes_key = base64.b64encode(b"12345678901234567890123456789012").decode().rstrip("=")
+    account = _build_wework_account(
+        token=token,
+        corp_id=corp_id,
+        encoding_aes_key=encoding_aes_key,
+    )
+    channel = WeWorkChannel(account)
+    fake_http = FakeHTTPClient()
+    channel._http = fake_http
+
+    ok = channel.send(
+        OutboundMessage(
+            channel="wework",
+            to="zhangsan",
+            text="## 今日摘要\n\n- **热量**：1800 kcal\n- 蛋白质充足",
+        )
+    )
+
+    assert ok is True
+    _, _, payload = fake_http.post_calls[0]
+    assert payload["msgtype"] == "markdown"
+    assert payload["markdown"]["content"].startswith("## 今日摘要")
+
+
 def test_wework_channel_refreshes_token_and_retries_on_token_error() -> None:
     token = "token-123"
     corp_id = "ww1234567890abcdef"
