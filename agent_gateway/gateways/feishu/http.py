@@ -164,6 +164,18 @@ class FeishuWebhookServer:
                 )
                 return
 
+            if payload.get("_method") == "POST":
+                wework_channel = self._resolve_wework_channel(request_path)
+                if wework_channel is not None:
+                    await self._handle_wework_callback(
+                        writer,
+                        wework_channel,
+                        query_string=str(payload.get("_query", "")),
+                        body_text=str(payload.get("_body_text", "")),
+                        request_headers=request_headers,
+                    )
+                    return
+
             channel = self._resolve_channel(request_path)
             if channel is None:
                 request_body = payload
@@ -554,13 +566,107 @@ class FeishuWebhookServer:
         body_bytes = await reader.readexactly(content_length) if content_length > 0 else b""
         if not body_bytes:
             return HTTPStatus.BAD_REQUEST, {"error": "empty body"}, headers, body_bytes, path
+        content_type = headers.get("content-type", "")
+        raw_text = ""
         try:
-            body = json.loads(body_bytes.decode("utf-8"))
+            raw_text = body_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raw_text = ""
+        if "xml" in content_type.lower() or raw_text.lstrip().startswith("<"):
+            return (
+                None,
+                {"_method": method, "_query": query_string, "_body_text": raw_text},
+                headers,
+                body_bytes,
+                path,
+            )
+        try:
+            body = json.loads(raw_text)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return HTTPStatus.BAD_REQUEST, {"error": "invalid json"}, headers, body_bytes, path
         if not isinstance(body, dict):
             return HTTPStatus.BAD_REQUEST, {"error": "json body must be object"}, headers, body_bytes, path
         return None, body, headers, body_bytes, path
+
+    async def _handle_wework_callback(
+        self,
+        writer: asyncio.StreamWriter,
+        channel: WeWorkChannel,
+        *,
+        query_string: str,
+        body_text: str,
+        request_headers: dict[str, str],
+    ) -> None:
+        """处理企业微信 POST 消息回调。"""
+
+        del request_headers
+        try:
+            inbound = channel.parse_callback(query_string, body_text)
+        except Exception as exc:
+            print(
+                "[wework] webhook callback rejected:"
+                f" account={channel.account_id}"
+                f" error={exc}"
+            )
+            self._record_wework_event(
+                "wework.event.rejected",
+                status="rejected",
+                message="WeWork callback rejected",
+                account_id=channel.account_id,
+                reason=str(exc),
+            )
+            await self._write_text(writer, HTTPStatus.UNAUTHORIZED, "invalid request")
+            return
+
+        if inbound is None:
+            self._record_wework_event(
+                "wework.event.ignored",
+                status="ignored",
+                message="WeWork callback ignored",
+                account_id=channel.account_id,
+                reason="unsupported or empty callback",
+            )
+            await self._write_text(writer, HTTPStatus.OK, "success")
+            return
+
+        event_id = str(inbound.metadata.get("wework_msg_id", "") or "")
+        dedup_key = f"{channel.account_id}:{event_id}" if event_id else ""
+        if dedup_key and not self.dedup.mark_if_new(dedup_key):
+            print(f"[wework] webhook duplicate ignored: msg_id={event_id}")
+            self._record_wework_event(
+                "wework.event.ignored",
+                status="duplicate",
+                message="WeWork duplicate callback ignored",
+                account_id=channel.account_id,
+                reason="duplicate event",
+            )
+            await self._write_text(writer, HTTPStatus.OK, "success")
+            return
+
+        correlation_id = f"wework_{event_id}" if event_id else new_correlation_id("wework")
+        inbound.metadata["correlation_id"] = correlation_id
+        if event_id:
+            inbound.metadata.setdefault(
+                "idempotency_key",
+                f"wework:{channel.account_id}:msg:{event_id}",
+            )
+        print(
+            "[wework] webhook event accepted:"
+            f" account={inbound.account_id}"
+            f" sender={inbound.sender_id}"
+            f" peer={inbound.peer_id}"
+        )
+        await self.channel_runtime.ingest_external(inbound)
+        self._record_wework_event(
+            "wework.event.accepted",
+            status="ok",
+            message="WeWork event accepted",
+            account_id=channel.account_id,
+            correlation_id=correlation_id,
+            inbound=inbound,
+            metadata={"msg_id": event_id},
+        )
+        await self._write_text(writer, HTTPStatus.OK, "success")
 
     @staticmethod
     def _is_non_event_probe(status: HTTPStatus, payload: dict[str, Any]) -> bool:
@@ -730,22 +836,34 @@ class FeishuWebhookServer:
         status: str,
         message: str,
         account_id: str = "",
+        correlation_id: str = "",
         reason: str = "",
+        inbound: Any = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """记录企业微信回调运行事件。"""
 
         if self.event_store is None:
             return
+        payload = dict(metadata or {})
+        if reason:
+            payload["reason"] = reason
         try:
             self.event_store.record(
                 event_type,
                 status=status,
                 component="wework",
                 message=message,
+                correlation_id=correlation_id,
                 channel="wework",
                 account_id=account_id,
+                peer_id=str(getattr(inbound, "peer_id", "")),
                 error=reason if status in {"error", "rejected"} else "",
-                metadata={"reason": reason} if reason else {},
+                metadata={
+                    **payload,
+                    "sender_id": str(getattr(inbound, "sender_id", "")),
+                    "is_group": bool(getattr(inbound, "is_group", False)),
+                },
             )
         except Exception:
             pass
