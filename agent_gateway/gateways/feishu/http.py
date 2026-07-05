@@ -15,6 +15,7 @@ from typing import Any
 
 from agent_gateway.gateways.feishu.channel import FeishuChannel
 from agent_gateway.gateways.messaging.manager import ChannelManager
+from agent_gateway.gateways.wework.channel import WeWorkChannel
 from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime
 from agent_gateway.gateways.feishu.security import (
     FeishuEventDeduplicator,
@@ -127,6 +128,40 @@ class FeishuWebhookServer:
                     reason=str(payload.get("error", "request rejected")),
                 )
                 await self._write_json(writer, status, payload)
+                return
+
+            if payload.get("_method") == "GET":
+                wework_channel = self._resolve_wework_channel(request_path)
+                if wework_channel is not None:
+                    try:
+                        echo = wework_channel.verify_url(str(payload.get("_query", "")))
+                    except Exception as exc:
+                        self._record_wework_event(
+                            "wework.event.rejected",
+                            status="rejected",
+                            message="WeWork callback URL verification rejected",
+                            account_id=wework_channel.account_id,
+                            reason=str(exc),
+                        )
+                        await self._write_json(
+                            writer,
+                            HTTPStatus.UNAUTHORIZED,
+                            {"error": "wework callback verification failed"},
+                        )
+                        return
+                    self._record_wework_event(
+                        "wework.event.accepted",
+                        status="ok",
+                        message="WeWork callback URL verified",
+                        account_id=wework_channel.account_id,
+                    )
+                    await self._write_text(writer, HTTPStatus.OK, echo)
+                    return
+                await self._write_json(
+                    writer,
+                    HTTPStatus.OK,
+                    {"ok": True, "kind": "feishu-webhook-health"},
+                )
                 return
 
             channel = self._resolve_channel(request_path)
@@ -492,10 +527,10 @@ class FeishuWebhookServer:
         except ValueError:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid request line"}, {}, b"", ""
         method = method.upper()
-        path = raw_path.split("?", 1)[0]
+        path, _, query_string = raw_path.partition("?")
         path = self._normalize_path(path)
         if method in {"GET", "HEAD"}:
-            return HTTPStatus.OK, {"ok": True, "kind": "feishu-webhook-health"}, {}, b"", path
+            return None, {"_method": method, "_query": query_string}, {}, b"", path
         if method == "OPTIONS":
             return HTTPStatus.NO_CONTENT, {"ok": True}, {}, b"", path
         if method != "POST":
@@ -554,6 +589,27 @@ class FeishuWebhookServer:
         writer.write("\r\n".join(head).encode("utf-8") + body)
         await writer.drain()
 
+    async def _write_text(
+        self,
+        writer: asyncio.StreamWriter,
+        status: HTTPStatus,
+        text: str,
+    ) -> None:
+        """返回一个纯文本 HTTP 响应。"""
+
+        body = text.encode("utf-8")
+        reason = status.phrase
+        head = [
+            f"HTTP/1.1 {status.value} {reason}",
+            "Content-Type: text/plain; charset=utf-8",
+            f"Content-Length: {len(body)}",
+            "Connection: close",
+            "",
+            "",
+        ]
+        writer.write("\r\n".join(head).encode("utf-8") + body)
+        await writer.drain()
+
     def _resolve_channel(self, request_path: str = "") -> FeishuChannel | None:
         """根据 webhook path 解析应该使用哪个 Feishu 账号。"""
 
@@ -569,13 +625,30 @@ class FeishuWebhookServer:
                 return channel
         return None
 
+    def _resolve_wework_channel(self, request_path: str = "") -> WeWorkChannel | None:
+        """根据 webhook path 解析应该使用哪个企业微信账号。"""
+
+        normalized_path = self._normalize_path(request_path)
+        for account, channel in self.channels.iter_channels():
+            if account.channel != "wework" or not isinstance(channel, WeWorkChannel):
+                continue
+            raw_path = str(account.config.get("webhook_path", "") or "/webhooks/wework")
+            if self._normalize_path(raw_path) == normalized_path:
+                return channel
+        return None
+
     def list_webhook_paths(self) -> list[tuple[str, str]]:
         """暴露当前所有 Feishu 账号对应的 webhook path。"""
 
-        return [
+        paths = [
             (channel.account_id, self._channel_webhook_path(channel))
             for _account, channel in self._iter_feishu_channels()
         ]
+        for account, channel in self.channels.iter_channels():
+            if account.channel == "wework" and isinstance(channel, WeWorkChannel):
+                raw_path = str(account.config.get("webhook_path", "") or "/webhooks/wework")
+                paths.append((channel.account_id, self._normalize_path(raw_path)))
+        return paths
 
     def _iter_feishu_channels(self) -> list[tuple[object, FeishuChannel]]:
         """遍历已注册的 Feishu 通道实例。"""
@@ -646,6 +719,33 @@ class FeishuWebhookServer:
                     "sender_id": str(getattr(inbound, "sender_id", "")),
                     "is_group": bool(getattr(inbound, "is_group", False)),
                 },
+            )
+        except Exception:
+            pass
+
+    def _record_wework_event(
+        self,
+        event_type: str,
+        *,
+        status: str,
+        message: str,
+        account_id: str = "",
+        reason: str = "",
+    ) -> None:
+        """记录企业微信回调运行事件。"""
+
+        if self.event_store is None:
+            return
+        try:
+            self.event_store.record(
+                event_type,
+                status=status,
+                component="wework",
+                message=message,
+                channel="wework",
+                account_id=account_id,
+                error=reason if status in {"error", "rejected"} else "",
+                metadata={"reason": reason} if reason else {},
             )
         except Exception:
             pass

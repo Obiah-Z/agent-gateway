@@ -611,7 +611,7 @@ async def serve(app: GatewayApplication) -> None:
         if webhook_paths:
             for account_id, path in webhook_paths:
                 print(
-                    "Feishu webhook on "
+                    "Webhook on "
                     f"http://{app.settings.feishu_webhook_host}:{app.settings.feishu_webhook_port}"
                     f"{path} account={account_id}"
                 )

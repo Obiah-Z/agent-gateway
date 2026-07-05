@@ -19,6 +19,21 @@
       }
     },
     {
+      "channel": "wework",
+      "account_id": "wework-main",
+      "enabled": true,
+      "label": "WeWork Bot",
+      "token_env": "WEWORK_CALLBACK_TOKEN",
+      "config": {
+        "corp_id_env": "WEWORK_CORP_ID",
+        "agent_id_env": "WEWORK_AGENT_ID",
+        "secret_env": "WEWORK_SECRET",
+        "encoding_aes_key_env": "WEWORK_ENCODING_AES_KEY",
+        "webhook_path": "/webhooks/wework",
+        "api_base": "https://qyapi.weixin.qq.com"
+      }
+    },
+    {
       "channel": "feishu",
       "account_id": "feishu-main",
       "enabled": true,

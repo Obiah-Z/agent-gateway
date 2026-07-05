@@ -5,6 +5,7 @@ from agent_gateway.gateways.messaging.cli import CLIChannel
 from agent_gateway.gateways.feishu.channel import FeishuChannel
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.gateways.messaging.telegram import TelegramChannel
+from agent_gateway.gateways.wework.channel import WeWorkChannel
 from agent_gateway.config import GatewaySettings
 from typing import Any
 
@@ -56,4 +57,6 @@ def _build_channel(
             state_read_repository=state_read_repository,
             state_write_repository=state_write_repository,
         )
+    if account.channel == "wework":
+        return WeWorkChannel(account)
     return None
