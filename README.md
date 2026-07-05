@@ -7,11 +7,10 @@
 ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-reliable%20queue-FF6600?style=flat-square&logo=rabbitmq&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-state%20store-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
-![WeCom](https://img.shields.io/badge/WeCom-personal%20secretary-07C160?style=flat-square&logo=wechat&logoColor=white)
 
 AI Agent Gateway 是一个基于 Python 构建的智能体运行网关。它把企业微信、飞书、CLI、Telegram 等入口统一成后台任务，将 Agent 执行、工具调用、会话状态、可靠投递、定时任务和运行观测拆成清晰的后端模块，用 Redis、RabbitMQ、PostgreSQL 支撑多 worker 场景下的去重、顺序、重试、恢复和可观测性。
 
-`多通道入口` · `Agent Loop` · `个人秘书` · `会话调度` · `可靠投递` · `运维观测`
+`多通道入口` · `Agent Loop`  · `会话调度` · `可靠投递` · `运维观测`
 
 ## 目录
 
