@@ -658,7 +658,7 @@ def test_feishu_webhook_server_deduplicates_events_with_redis(tmp_path: Path) ->
         assert second_status == 202
         assert second_payload == {"ok": True, "duplicate": True}
         assert len(runtime.messages) == 1
-        assert "gateway:feishu:event:feishu-main:evt-redis-dedup-1" in redis_connection.values
+        assert "gateway:webhook:event:feishu-main:evt-redis-dedup-1" in redis_connection.values
 
     asyncio.run(_run())
 

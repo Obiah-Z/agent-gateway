@@ -24,7 +24,7 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
         "metrics",
         "memory_entries",
         "config_audits",
-        "feishu_dedup_entries",
+        "webhook_dedup_entries",
         "feishu_webhook_events",
         "feishu_onboarding_sessions",
         "channel_offsets",
@@ -69,7 +69,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert '"tool_policy" JSONB NOT NULL DEFAULT' in sql
     assert 'CREATE TABLE IF NOT EXISTS "sessions"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "delivery_entries"' in sql
-    assert 'CREATE TABLE IF NOT EXISTS "feishu_dedup_entries"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "webhook_dedup_entries"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "feishu_webhook_events"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "feishu_onboarding_sessions"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "channel_offsets"' in sql
@@ -98,6 +98,7 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE INDEX IF NOT EXISTS "idx_session_lane_events_session_key_occurred_at"' in sql
     assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_by"' in sql
     assert 'ALTER TABLE "delivery_entries" ADD COLUMN IF NOT EXISTS "locked_at"' in sql
+    assert 'FROM "feishu_dedup_entries"' in sql
 
 
 def test_postgres_schema_sql_migrates_old_delivery_queue_tables() -> None:
@@ -435,7 +436,7 @@ def test_postgres_write_delivery_entry_normalizes_state(monkeypatch) -> None:
     assert row["updated_at"] > 0
 
 
-def test_postgres_write_feishu_event_dedup_uses_insert_do_nothing(monkeypatch) -> None:
+def test_postgres_write_webhook_event_dedup_uses_insert_do_nothing(monkeypatch) -> None:
     captured = []
 
     def fake_query(self, table, *, sql, params=None):
@@ -445,10 +446,10 @@ def test_postgres_write_feishu_event_dedup_uses_insert_do_nothing(monkeypatch) -
     monkeypatch.setattr(PostgresWriteRepository, "query", fake_query)
     repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
 
-    assert repo.mark_feishu_event_if_new("account:evt-1", seen_at=1.0, expires_at=61.0) is True
+    assert repo.mark_webhook_event_if_new("account:evt-1", seen_at=1.0, expires_at=61.0) is True
 
     table, sql, params = captured[0]
-    assert table == "feishu_dedup_entries"
+    assert table == "webhook_dedup_entries"
     assert "ON CONFLICT (event_id) DO NOTHING" in sql
     assert params["row"]["event_id"] == "account:evt-1"
     assert params["row"]["expires_at"] == 61.0

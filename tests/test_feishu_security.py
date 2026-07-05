@@ -3,12 +3,12 @@ import json
 from pathlib import Path
 
 from agent_gateway.gateways.feishu.security import (
-    FeishuEventDeduplicator,
     FeishuWebhookAuditLog,
-    FallbackFeishuEventDeduplicator,
-    PostgresFeishuEventDeduplicator,
-    RedisFeishuEventDeduplicator,
     FeishuSignatureVerifier,
+    FallbackWebhookEventDeduplicator,
+    PostgresWebhookEventDeduplicator,
+    RedisWebhookEventDeduplicator,
+    WebhookEventDeduplicator,
     extract_event_id,
 )
 
@@ -55,8 +55,8 @@ def test_feishu_signature_verifier_rejects_expired_signature() -> None:
     assert reason == "signature timestamp expired"
 
 
-def test_feishu_event_deduplicator_marks_duplicates(tmp_path: Path) -> None:
-    dedup = FeishuEventDeduplicator(tmp_path / "dedup", ttl_seconds=60)
+def test_webhook_event_deduplicator_marks_duplicates(tmp_path: Path) -> None:
+    dedup = WebhookEventDeduplicator(tmp_path / "dedup", ttl_seconds=60)
 
     first = dedup.mark_if_new("evt-1", now=1000.0)
     second = dedup.mark_if_new("evt-1", now=1001.0)
@@ -102,7 +102,7 @@ class FakeFeishuStateRepository:
         self.events: list[dict[str, object]] = []
         self.dedup_calls: list[dict[str, object]] = []
 
-    def mark_feishu_event_if_new(self, event_id: str, *, seen_at: float, expires_at: float) -> bool:
+    def mark_webhook_event_if_new(self, event_id: str, *, seen_at: float, expires_at: float) -> bool:
         self.dedup_calls.append({"event_id": event_id, "seen_at": seen_at, "expires_at": expires_at})
         if self.fail:
             raise RuntimeError("postgres unavailable")
@@ -118,27 +118,27 @@ class FakeFeishuStateRepository:
         return row
 
 
-def test_redis_feishu_event_deduplicator_uses_set_nx_ex() -> None:
+def test_redis_webhook_event_deduplicator_uses_set_nx_ex() -> None:
     connection = FakeRedisConnection()
-    dedup = RedisFeishuEventDeduplicator(
+    dedup = RedisWebhookEventDeduplicator(
         FakeRedisClient(connection),
         ttl_seconds=60,
-        key_prefix="test:feishu:event",
+        key_prefix="test:webhook:event",
     )
 
     assert dedup.mark_if_new("account:evt-1") is True
     assert dedup.mark_if_new("account:evt-1") is False
     assert connection.calls[0] == {
-        "key": "test:feishu:event:account:evt-1",
+        "key": "test:webhook:event:account:evt-1",
         "value": "1",
         "nx": True,
         "ex": 60,
     }
 
 
-def test_postgres_feishu_event_deduplicator_marks_duplicates() -> None:
+def test_postgres_webhook_event_deduplicator_marks_duplicates() -> None:
     repo = FakeFeishuStateRepository()
-    dedup = PostgresFeishuEventDeduplicator(repo, ttl_seconds=60)
+    dedup = PostgresWebhookEventDeduplicator(repo, ttl_seconds=60)
 
     assert dedup.mark_if_new("account:evt-1", now=1000.0) is True
     assert dedup.mark_if_new("account:evt-1", now=1001.0) is False
@@ -149,25 +149,25 @@ def test_postgres_feishu_event_deduplicator_marks_duplicates() -> None:
     }
 
 
-def test_fallback_feishu_event_deduplicator_uses_local_state_when_redis_fails(
+def test_fallback_webhook_event_deduplicator_uses_local_state_when_redis_fails(
     tmp_path: Path,
 ) -> None:
-    dedup = FallbackFeishuEventDeduplicator(
+    dedup = FallbackWebhookEventDeduplicator(
         FakeRedisClient(fail=True),
-        FeishuEventDeduplicator(tmp_path / "dedup", ttl_seconds=60),
+        WebhookEventDeduplicator(tmp_path / "dedup", ttl_seconds=60),
     )
 
     assert dedup.mark_if_new("evt-1", now=1000.0) is True
     assert dedup.mark_if_new("evt-1", now=1001.0) is False
 
 
-def test_fallback_feishu_event_deduplicator_uses_postgres_before_local(
+def test_fallback_webhook_event_deduplicator_uses_postgres_before_local(
     tmp_path: Path,
 ) -> None:
     repo = FakeFeishuStateRepository()
-    dedup = FallbackFeishuEventDeduplicator(
-        PostgresFeishuEventDeduplicator(repo, ttl_seconds=60),
-        FeishuEventDeduplicator(tmp_path / "dedup", ttl_seconds=60),
+    dedup = FallbackWebhookEventDeduplicator(
+        PostgresWebhookEventDeduplicator(repo, ttl_seconds=60),
+        WebhookEventDeduplicator(tmp_path / "dedup", ttl_seconds=60),
     )
 
     assert dedup.mark_if_new("evt-1", now=1000.0) is True

@@ -264,7 +264,7 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
     assert "sessions" in tables
     assert "tasks" in tables
     assert "delivery_entries" in tables
-    assert "feishu_dedup_entries" in tables
+    assert "webhook_dedup_entries" in tables
     assert "feishu_webhook_events" in tables
     assert "feishu_onboarding_sessions" in tables
     assert "channel_offsets" in tables
@@ -275,7 +275,7 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
     assert "memory_entries" in tables
     assert report.written["sessions"] == 1
     assert report.written["delivery_entries"] == 2
-    assert report.written["feishu_dedup_entries"] == 1
+    assert report.written["webhook_dedup_entries"] == 1
     assert report.written["feishu_webhook_events"] == 1
     assert report.written["feishu_onboarding_sessions"] == 1
     assert report.written["channel_offsets"] == 1
@@ -292,13 +292,13 @@ def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> 
         for row in rows
     ]
     assert {row["state"] for row in delivery_rows} == {"pending", "failed"}
-    feishu_dedup_rows = [
+    webhook_dedup_rows = [
         row
         for table, rows, _ in writer.batches
-        if table == "feishu_dedup_entries"
+        if table == "webhook_dedup_entries"
         for row in rows
     ]
-    assert feishu_dedup_rows[0]["event_id"] == "default:evt-1"
+    assert webhook_dedup_rows[0]["event_id"] == "default:evt-1"
     feishu_audit_rows = [
         row
         for table, rows, _ in writer.batches
