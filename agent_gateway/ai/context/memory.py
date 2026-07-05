@@ -37,28 +37,38 @@ class MemoryStore:
         self.read_backend: Any | None = None
         self.write_backend: Any | None = None
 
-    def write_memory(self, content: str, category: str = "general") -> str:
+    def write_memory(self, content: str, category: str = "general", *, user_scope: str = "") -> str:
         """把一条新记忆追加到当天的 daily memory 文件。"""
 
-        self._write_primary(content, category)
-        self.write_memory_to_disk(content, category=category)
+        normalized_scope = self.normalize_scope(user_scope)
+        self._write_primary(content, category, user_scope=normalized_scope)
+        self.write_memory_to_disk(content, category=category, user_scope=normalized_scope)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return f"Memory saved to {today}.jsonl ({category})"
+        scope_suffix = f" scope={normalized_scope}" if normalized_scope else " scope=global"
+        return f"Memory saved to {today}.jsonl ({category}, {scope_suffix})"
 
-    def write_memory_to_disk(self, content: str, category: str = "general") -> None:
+    def write_memory_to_disk(
+        self,
+        content: str,
+        category: str = "general",
+        *,
+        user_scope: str = "",
+    ) -> None:
         """仅写入本地 daily memory，不触发备份镜像。"""
 
+        normalized_scope = self.normalize_scope(user_scope)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = self.daily_dir / f"{today}.jsonl"
+        path = self._daily_dir_for_scope(normalized_scope) / f"{today}.jsonl"
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "category": category,
             "content": content,
+            "user_scope": normalized_scope,
         }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def _mirror(self, content: str, category: str) -> None:
+    def _mirror(self, content: str, category: str, *, user_scope: str = "") -> None:
         """把记忆镜像到备份 sink。"""
 
         sink = getattr(self, "backup_sink", None)
@@ -68,11 +78,11 @@ class MemoryStore:
         if method is None:
             return
         try:
-            method(content, category=category)
+            method(content, category=category, user_scope=user_scope)
         except Exception:
             pass
 
-    def _write_primary(self, content: str, category: str) -> None:
+    def _write_primary(self, content: str, category: str, *, user_scope: str = "") -> None:
         """优先写入数据库主存储；不可用时退回备份 sink。"""
 
         backend = getattr(self, "write_backend", None)
@@ -80,22 +90,30 @@ class MemoryStore:
             method = getattr(backend, "write_memory", None)
             if method is not None:
                 try:
-                    method(content, category=category)
+                    method(content, category=category, user_scope=user_scope)
                     return
                 except Exception:
                     pass
-        self._mirror(content, category)
+        self._mirror(content, category, user_scope=user_scope)
 
-    def write_memory_migration(self, content: str, category: str = "general") -> None:
+    def write_memory_migration(
+        self,
+        content: str,
+        category: str = "general",
+        *,
+        user_scope: str = "",
+    ) -> None:
         """把记忆写入迁移专用目录。"""
 
+        normalized_scope = self.normalize_scope(user_scope)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = self.migration_root / "daily" / f"{today}.jsonl"
+        path = self.migration_root / self._scope_dir_name(normalized_scope) / "daily" / f"{today}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "category": category,
             "content": content,
+            "user_scope": normalized_scope,
         }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -141,7 +159,7 @@ class MemoryStore:
     def _get_stats_from_disk(self) -> dict[str, int]:
         """从本地 daily JSONL 统计记忆体量，作为数据库不可用时的兜底。"""
 
-        daily_files = list(self.daily_dir.glob("*.jsonl")) if self.daily_dir.is_dir() else []
+        daily_files = self._iter_daily_files()
         total_entries = 0
         for path in daily_files:
             try:
@@ -168,9 +186,10 @@ class MemoryStore:
             except Exception:
                 pass
         rows: list[dict[str, Any]] = []
-        if not self.daily_dir.is_dir():
+        daily_files = self._iter_daily_files()
+        if not daily_files:
             return rows
-        for path in sorted(self.daily_dir.glob("*.jsonl"), reverse=True):
+        for path in sorted(daily_files, reverse=True):
             try:
                 for line in path.read_text(encoding="utf-8").splitlines():
                     raw = line.strip()
@@ -182,7 +201,9 @@ class MemoryStore:
                             "ts": str(entry.get("ts", "")),
                             "category": str(entry.get("category", "")),
                             "content": str(entry.get("content", "")),
+                            "user_scope": str(entry.get("user_scope", "")),
                             "file": path.name,
+                            "path": str(path.relative_to(self.workspace_root)),
                         }
                     )
             except (OSError, json.JSONDecodeError):
@@ -190,13 +211,19 @@ class MemoryStore:
         rows.sort(key=lambda row: row.get("ts", ""), reverse=True)
         return rows[:safe_limit]
 
-    def hybrid_search(self, query: str, top_k: int = 5) -> list[MemorySearchResult]:
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int = 5,
+        *,
+        user_scope: str = "",
+    ) -> list[MemorySearchResult]:
         """执行混合检索。
 
         先做关键词检索和哈希向量检索，再合并分数、做时间衰减和去冗余重排。
         """
 
-        chunks = self._load_all_chunks()
+        chunks = self._load_all_chunks(user_scope=self.normalize_scope(user_scope))
         if not chunks:
             return []
         keyword_results = self._keyword_search(query, chunks, top_k=10)
@@ -228,23 +255,23 @@ class MemoryStore:
             for result in results
         )
 
-    def auto_recall(self, query: str, top_k: int = 3) -> str:
+    def auto_recall(self, query: str, top_k: int = 3, *, user_scope: str = "") -> str:
         """为一次对话自动召回最相关的记忆片段。"""
 
-        results = self.hybrid_search(query, top_k=top_k)
+        results = self.hybrid_search(query, top_k=top_k, user_scope=user_scope)
         if not results:
             return ""
         return "\n".join(f"- [{result.path}] {result.snippet}" for result in results)
 
-    def _load_all_chunks(self) -> list[dict[str, str]]:
+    def _load_all_chunks(self, *, user_scope: str = "") -> list[dict[str, str]]:
         """把长期记忆和日记忆切成统一检索块。"""
 
-        backend_chunks = self._load_chunks_from_backend()
+        backend_chunks = self._load_chunks_from_backend(user_scope=user_scope)
         if backend_chunks:
             return backend_chunks
-        return self._load_chunks_from_disk()
+        return self._load_chunks_from_disk(user_scope=user_scope)
 
-    def _load_chunks_from_backend(self) -> list[dict[str, str]]:
+    def _load_chunks_from_backend(self, *, user_scope: str = "") -> list[dict[str, str]]:
         """优先从 PostgreSQL memory_entries 构造检索块。"""
 
         backend = self.read_backend
@@ -256,6 +283,8 @@ class MemoryStore:
             return []
         chunks: list[dict[str, str]] = []
         for row in rows:
+            if not self._row_matches_scope(row, user_scope):
+                continue
             content = str(row.get("content", "")).strip()
             if not content:
                 continue
@@ -265,7 +294,7 @@ class MemoryStore:
             chunks.append({"path": label, "text": content})
         return chunks
 
-    def _load_chunks_from_disk(self) -> list[dict[str, str]]:
+    def _load_chunks_from_disk(self, *, user_scope: str = "") -> list[dict[str, str]]:
         """从本地 MEMORY.md 和 daily JSONL 构造检索块，作为数据库不可用时的兜底。"""
 
         chunks: list[dict[str, str]] = []
@@ -276,8 +305,9 @@ class MemoryStore:
                 if text:
                     chunks.append({"path": "MEMORY.md", "text": text})
 
-        if self.daily_dir.is_dir():
-            for path in sorted(self.daily_dir.glob("*.jsonl")):
+        daily_dir = self._daily_dir_for_scope(user_scope)
+        if daily_dir.is_dir():
+            for path in sorted(daily_dir.glob("*.jsonl")):
                 try:
                     for line in path.read_text(encoding="utf-8").splitlines():
                         row = line.strip()
@@ -293,6 +323,44 @@ class MemoryStore:
                 except (OSError, json.JSONDecodeError):
                     continue
         return chunks
+
+    @staticmethod
+    def normalize_scope(user_scope: str) -> str:
+        """规范化记忆作用域，空值代表全局记忆。"""
+
+        return " ".join(str(user_scope or "").strip().split())
+
+    @staticmethod
+    def _scope_dir_name(user_scope: str) -> str:
+        if not user_scope:
+            return "global"
+        slug = re.sub(r"[^a-zA-Z0-9._=-]+", "_", user_scope.strip())
+        slug = slug.strip("._-")[:160]
+        return slug or "global"
+
+    def _daily_dir_for_scope(self, user_scope: str) -> Path:
+        if not user_scope:
+            return self.daily_dir
+        path = self.workspace_root / "memory" / "users" / self._scope_dir_name(user_scope) / "daily"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _iter_daily_files(self) -> list[Path]:
+        files: list[Path] = []
+        if self.daily_dir.is_dir():
+            files.extend(self.daily_dir.glob("*.jsonl"))
+        users_root = self.workspace_root / "memory" / "users"
+        if users_root.is_dir():
+            files.extend(users_root.glob("*/daily/*.jsonl"))
+        return list(files)
+
+    @staticmethod
+    def _row_matches_scope(row: dict[str, Any], user_scope: str) -> bool:
+        metadata = row.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        row_scope = str(metadata.get("user_scope") or row.get("user_scope") or "").strip()
+        return row_scope == user_scope
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -483,6 +551,28 @@ class MemoryStore:
 
 
 def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> None:
+    def memory_write_handler(
+        content: str,
+        category: str = "general",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = user_scope or str((__runtime_context or {}).get("memory_user_scope", ""))
+        return memory_store.write_memory(content, category, user_scope=scope)
+
+    def memory_search_handler(
+        query: str,
+        top_k: int = 5,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = user_scope or str((__runtime_context or {}).get("memory_user_scope", ""))
+        return memory_store.format_results(
+            memory_store.hybrid_search(query, top_k=top_k, user_scope=scope)
+        )
+
     registry.register(
         RegisteredTool(
             name="memory_write",
@@ -495,9 +585,7 @@ def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> 
                 },
                 "required": ["content"],
             },
-            handler=lambda content, category="general": memory_store.write_memory(
-                content, category
-            ),
+            handler=memory_write_handler,
             tags=("memory", "write"),
         )
     )
@@ -513,9 +601,7 @@ def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> 
                 },
                 "required": ["query"],
             },
-            handler=lambda query, top_k=5: memory_store.format_results(
-                memory_store.hybrid_search(query, top_k=top_k)
-            ),
+            handler=memory_search_handler,
             tags=("memory", "read"),
         )
     )

@@ -394,7 +394,7 @@ def test_postgres_write_runtime_rows_use_upsert(monkeypatch) -> None:
 
     repo.write_task({"id": "task-1", "task_type": "cron", "source": "test"})
     repo.write_event({"event_id": "evt-1", "timestamp": 1.0, "type": "test", "status": "ok", "component": "test", "message": "ok"})
-    repo.write_memory("remember", category="note")
+    repo.write_memory("remember", category="note", user_scope="user:alice")
     repo.write_metric({"timestamp": 1.0, "runtime": {}})
     repo.write_alert({"timestamp": 1.0, "message": "alert"})
 
@@ -405,6 +405,8 @@ def test_postgres_write_runtime_rows_use_upsert(monkeypatch) -> None:
         "metrics",
         "errors",
     ]
+    memory_row = calls[2][1]
+    assert memory_row["metadata"]["user_scope"] == "user:alice"
 
 
 def test_postgres_write_delivery_entry_normalizes_state(monkeypatch) -> None:

@@ -119,6 +119,7 @@ class PromptAssembler:
         """构建一次模型调用的 system prompt。"""
 
         runtime_context = runtime_context or {}
+        memory_user_scope = str(runtime_context.get("memory_user_scope", "")).strip()
         bootstrap = self.loader.load(
             use_global_files=agent.use_global_prompt_files,
             prompt_dir=agent.resolved_prompt_dir(),
@@ -136,7 +137,11 @@ class PromptAssembler:
             and agent.should_auto_recall_memory()
         ):
             # 自动记忆召回只在 Agent 配置允许时发生，避免所有后台任务都注入过多历史。
-            memory_context = self.memory_store.auto_recall(user_text, top_k=agent.memory_top_k)
+            memory_context = self.memory_store.auto_recall(
+                user_text,
+                top_k=agent.memory_top_k,
+                user_scope=memory_user_scope,
+            )
 
         identity = bootstrap.get("IDENTITY.md", "").strip()
         sections.append(identity or "You are a helpful personal AI assistant.")
@@ -165,7 +170,8 @@ class PromptAssembler:
                 sections.append("## Memory\n\n" + "\n\n".join(memory_parts))
             sections.append(
                 "## Memory Instructions\n\n"
-                "- Use memory_write to save important user facts and preferences.\n"
+                "- Use memory_write to save important user facts and preferences for the current user only.\n"
+                "- Memory tools are automatically scoped to the current user/session by the gateway.\n"
                 "- Reference remembered facts naturally when useful.\n"
                 "- Use memory_search when you need precise recall from past context."
             )

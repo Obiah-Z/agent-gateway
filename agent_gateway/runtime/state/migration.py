@@ -43,7 +43,7 @@ class MigrationSink(Protocol):
     def write_event(self, event: dict[str, Any]) -> None:
         """备份单条运行事件。"""
 
-    def write_memory(self, content: str, category: str = "general") -> None:
+    def write_memory(self, content: str, category: str = "general", *, user_scope: str = "") -> None:
         """备份单条记忆。"""
 
 
@@ -808,10 +808,10 @@ class CompositeMigrationSink(MigrationSink):
             except Exception:
                 continue
 
-    def write_memory(self, content: str, category: str = "general") -> None:
+    def write_memory(self, content: str, category: str = "general", *, user_scope: str = "") -> None:
         for sink in self.sinks:
             try:
-                sink.write_memory(content, category=category)
+                sink.write_memory(content, category=category, user_scope=user_scope)
             except Exception:
                 continue
 
@@ -842,5 +842,5 @@ class LocalMigrationSink(MigrationSink):
     def write_event(self, event: dict[str, Any]) -> None:
         self.events.write_event_row(event)
 
-    def write_memory(self, content: str, category: str = "general") -> None:
-        self.memory.write_memory_migration(content, category=category)
+    def write_memory(self, content: str, category: str = "general", *, user_scope: str = "") -> None:
+        self.memory.write_memory_migration(content, category=category, user_scope=user_scope)

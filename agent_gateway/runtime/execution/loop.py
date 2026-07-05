@@ -20,6 +20,19 @@ from agent_gateway.runtime.state.context import ContextGuard
 from agent_gateway.runtime.state.store import SessionStore
 
 
+def memory_scope_from_session_key(session_key: str) -> str:
+    """从 session_key 推导用户记忆作用域，避免不同用户共享个人记忆。"""
+
+    raw = str(session_key or "").strip()
+    if not raw:
+        return ""
+    parts = raw.split(":")
+    if len(parts) >= 3 and parts[0] == "agent":
+        # 去掉 agent_id，让同一用户在多个 Agent 间可以共享个人记忆。
+        return "user:" + ":".join(parts[2:])
+    return raw
+
+
 class AgentLoopRunner:
     """执行一个 Agent 的对话轮次或后台任务轮次。"""
 
@@ -102,6 +115,7 @@ class AgentLoopRunner:
         disabled = {name for name in (disabled_tools or []) if name}
         if disabled:
             allowed_tools = [name for name in allowed_tools if name not in disabled]
+        memory_user_scope = memory_scope_from_session_key(session_key)
 
         # PromptAssembler 会按 Agent 策略合并 workspace 文件、记忆召回和技能说明。
         system_prompt = self.prompt_assembler.build(
@@ -114,16 +128,18 @@ class AgentLoopRunner:
                 "channel": channel,
                 "model": agent.effective_model(self.settings.model_id),
                 "disabled_tools": ", ".join(sorted(disabled)) if disabled else "",
+                "memory_user_scope": memory_user_scope,
             },
         )
 
         self.resilience_runner.event_store = self.event_store
-        self.resilience_runner.runtime_context = {
+        runtime_context = {
             "agent_id": agent_id,
             "session_key": session_key,
             "channel": channel,
             "correlation_id": correlation_id,
             "disabled_tools": sorted(disabled),
+            "memory_user_scope": memory_user_scope,
         }
         try:
             result = await asyncio.to_thread(
@@ -132,6 +148,7 @@ class AgentLoopRunner:
                 messages,
                 model=agent.effective_model(self.settings.model_id),
                 allowed_tools=allowed_tools,
+                runtime_context=runtime_context,
             )
             # ResilienceRunner 返回的是经过工具调用闭环后的完整历史，用它覆盖会话文件。
             self.sessions.rewrite_messages(agent_id, session_key, result.messages)

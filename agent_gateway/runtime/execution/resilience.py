@@ -207,10 +207,12 @@ class ResilienceRunner:
         *,
         model: str,
         allowed_tools: list[str] | None = None,
+        runtime_context: dict[str, Any] | None = None,
     ) -> ResilienceResult:
         """执行一次完整的模型调用闭环。"""
 
         current_messages = self._clone_messages(messages)
+        current_context = dict(runtime_context or self.runtime_context or {})
         attempted_profiles: set[str] = set()
         candidate_models = [model, *self.settings.fallback_models]
         failures: list[AttemptFailure] = []
@@ -232,6 +234,7 @@ class ResilienceRunner:
                             system=system,
                             messages=layer_messages,
                             allowed_tools=allowed_tools,
+                            runtime_context=current_context,
                         )
                         self.profile_manager.mark_success(profile)
                         return ResilienceResult(
@@ -290,10 +293,12 @@ class ResilienceRunner:
         system: str,
         messages: list[dict[str, Any]],
         allowed_tools: list[str] | None = None,
+        runtime_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """执行单次 profile/model 尝试，并处理 tool_use 循环。"""
 
         current_messages = self._clone_messages(messages)
+        current_context = dict(runtime_context or {})
         tool_calls: list[str] = []
         tool_schemas = (
             self.tools.schemas_for(allowed_tools)
@@ -341,9 +346,14 @@ class ResilienceRunner:
                     status="ok",
                     message=f"Tool call started: {tool_name}",
                     tool_name=tool_name,
+                    runtime_context=current_context,
                 )
                 try:
-                    result = self.tools.dispatch(tool_name, block.get("input", {}))
+                    result = self.tools.dispatch(
+                        tool_name,
+                        block.get("input", {}),
+                        runtime_context=current_context,
+                    )
                 except Exception as exc:
                     self._record_tool_event(
                         "tool.call.failed",
@@ -352,6 +362,7 @@ class ResilienceRunner:
                         tool_name=tool_name,
                         error=exc,
                         metadata={"duration_ms": round((time.time() - started_at) * 1000, 1)},
+                        runtime_context=current_context,
                     )
                     raise
                 self._record_tool_event(
@@ -363,6 +374,7 @@ class ResilienceRunner:
                         "duration_ms": round((time.time() - started_at) * 1000, 1),
                         "result_length": len(str(result)),
                     },
+                    runtime_context=current_context,
                 )
                 tool_results.append(
                     {
@@ -450,10 +462,11 @@ class ResilienceRunner:
         tool_name: str,
         error: str | Exception = "",
         metadata: dict[str, Any] | None = None,
+        runtime_context: dict[str, Any] | None = None,
     ) -> None:
         if self.event_store is None:
             return
-        context = self.runtime_context
+        context = dict(runtime_context or self.runtime_context or {})
         payload = dict(metadata or {})
         payload["tool_name"] = tool_name
         try:

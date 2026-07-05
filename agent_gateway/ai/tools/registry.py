@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -88,13 +89,23 @@ class ToolRegistry:
                 names.append(tool.name)
         return names
 
-    def dispatch(self, name: str, tool_input: dict[str, Any]) -> str:
+    def dispatch(
+        self,
+        name: str,
+        tool_input: dict[str, Any],
+        *,
+        runtime_context: dict[str, Any] | None = None,
+    ) -> str:
         """执行指定工具，并把异常转成模型可读错误文本。"""
 
         tool = self.get(name)
         if tool is None:
             return f"Error: unknown tool '{name}'"
         try:
-            return tool.handler(**tool_input)
+            call_input = dict(tool_input)
+            signature = inspect.signature(tool.handler)
+            if "__runtime_context" in signature.parameters:
+                call_input["__runtime_context"] = dict(runtime_context or {})
+            return tool.handler(**call_input)
         except Exception as exc:
             return f"Error: {name} failed: {exc}"

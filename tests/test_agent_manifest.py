@@ -26,11 +26,13 @@ class FakeResilienceRunner:
         self.last_allowed_tools = None
         self.last_system_prompt = ""
         self.last_model = ""
+        self.last_runtime_context = {}
 
-    def run(self, system: str, messages, *, model: str, allowed_tools=None):
+    def run(self, system: str, messages, *, model: str, allowed_tools=None, runtime_context=None):
         self.last_system_prompt = system
         self.last_model = model
         self.last_allowed_tools = allowed_tools
+        self.last_runtime_context = dict(runtime_context or {})
         return type(
             "Result",
             (),
@@ -190,6 +192,7 @@ def test_agent_loop_runner_applies_tool_policy(tmp_path: Path) -> None:
     assert reply.text == "ok"
     assert resilience.last_model == "deepseek-v4-pro"
     assert resilience.last_allowed_tools == ["read_file", "memory_search"]
+    assert resilience.last_runtime_context["memory_user_scope"] == "user:main"
 
 
 def test_agent_loop_runner_excludes_disabled_tools(tmp_path: Path) -> None:

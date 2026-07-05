@@ -33,6 +33,25 @@ def test_memory_store_lists_recent_entries(tmp_path: Path) -> None:
     assert rows[0]["file"].endswith(".jsonl")
 
 
+def test_memory_store_isolates_daily_memory_by_user_scope(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    store = MemoryStore(workspace)
+    store.write_memory("Alice likes oats for breakfast.", "preference", user_scope="user:alice")
+    store.write_memory("Bob prefers rice for lunch.", "preference", user_scope="user:bob")
+
+    alice_results = store.hybrid_search("oats breakfast", top_k=3, user_scope="user:alice")
+    bob_results = store.hybrid_search("oats breakfast", top_k=3, user_scope="user:bob")
+    recent = store.recent_entries(limit=10)
+
+    assert any("Alice likes oats" in result.snippet for result in alice_results)
+    assert not any("Alice likes oats" in result.snippet for result in bob_results)
+    assert (workspace / "memory" / "users" / "user_alice" / "daily").is_dir()
+    assert (workspace / "memory" / "users" / "user_bob" / "daily").is_dir()
+    assert {row["user_scope"] for row in recent} == {"user:alice", "user:bob"}
+
+
 def test_memory_store_hybrid_search_prefers_read_backend(tmp_path: Path) -> None:
     class FakeReadBackend:
         def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
@@ -56,6 +75,37 @@ def test_memory_store_hybrid_search_prefers_read_backend(tmp_path: Path) -> None
     assert results
     assert "PostgreSQL memory recall" in results[0].snippet
     assert results[0].path == "postgres [database]"
+
+
+def test_memory_store_filters_backend_rows_by_user_scope(tmp_path: Path) -> None:
+    class FakeReadBackend:
+        def list(self, table: str, *, limit: int = 50, cursor: str = "", filters=None):
+            assert table == "memory_entries"
+            return [
+                {
+                    "content": "Alice database memory.",
+                    "category": "database",
+                    "source_file": "postgres",
+                    "metadata": {"user_scope": "user:alice"},
+                },
+                {
+                    "content": "Bob database memory.",
+                    "category": "database",
+                    "source_file": "postgres",
+                    "metadata": {"user_scope": "user:bob"},
+                },
+            ]
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = MemoryStore(workspace)
+    store.read_backend = FakeReadBackend()
+
+    results = store.hybrid_search("database memory", top_k=5, user_scope="user:alice")
+
+    snippets = " ".join(result.snippet for result in results)
+    assert "Alice database memory" in snippets
+    assert "Bob database memory" not in snippets
 
 
 def test_memory_store_stats_prefers_read_backend(tmp_path: Path) -> None:

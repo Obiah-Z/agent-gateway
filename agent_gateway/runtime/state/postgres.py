@@ -1391,10 +1391,17 @@ class PostgresWriteRepository:
         payload = dict(event)
         return self.upsert("runtime_events", payload)
 
-    def write_memory(self, content: str, category: str = "general") -> dict[str, Any]:
+    def write_memory(
+        self,
+        content: str,
+        category: str = "general",
+        *,
+        user_scope: str = "",
+    ) -> dict[str, Any]:
         """兼容本地 MemoryStore 的镜像入口。"""
 
         now = time.time()
+        normalized_scope = str(user_scope or "").strip()
         payload = {
             "id": f"mem_{int(now * 1000)}",
             "agent_id": "",
@@ -1403,7 +1410,7 @@ class PostgresWriteRepository:
             "source_file": "",
             "created_at": now,
             "updated_at": now,
-            "metadata": {},
+            "metadata": {"user_scope": normalized_scope} if normalized_scope else {},
         }
         return self.upsert("memory_entries", payload)
 
