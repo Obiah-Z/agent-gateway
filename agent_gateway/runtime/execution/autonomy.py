@@ -331,6 +331,7 @@ class CronService:
         task_queue: LocalTaskQueue | None = None,
         state_read_repository: Any = None,
         state_write_repository: Any = None,
+        diet_store: Any = None,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
@@ -341,6 +342,7 @@ class CronService:
         self.task_queue = task_queue
         self.state_read_repository = state_read_repository
         self.state_write_repository = state_write_repository
+        self.diet_store = diet_store
         self.cron_file = settings.workspace_root / "CRON.json"
         self.run_log_dir = settings.workspace_root / "cron"
         self.run_log_dir.mkdir(parents=True, exist_ok=True)
@@ -630,6 +632,8 @@ class CronService:
                     payload,
                     correlation_id=correlation_id,
                 )
+            elif kind in {"diet_plan_generate", "nutrition_day_summary", "meal_reminder"}:
+                output, status = self._run_diet_job(job, payload, now=now)
             else:
                 output = f"[unknown kind: {kind}]"
                 status = "error"
@@ -855,6 +859,155 @@ class CronService:
             write_backend=self.state_write_repository,
         )
 
+    def _run_diet_job(self, job: CronJob, payload: dict[str, Any], *, now: float) -> tuple[str, str]:
+        """执行饮食专用 Cron，避免只靠 prompt 保证用户隔离和提醒跳过。"""
+
+        if self.diet_store is None:
+            raise RuntimeError("diet store is not configured")
+        kind = str(payload.get("kind", ""))
+        user_scope = str(payload.get("user_scope", "")).strip()
+        if not user_scope:
+            raise ValueError("diet cron payload requires user_scope")
+        target_date = self._diet_payload_date(job, payload, now=now)
+        idempotency_key = self._diet_idempotency_key(kind, user_scope, target_date, payload)
+
+        if kind == "meal_reminder":
+            meal_type = str(payload.get("meal_type", "") or "unknown").strip() or "unknown"
+            stage = str(payload.get("stage", "") or "after").strip() or "after"
+            if stage == "after" and self._diet_meal_exists(user_scope, target_date, meal_type):
+                return f"{target_date} {self._diet_meal_label(meal_type)}已记录，跳过提醒。", "skipped"
+            if not self._claim_diet_action(idempotency_key):
+                return f"duplicate diet reminder skipped: {idempotency_key}", "skipped"
+            return self._format_diet_reminder(user_scope, target_date, meal_type, stage), "ok"
+
+        if not self._claim_diet_action(idempotency_key):
+            return f"duplicate diet job skipped: {idempotency_key}", "skipped"
+        if kind == "diet_plan_generate":
+            plan = self.diet_store.generate_plan(user_scope, plan_date=target_date)
+            return self._format_diet_plan(plan), "ok"
+        if kind == "nutrition_day_summary":
+            summary = self.diet_store.summarize_day(user_scope, date=target_date)
+            return self._format_diet_summary(summary), "ok"
+        raise RuntimeError(f"unsupported diet cron kind: {kind}")
+
+    def _diet_payload_date(self, job: CronJob, payload: dict[str, Any], *, now: float) -> str:
+        """解析饮食任务日期；未指定时按任务时区取当天。"""
+
+        raw_date = str(payload.get("date") or payload.get("plan_date") or "").strip()
+        if raw_date and raw_date != "today":
+            return raw_date
+        tz_name = str(payload.get("tz") or job.schedule_config.get("tz") or "Asia/Shanghai")
+        try:
+            zone = ZoneInfo(tz_name)
+        except Exception:
+            zone = timezone.utc
+        return datetime.fromtimestamp(now, tz=zone).date().isoformat()
+
+    def _diet_idempotency_key(
+        self,
+        kind: str,
+        user_scope: str,
+        target_date: str,
+        payload: dict[str, Any],
+    ) -> str:
+        explicit = str(payload.get("idempotency_key", "")).strip()
+        if explicit:
+            return explicit.format(user_scope=user_scope, date=target_date)
+        if kind == "diet_plan_generate":
+            return f"diet-plan:{user_scope}:{target_date}"
+        if kind == "nutrition_day_summary":
+            return f"nutrition-summary:{user_scope}:{target_date}"
+        meal_type = str(payload.get("meal_type", "") or "unknown").strip() or "unknown"
+        stage = str(payload.get("stage", "") or "after").strip() or "after"
+        return f"meal-reminder:{user_scope}:{target_date}:{meal_type}:{stage}"
+
+    def _claim_diet_action(self, key: str) -> bool:
+        """用 Redis 幂等键保护饮食主动任务；未启用 Redis 时退化为允许执行。"""
+
+        if self.redis_client is None or not getattr(self.redis_client, "enabled", False):
+            return True
+        try:
+            return bool(
+                self.redis_client.mark_once(
+                    f"gateway:diet:{key}",
+                    ttl_seconds=3 * 86400,
+                )
+            )
+        except Exception:
+            return True
+
+    def _diet_meal_exists(self, user_scope: str, target_date: str, meal_type: str) -> bool:
+        meals = self.diet_store.list_meal_logs(user_scope, meal_date=target_date, limit=100)
+        return any(str(row.get("meal_type", "")).strip() == meal_type for row in meals)
+
+    @staticmethod
+    def _diet_meal_label(meal_type: str) -> str:
+        return {
+            "breakfast": "早餐",
+            "lunch": "午餐",
+            "dinner": "晚餐",
+            "snack": "加餐",
+        }.get(meal_type, meal_type or "餐食")
+
+    def _format_diet_reminder(
+        self,
+        user_scope: str,
+        target_date: str,
+        meal_type: str,
+        stage: str,
+    ) -> str:
+        label = self._diet_meal_label(meal_type)
+        if stage == "before":
+            plan = self.diet_store.get_plan(user_scope, plan_date=target_date) or {}
+            meals = plan.get("meals", {}) if isinstance(plan.get("meals"), dict) else {}
+            options = meals.get(meal_type, []) if isinstance(meals, dict) else []
+            option_text = "；".join(str(item) for item in list(options)[:2]) if options else "按今天计划选择清淡、足量蛋白质的一餐"
+            return f"{label}提醒：{option_text}。吃完后可以直接回复实际吃了什么，我会帮你记录。"
+        return f"{label}补录提醒：如果已经吃完，请回复“{label}吃了……”；我会记录并估算热量。"
+
+    @staticmethod
+    def _format_diet_plan(plan: dict[str, Any]) -> str:
+        meals = plan.get("meals", {}) if isinstance(plan.get("meals"), dict) else {}
+
+        def meal_line(key: str, label: str) -> str:
+            options = meals.get(key, []) if isinstance(meals, dict) else []
+            text = "；".join(str(item) for item in list(options)[:2]) if options else "暂无建议"
+            return f"{label}：{text}"
+
+        return "\n".join(
+            [
+                "今日饮食计划",
+                f"日期：{plan.get('plan_date', '')}",
+                f"目标热量：约 {float(plan.get('target_calories', 0) or 0):.0f} kcal",
+                meal_line("breakfast", "早餐"),
+                meal_line("lunch", "午餐"),
+                meal_line("dinner", "晚餐"),
+                meal_line("snack", "加餐"),
+                f"准备建议：{plan.get('shopping_tips', '')}",
+            ]
+        )
+
+    @staticmethod
+    def _format_diet_summary(summary: dict[str, Any]) -> str:
+        metadata = summary.get("metadata", {}) if isinstance(summary.get("metadata"), dict) else {}
+        missing = metadata.get("missing_meals", [])
+        missing_text = "、".join(str(item) for item in missing) if missing else "无"
+        target = float(summary.get("target_calories", 0) or 0)
+        actual = float(summary.get("actual_calories", 0) or 0)
+        delta = actual - target
+        delta_label = "高于" if delta > 0 else "低于"
+        return "\n".join(
+            [
+                "今日饮食汇总",
+                f"日期：{summary.get('date', '')}",
+                f"摄入热量：约 {actual:.0f} kcal；目标约 {target:.0f} kcal，{delta_label}目标 {abs(delta):.0f} kcal",
+                f"蛋白质/碳水/脂肪：{float(summary.get('protein_g', 0) or 0):.0f}g / {float(summary.get('carbs_g', 0) or 0):.0f}g / {float(summary.get('fat_g', 0) or 0):.0f}g",
+                f"缺失餐次：{missing_text}",
+                str(summary.get("summary_text", "") or "记录不足时，以上结果只作为粗略估算。"),
+                "明天建议：优先保证蛋白质和蔬菜，主食按一拳左右控制。",
+            ]
+        )
+
     async def _run_github_skill_digest(
         self,
         job: CronJob,
@@ -1067,6 +1220,7 @@ class AutonomyRuntime:
         task_queue: LocalTaskQueue | None = None,
         state_read_repository: Any = None,
         state_write_repository: Any = None,
+        diet_store: Any = None,
     ) -> None:
         target = ProactiveTarget(
             channel=settings.proactive_channel,
@@ -1091,6 +1245,7 @@ class AutonomyRuntime:
             task_queue=task_queue,
             state_read_repository=state_read_repository,
             state_write_repository=state_write_repository,
+            diet_store=diet_store,
         )
 
     def set_channels(self, channels: ChannelManager) -> None:

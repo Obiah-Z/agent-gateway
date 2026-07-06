@@ -1,0 +1,192 @@
+{
+  "jobs": [
+    {
+      "id": "daily-diet-plan",
+      "name": "每日饮食计划",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 6 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "diet_plan_generate",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "daily-nutrition-summary",
+      "name": "晚间热量汇总",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 22 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "nutrition_day_summary",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "breakfast-before-reminder",
+      "name": "早餐计划提醒",
+      "enabled": false,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 7 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "meal_reminder",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today",
+        "meal_type": "breakfast",
+        "stage": "before"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "breakfast-after-reminder",
+      "name": "早餐补录提醒",
+      "enabled": false,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 9 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "meal_reminder",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today",
+        "meal_type": "breakfast",
+        "stage": "after"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "lunch-before-reminder",
+      "name": "午餐计划提醒",
+      "enabled": false,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 11 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "meal_reminder",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today",
+        "meal_type": "lunch",
+        "stage": "before"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "lunch-after-reminder",
+      "name": "午餐补录提醒",
+      "enabled": false,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 13 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "meal_reminder",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today",
+        "meal_type": "lunch",
+        "stage": "after"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "dinner-before-reminder",
+      "name": "晚餐计划提醒",
+      "enabled": false,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 17 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "meal_reminder",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today",
+        "meal_type": "dinner",
+        "stage": "before"
+      },
+      "delete_after_run": false
+    },
+    {
+      "id": "dinner-after-reminder",
+      "name": "晚餐补录提醒",
+      "enabled": false,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 20 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "target": {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "agent_id": "diet-assistant-dd5bf625"
+      },
+      "payload": {
+        "kind": "meal_reminder",
+        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "date": "today",
+        "meal_type": "dinner",
+        "stage": "after"
+      },
+      "delete_after_run": false
+    }
+  ]
+}

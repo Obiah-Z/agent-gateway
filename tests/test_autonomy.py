@@ -7,6 +7,7 @@ from agent_gateway.gateways.messaging.base import Channel, ChannelAccount
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.domain.models import AgentReply, OutboundMessage, ProactiveTarget
+from agent_gateway.ai.context.diet import DietStore
 from agent_gateway.ai.news.models import NewsItem, NewsSourceConfig
 from agent_gateway.runtime.execution.autonomy import CronService, HeartbeatService
 from agent_gateway.runtime.tasks import LocalTaskQueue, LocalTaskStore, TaskWorkerRuntime
@@ -445,6 +446,153 @@ def test_cron_service_uses_redis_idempotency_for_scheduled_tick(tmp_path: Path) 
     assert len(redis_client.calls) == 2
     assert redis_client.calls[0]["key"].startswith("gateway:cron:system-ping:")
     assert redis_client.calls[0]["ttl_seconds"] == 120
+
+
+def test_cron_service_runs_diet_plan_with_user_scope_and_idempotency(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "daily-diet-plan",
+                "name": "每日饮食计划",
+                "enabled": True,
+                "schedule": {
+                    "kind": "cron",
+                    "expr": "0 6 * * *",
+                    "tz": "Asia/Shanghai",
+                },
+                "target": {
+                    "channel": "cli",
+                    "account_id": "cli-local",
+                    "peer_id": "diet-user",
+                    "agent_id": "diet-assistant",
+                },
+                "payload": {
+                    "kind": "diet_plan_generate",
+                    "user_scope": "user:wework:diet",
+                    "date": "2026-07-06",
+                },
+            }
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="cli-user",
+        proactive_agent_id="main",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    redis_client = FakeRedisOnceClient()
+    diet_store = DietStore(workspace)
+    diet_store.update_profile(
+        "user:wework:diet",
+        height_cm=178,
+        current_weight_kg=82,
+        target_weight_kg=75,
+    )
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "cli-user", "main"),
+        redis_client=redis_client,
+        diet_store=diet_store,
+    )
+
+    asyncio.run(cron._run_job(cron.jobs[0], 1783290000.0))
+    asyncio.run(cron._run_job(cron.jobs[0], 1783290000.0))
+
+    assert len(channel.sent) == 1
+    assert "[每日饮食计划] 今日饮食计划" in channel.sent[0]
+    assert "目标热量" in channel.sent[0]
+    assert diet_store.get_plan("user:wework:diet", plan_date="2026-07-06") is not None
+    diet_claims = [call for call in redis_client.calls if str(call["key"]).startswith("gateway:diet:diet-plan:")]
+    assert len(diet_claims) == 2
+
+
+def test_cron_service_runs_diet_summary_and_skips_logged_meal_reminder(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cron_payload = {
+        "jobs": [
+            {
+                "id": "daily-nutrition-summary",
+                "name": "晚间热量汇总",
+                "enabled": True,
+                "schedule": {
+                    "kind": "cron",
+                    "expr": "0 22 * * *",
+                    "tz": "Asia/Shanghai",
+                },
+                "payload": {
+                    "kind": "nutrition_day_summary",
+                    "user_scope": "user:wework:diet",
+                    "date": "2026-07-06",
+                },
+            },
+            {
+                "id": "lunch-after-reminder",
+                "name": "午餐补录提醒",
+                "enabled": True,
+                "schedule": {
+                    "kind": "cron",
+                    "expr": "30 13 * * *",
+                    "tz": "Asia/Shanghai",
+                },
+                "payload": {
+                    "kind": "meal_reminder",
+                    "user_scope": "user:wework:diet",
+                    "date": "2026-07-06",
+                    "meal_type": "lunch",
+                    "stage": "after",
+                },
+            },
+        ]
+    }
+    (workspace / "CRON.json").write_text(json.dumps(cron_payload), encoding="utf-8")
+    settings = GatewaySettings(
+        workspace_root=workspace,
+        data_dir=tmp_path / "data",
+        config_dir=tmp_path / "config",
+        proactive_channel="cli",
+        proactive_account_id="cli-local",
+        proactive_peer_id="diet-user",
+        proactive_agent_id="diet-assistant",
+    )
+    settings.ensure_directories()
+    manager, channel = _build_channel_manager()
+    diet_store = DietStore(workspace)
+    diet_store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭一份",
+        estimated_calories=780,
+        protein_g=35,
+        carbs_g=90,
+        fat_g=20,
+    )
+    cron = CronService(
+        settings,
+        FakeDispatcher("unused"),
+        manager,
+        ProactiveTarget("cli", "cli-local", "diet-user", "diet-assistant"),
+        diet_store=diet_store,
+    )
+
+    asyncio.run(cron._run_job(cron._resolve_job("daily-nutrition-summary"), 1783346400.0))
+    asyncio.run(cron._run_job(cron._resolve_job("lunch-after-reminder"), 1783315800.0))
+
+    assert len(channel.sent) == 1
+    assert "[晚间热量汇总] 今日饮食汇总" in channel.sent[0]
+    assert "780 kcal" in channel.sent[0]
+    assert diet_store.get_day_summary("user:wework:diet", date="2026-07-06") is not None
 
 
 def test_cron_manual_trigger_does_not_use_redis_idempotency(tmp_path: Path) -> None:
