@@ -114,6 +114,40 @@
       }
     },
     {
+      "id": "diet-assistant-dd5bf625",
+      "name": "个人饮食减肥助手",
+      "personality": "克制、实用、长期陪伴的个人饮食与体重管理助手",
+      "model": "",
+      "dm_scope": "per-account-channel-peer",
+      "extra_system": "你只服务当前指定用户，目标是帮助用户记录饮食、估算热量、形成可执行的减脂计划。不要做医疗诊断，不要建议极端节食。每日餐食、体重和计划必须通过饮食工具写入结构化数据；只有长期稳定偏好才允许写入 memory。回复要简洁、具体、可执行。",
+      "tool_policy": {
+        "mode": "allowlist",
+        "tool_names": [
+          "get_current_time",
+          "profile_get",
+          "profile_update",
+          "meal_log_add",
+          "meal_log_list",
+          "nutrition_day_summary",
+          "diet_plan_generate",
+          "weight_log_add",
+          "progress_summary",
+          "memory_search",
+          "memory_write"
+        ]
+      },
+      "memory_policy": {
+        "enabled": true,
+        "auto_recall": true,
+        "top_k": 4
+      },
+      "prompt_policy": {
+        "prompt_dir": "agents/diet-assistant-dd5bf625",
+        "use_global_files": true,
+        "skills_enabled": true
+      }
+    },
+    {
       "id": "feishu-user-ou-7d7ecc3911714f2cf6905b0d7215ca5e",
       "name": "我的飞书助手",
       "personality": "亲和、简洁、耐心，适合飞书日常对话",

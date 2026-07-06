@@ -9,6 +9,14 @@
   },
   "bindings": [
     {
+      "_comment": "指定企业微信用户的个人饮食减肥 Agent。只匹配该用户 peer_id，避免影响 wework-main 账号下的其他用户。",
+      "agent_id": "diet-assistant-dd5bf625",
+      "tier": 1,
+      "match_key": "peer_id",
+      "match_value": "dd5bf6254c5b565c1f59edf6b29aa30c",
+      "priority": 150
+    },
+    {
       "agent_id": "feishu-user-ou-7d7ecc3911714f2cf6905b0d7215ca5e",
       "tier": 1,
       "match_key": "peer_id",
