@@ -12,6 +12,7 @@ services:
       - single
 
   gateway-api:
+    image: agent-gateway:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -52,6 +53,7 @@ services:
     restart: unless-stopped
 
   gateway-worker:
+    image: agent-gateway:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -89,6 +91,7 @@ services:
     restart: unless-stopped
 
   gateway-delivery:
+    image: agent-gateway:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -122,6 +125,7 @@ services:
     restart: unless-stopped
 
   gateway-scheduler:
+    image: agent-gateway:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -155,6 +159,7 @@ services:
     restart: unless-stopped
 
   gateway-dashboard:
+    image: agent-gateway:local
     build:
       context: .
       dockerfile: Dockerfile

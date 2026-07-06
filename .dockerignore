@@ -1,15 +1,25 @@
 .git
+.idea
 .venv
 __pycache__
 .pytest_cache
 .mypy_cache
 .ruff_cache
 .load-test-tmp
+agent_gateway.egg-info
 
 .env
 .env.*
 
+config/
 data/
+deploy/
+doc/
+plan/
+tests/
+workspace/
+PROJECT_PLAN.md
+docker-compose*.yml
 workspace/reports/load-tests/
 workspace/delivery-queue/
 

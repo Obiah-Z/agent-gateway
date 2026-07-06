@@ -7,6 +7,7 @@
 # three explicitly named workers so Dashboard/lane owner metadata remains clear.
 
 x-gateway-worker-common: &gateway-worker-common
+  image: agent-gateway:local
   build:
     context: .
     dockerfile: Dockerfile

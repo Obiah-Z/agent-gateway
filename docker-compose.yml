@@ -46,6 +46,7 @@ services:
     restart: unless-stopped
 
   gateway:
+    image: agent-gateway:local
     build:
       context: .
       dockerfile: Dockerfile

@@ -36,13 +36,15 @@ ENV PIP_DEFAULT_TIMEOUT=120 \
     PIP_RETRIES=20
 
 COPY pyproject.toml README.md ./
+
+RUN python -c "import tomllib; project = tomllib.load(open('pyproject.toml', 'rb'))['project']; print('\\n'.join(project.get('dependencies', [])))" > /tmp/requirements.txt \
+    && pip install --no-input -i https://pypi.tuna.tsinghua.edu.cn/simple --default-timeout 600 --retries 20 -r /tmp/requirements.txt
+
 COPY agent_gateway ./agent_gateway
 COPY scripts ./scripts
 
-RUN pip install --no-input -i https://pypi.tuna.tsinghua.edu.cn/simple --default-timeout 600 --retries 20 -e .
-
-COPY config ./config
-COPY workspace ./workspace
+RUN printf '%s\n' '#!/usr/bin/env sh' 'exec python -m agent_gateway.app "$@"' > /usr/local/bin/agent-gateway \
+    && chmod +x /usr/local/bin/agent-gateway
 
 EXPOSE 8765 8766 8780
 
