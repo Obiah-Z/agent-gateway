@@ -399,6 +399,138 @@ def test_gateway_server_exposes_recent_memory_writes(tmp_path) -> None:
     assert result["items"][0]["content"] == "cron should not write this often"
 
 
+def test_gateway_server_exposes_recent_diet_records(tmp_path) -> None:
+    class FakeStateRepository:
+        def get(self, table, key):
+            if table == "user_profiles" and key == "user:wework:test":
+                return {
+                    "user_scope": key,
+                    "height_cm": 178,
+                    "current_weight_kg": 82,
+                    "target_weight_kg": 75,
+                }
+            return None
+
+        def list(self, table, *, limit=50, cursor="", filters=None):
+            del cursor, limit
+            if table == "meal_logs":
+                return [
+                    {
+                        "id": "meal-1",
+                        "user_scope": filters["user_scope"],
+                        "meal_date": "2026-07-06",
+                        "meal_type": "lunch",
+                        "raw_text": "牛肉饭一份",
+                        "estimated_calories": 780,
+                    }
+                ]
+            if table == "diet_plans":
+                return []
+            if table == "daily_nutrition_summaries":
+                return [{"id": "sum-1", "user_scope": filters["user_scope"], "actual_calories": 780}]
+            if table == "weight_logs":
+                return [{"id": "weight-1", "user_scope": filters["user_scope"], "weight_kg": 81.5}]
+            return []
+
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    agents = AgentManager()
+    bindings = BindingTable()
+    profiles = ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")])
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=ChannelManager(),
+        state_repository=FakeStateRepository(),
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(server._m_diet_recent({"limit": 10, "user_scope": "user:wework:test"}))
+
+    assert result["configured"] is True
+    assert result["count"] == 2
+    assert result["meals"][0]["raw_text"] == "牛肉饭一份"
+    assert result["summaries"][0]["actual_calories"] == 780
+    assert result["today_status"]["user_scope"] == "user:wework:test"
+    assert result["today_status"]["actual_calories"] == 780
+    assert result["today_status"]["latest_weight"]["weight_kg"] == 81.5
+
+
+def test_gateway_server_collapses_recent_diet_without_user_scope(tmp_path) -> None:
+    class FakeStateRepository:
+        def list(self, table, *, limit=50, cursor="", filters=None):
+            del cursor, limit, filters
+            if table == "meal_logs":
+                return [
+                    {
+                        "id": "meal-1",
+                        "user_scope": "user:wework:alice",
+                        "meal_date": "2026-07-06",
+                        "meal_type": "lunch",
+                        "raw_text": "牛肉饭一份",
+                        "logged_at": 10.0,
+                    },
+                    {
+                        "id": "meal-2",
+                        "user_scope": "user:wework:bob",
+                        "meal_date": "2026-07-06",
+                        "meal_type": "dinner",
+                        "raw_text": "鸡胸沙拉",
+                        "logged_at": 20.0,
+                    },
+                ]
+            if table == "diet_plans":
+                return [
+                    {
+                        "id": "plan-1",
+                        "user_scope": "user:wework:alice",
+                        "plan_date": "2026-07-06",
+                        "created_at": 15.0,
+                    }
+                ]
+            if table == "daily_nutrition_summaries":
+                return []
+            return []
+
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")]),
+        channels=ChannelManager(),
+        state_repository=FakeStateRepository(),
+    )
+
+    result = control.recent_diet(limit=10)
+
+    assert result["requires_user_scope"] is True
+    assert result["meals"] == []
+    assert result["plans"] == []
+    assert result["summaries"] == []
+    assert [row["user_scope"] for row in result["users"]] == ["user:wework:bob", "user:wework:alice"]
+    alice = next(row for row in result["users"] if row["user_scope"] == "user:wework:alice")
+    assert alice["meal_count"] == 1
+    assert alice["plan_count"] == 1
+
+
 def test_gateway_server_exposes_metrics_methods(tmp_path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",

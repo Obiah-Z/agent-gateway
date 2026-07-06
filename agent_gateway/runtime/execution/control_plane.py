@@ -33,6 +33,7 @@ from agent_gateway.runtime.tasks.models import TaskInstance, TaskStatus
 from agent_gateway.runtime.tasks.queue import LocalTaskQueue
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.runtime.state.postgres import PostgresWriteRepository, check_postgres_schema
+from agent_gateway.ai.context.diet import DietStore
 from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
@@ -774,6 +775,96 @@ class GatewayControlPlane:
             "configured": True,
             "limit": max(1, min(int(limit), 200)),
         }
+
+    def recent_diet(self, *, limit: int = 20, user_scope: str = "", date: str = "") -> dict[str, Any]:
+        """查看最近饮食 Agent 产生的结构化记录。"""
+
+        safe_limit = max(1, min(int(limit), 100))
+        filters = {"user_scope": user_scope} if user_scope else {}
+        if self.state_repository is None:
+            return {
+                "meals": [],
+                "plans": [],
+                "summaries": [],
+                "users": [],
+                "count": 0,
+                "configured": False,
+                "limit": safe_limit,
+            }
+        if not user_scope:
+            meals = self.state_repository.list("meal_logs", limit=safe_limit, filters={})
+            plans = self.state_repository.list("diet_plans", limit=safe_limit, filters={})
+            summaries = self.state_repository.list(
+                "daily_nutrition_summaries",
+                limit=safe_limit,
+                filters={},
+            )
+            users = self._diet_user_summaries([*meals, *plans, *summaries])
+            return {
+                "meals": [],
+                "plans": [],
+                "summaries": [],
+                "users": users,
+                "count": len(users),
+                "configured": True,
+                "limit": safe_limit,
+                "user_scope": "",
+                "requires_user_scope": True,
+            }
+        meals = self.state_repository.list("meal_logs", limit=safe_limit, filters=filters)
+        plans = self.state_repository.list("diet_plans", limit=safe_limit, filters=filters)
+        summaries = self.state_repository.list(
+            "daily_nutrition_summaries",
+            limit=safe_limit,
+            filters=filters,
+        )
+        diet_store = DietStore(self.settings.workspace_root, read_backend=self.state_repository)
+        today_status = diet_store.today_status(user_scope, date=date)
+        return {
+            "meals": meals,
+            "plans": plans,
+            "summaries": summaries,
+            "users": [],
+            "today_status": today_status,
+            "count": len(meals) + len(plans) + len(summaries),
+            "configured": True,
+            "limit": safe_limit,
+            "user_scope": user_scope,
+        }
+
+    @staticmethod
+    def _diet_user_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """把跨用户饮食明细折叠成用户级摘要，避免 Dashboard 混合展示私密记录。"""
+
+        users: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            user_scope = str(row.get("user_scope", "")).strip()
+            if not user_scope:
+                continue
+            item = users.setdefault(
+                user_scope,
+                {
+                    "user_scope": user_scope,
+                    "meal_count": 0,
+                    "plan_count": 0,
+                    "summary_count": 0,
+                    "latest_at": 0.0,
+                },
+            )
+            if "meal_date" in row:
+                item["meal_count"] += 1
+                timestamp = row.get("logged_at", 0)
+            elif "plan_date" in row:
+                item["plan_count"] += 1
+                timestamp = row.get("created_at", 0)
+            else:
+                item["summary_count"] += 1
+                timestamp = row.get("updated_at", row.get("created_at", 0))
+            try:
+                item["latest_at"] = max(float(item["latest_at"]), float(timestamp or 0))
+            except (TypeError, ValueError):
+                pass
+        return sorted(users.values(), key=lambda item: float(item.get("latest_at", 0)), reverse=True)
 
     def metrics_snapshot(self) -> dict[str, Any]:
         """返回最近一条指标快照。"""

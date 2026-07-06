@@ -154,6 +154,9 @@ const dom = {
   errorsList: $("#errors-list"),
   memorySummary: $("#memory-summary"),
   memoryList: $("#memory-list"),
+  dietSummary: $("#diet-summary"),
+  dietUserScope: $("#diet-user-scope"),
+  dietList: $("#diet-list"),
   tasksSummary: $("#tasks-summary"),
   tasksList: $("#tasks-list"),
   deliveryState: $("#delivery-state"),
@@ -697,11 +700,20 @@ function buildErrorQuery(base = {}) {
   return params;
 }
 
+function buildDietQuery(base = {}) {
+  const params = { ...base };
+  const userScope = dom.dietUserScope?.value?.trim() || "";
+  if (userScope) {
+    params.user_scope = userScope;
+  }
+  return params;
+}
+
 async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, tasks, taskExecutions, laneDoctor, schedulerStatus, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, diet, tasks, taskExecutions, laneDoctor, schedulerStatus, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -714,6 +726,7 @@ async function refreshAll() {
       rpc("events.tail", buildEventQuery({ limit: 80 })),
       rpc("errors.recent", buildErrorQuery({ limit: 40 })),
       rpc("memory.recent", { limit: 20 }),
+      rpc("diet.recent", buildDietQuery({ limit: 20 })),
       rpc("tasks.list", { status: "all", limit: 40 }),
       rpc("tasks.executions", { limit: 24 }),
       rpc("tasks.lanes.doctor", { limit: 12 }),
@@ -734,6 +747,7 @@ async function refreshAll() {
     renderEvents(events);
     renderErrors(errors);
     renderMemories(memories);
+    renderDiet(diet);
     renderTasks(tasks, taskExecutions, laneDoctor, schedulerStatus || runtime.tasks?.session_scheduler || {});
     renderDelivery(deliveryList);
     renderCron(cronJobs);
@@ -1953,6 +1967,145 @@ function renderMemories(payload) {
   appendCollapseToggle(dom.memoryList, "memories", items.length, () => renderMemories(payload));
 }
 
+function renderDiet(payload) {
+  clearNode(dom.dietList);
+  const meals = Array.isArray(payload?.meals) ? payload.meals : [];
+  const plans = Array.isArray(payload?.plans) ? payload.plans : [];
+  const summaries = Array.isArray(payload?.summaries) ? payload.summaries : [];
+  const users = Array.isArray(payload?.users) ? payload.users : [];
+  const items = [
+    ...meals.map((item) => ({ kind: "meal", ...item })),
+    ...summaries.map((item) => ({ kind: "summary", ...item })),
+    ...plans.map((item) => ({ kind: "plan", ...item })),
+  ].sort((a, b) => {
+    const left = Number(a.logged_at || a.updated_at || a.created_at || 0);
+    const right = Number(b.logged_at || b.updated_at || b.created_at || 0);
+    return right - left;
+  });
+  if (payload?.today_status) {
+    dom.dietSummary.textContent = items.length ? `今日状态 + ${items.length} 条记录` : "今日状态";
+    dom.dietList.className = "memory-list";
+    renderDietStatus(payload.today_status);
+    if (!items.length) {
+      return;
+    }
+  }
+  if (!items.length && users.length) {
+    dom.dietSummary.textContent = `${users.length} 个用户`;
+    dom.dietList.className = "memory-list";
+    const visibleUsers = slicePanelItems(users, "diet");
+    for (const user of visibleUsers) {
+      const card = document.createElement("article");
+      card.className = "memory-item";
+      const head = document.createElement("div");
+      head.className = "memory-head";
+      const title = document.createElement("div");
+      appendText(title, "strong", "用户饮食摘要");
+      appendText(title, "small", user.user_scope || "未标记用户");
+      head.appendChild(title);
+      appendText(head, "span", formatTimestamp(user.latest_at), "event-time");
+      card.appendChild(head);
+      appendText(
+        card,
+        "p",
+        `餐食 ${user.meal_count || 0} 条 · 计划 ${user.plan_count || 0} 条 · 汇总 ${user.summary_count || 0} 条`,
+        "memory-content",
+      );
+      dom.dietList.appendChild(card);
+    }
+    appendCollapseToggle(dom.dietList, "diet", users.length, () => renderDiet(payload));
+    return;
+  }
+  dom.dietSummary.textContent = payload?.today_status ? `今日状态 + ${items.length} 条记录` : `${items.length} 条记录`;
+  dom.dietList.className = items.length ? "memory-list" : "memory-list empty";
+  if (!items.length) {
+    dom.dietList.textContent = payload?.requires_user_scope
+      ? "未发现饮食用户摘要。指定 user_scope 后可查看明细。"
+      : "最近没有饮食记录。";
+    return;
+  }
+  const visibleItems = slicePanelItems(items, "diet");
+  for (const item of visibleItems) {
+    const card = document.createElement("article");
+    card.className = "memory-item";
+    const head = document.createElement("div");
+    head.className = "memory-head";
+    const title = document.createElement("div");
+    appendText(title, "strong", dietTitle(item));
+    appendText(title, "small", item.user_scope || "未标记用户");
+    head.appendChild(title);
+    appendText(head, "span", formatTimestamp(item.logged_at || item.updated_at || item.created_at), "event-time");
+    card.appendChild(head);
+    appendText(card, "p", dietDescription(item), "memory-content");
+    dom.dietList.appendChild(card);
+  }
+  appendCollapseToggle(dom.dietList, "diet", items.length, () => renderDiet(payload));
+}
+
+function renderDietStatus(status) {
+  const card = document.createElement("article");
+  card.className = "memory-item";
+  const head = document.createElement("div");
+  head.className = "memory-head";
+  const title = document.createElement("div");
+  appendText(title, "strong", `今日状态：${status.date || "--"}`);
+  appendText(title, "small", status.user_scope || "未标记用户");
+  head.appendChild(title);
+  appendText(head, "span", status.profile_complete ? "档案完整" : "档案待补充", "event-time");
+  card.appendChild(head);
+  const actual = Number(status.actual_calories || 0).toFixed(0);
+  const target = Number(status.target_calories || 0).toFixed(0);
+  const protein = Number(status.protein_g || 0).toFixed(0);
+  const missing = Array.isArray(status.missing_meals) && status.missing_meals.length
+    ? status.missing_meals.join("、")
+    : "无";
+  const latestWeight = status.latest_weight?.weight_kg
+    ? ` · 最新体重 ${Number(status.latest_weight.weight_kg).toFixed(1)} kg`
+    : "";
+  appendText(
+    card,
+    "p",
+    `摄入 ${actual} / ${target} kcal · 蛋白质 ${protein}g · 缺失餐次 ${missing}${latestWeight}`,
+    "memory-content",
+  );
+  const trend = status.trend_7d || {};
+  if (trend.daily?.length) {
+    appendText(
+      card,
+      "small",
+      `近 7 天：平均 ${Number(trend.average_calories || 0).toFixed(0)} kcal · 蛋白质 ${Number(trend.average_protein_g || 0).toFixed(0)}g · 缺餐天数 ${trend.missing_meal_days || 0}`,
+      "memory-content",
+    );
+  }
+  const flags = Array.isArray(status.risk_flags) ? status.risk_flags : [];
+  if (flags.length) {
+    appendText(card, "small", `状态标记：${flags.join("、")}`, "memory-content");
+  }
+  dom.dietList.appendChild(card);
+}
+
+function dietTitle(item) {
+  if (item.kind === "meal") {
+    return `餐食记录：${item.meal_date || "--"} · ${item.meal_type || "未分类"}`;
+  }
+  if (item.kind === "summary") {
+    return `热量汇总：${item.date || "--"}`;
+  }
+  return `饮食计划：${item.plan_date || "--"}`;
+}
+
+function dietDescription(item) {
+  if (item.kind === "meal") {
+    const calories = Number(item.estimated_calories || 0).toFixed(0);
+    const protein = Number(item.protein_g || 0).toFixed(0);
+    return `${item.raw_text || "未填写餐食"} · 约 ${calories} kcal · 蛋白质 ${protein}g`;
+  }
+  if (item.kind === "summary") {
+    return item.summary_text || `总摄入约 ${Number(item.actual_calories || 0).toFixed(0)} kcal`;
+  }
+  return item.generated_reason || `目标约 ${Number(item.target_calories || 0).toFixed(0)} kcal`;
+}
+
 function renderTasks(payload, executionsPayload = {}, laneDoctor = {}, schedulerStatus = {}) {
   clearNode(dom.tasksList);
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -2524,6 +2677,11 @@ async function bootstrap() {
   dom.eventComponent.addEventListener("change", refreshAll);
   dom.eventStatus.addEventListener("change", refreshAll);
   dom.eventCorrelation.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      refreshAll();
+    }
+  });
+  dom.dietUserScope?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       refreshAll();
     }
