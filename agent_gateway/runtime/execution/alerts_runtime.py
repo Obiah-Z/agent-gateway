@@ -118,12 +118,14 @@ class AlertsRuntime:
                 if state.status == "active":
                     state.status = "recovered"
                     state.last_recovered_at = now
+                    recovery_message = self._recovery_message(rule, value)
+                    state.last_message = recovery_message
                     emitted.append(
                         self.alert_store.append(
                             rule=rule,
                             state=state,
                             event="recovered",
-                            message=message or f"{rule.title} 已恢复",
+                            message=recovery_message,
                             value=value,
                             metadata=metadata,
                             timestamp=now,
@@ -224,8 +226,9 @@ class AlertsRuntime:
         ]
         if event != "recovered":
             lines.append(f"- 持续时间：{duration}")
-        if state.get("last_message"):
-            lines.append(f"- 说明：{state['last_message']}")
+        display_message = row.get("message") or state.get("last_message")
+        if display_message:
+            lines.append(f"- 说明：{display_message}")
         lines.extend(
             [
                 f"- 建议动作：{suggestion}",
@@ -246,6 +249,12 @@ class AlertsRuntime:
             ]
         )
         return "\n".join(lines)
+
+    @staticmethod
+    def _recovery_message(rule: AlertRule, value: float) -> str:
+        """生成不会混淆为故障态的恢复事件说明。"""
+
+        return f"{rule.title}已恢复：当前值 {value:g}，已低于告警阈值 {rule.threshold:g}"
 
     @staticmethod
     def _duration_label(active_since: Any) -> str:

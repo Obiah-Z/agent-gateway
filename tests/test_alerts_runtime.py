@@ -45,6 +45,32 @@ def test_alerts_runtime_triggers_and_recovers_metric_rules(tmp_path: Path) -> No
     assert runtime.recent_history(limit=10)[-1]["event"] == "recovered"
 
 
+def test_alerts_runtime_recovered_delivery_failure_message_is_clear(tmp_path: Path) -> None:
+    metrics = MetricsStore(tmp_path / "metrics", retention_days=2000)
+    alerts = AlertStore(tmp_path / "alerts", retention_days=2000)
+    runtime = AlertsRuntime(
+        metrics_store=metrics,
+        alert_store=alerts,
+        interval_seconds=60,
+    )
+
+    metrics.record(delivery={"pending": 0, "failed": 1}, lanes={"queued": 0}, profiles={"available": 1})
+    runtime.evaluate_once()
+    metrics.record(delivery={"pending": 0, "failed": 2}, lanes={"queued": 0}, profiles={"available": 1})
+    runtime.evaluate_once()
+
+    active = runtime.active_alerts()
+    assert [row["rule_id"] for row in active] == ["delivery_failed_persisting"]
+
+    metrics.record(delivery={"pending": 0, "failed": 0}, lanes={"queued": 0}, profiles={"available": 1})
+    emitted = runtime.evaluate_once()
+
+    assert emitted[-1]["event"] == "recovered"
+    assert emitted[-1]["message"] == "投递失败持续存在已恢复：当前值 0，已低于告警阈值 1"
+    assert emitted[-1]["state"]["last_message"] == emitted[-1]["message"]
+    assert "当前值 0，阈值 >= 1" not in emitted[-1]["message"]
+
+
 def test_alerts_runtime_uses_event_store_for_feishu_signature_rejections(tmp_path: Path) -> None:
     metrics = MetricsStore(tmp_path / "metrics")
     alerts = AlertStore(tmp_path / "alerts", retention_days=2000)
