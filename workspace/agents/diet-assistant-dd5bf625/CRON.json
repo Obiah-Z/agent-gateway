@@ -12,12 +12,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "diet_plan_generate",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today"
       },
       "delete_after_run": false
@@ -34,12 +34,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "nutrition_day_summary",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today"
       },
       "delete_after_run": false
@@ -56,12 +56,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "meal_reminder",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today",
         "meal_type": "breakfast",
         "stage": "before"
@@ -80,12 +80,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "meal_reminder",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today",
         "meal_type": "breakfast",
         "stage": "after"
@@ -104,12 +104,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "meal_reminder",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today",
         "meal_type": "lunch",
         "stage": "before"
@@ -128,12 +128,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "meal_reminder",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today",
         "meal_type": "lunch",
         "stage": "after"
@@ -152,12 +152,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "meal_reminder",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today",
         "meal_type": "dinner",
         "stage": "before"
@@ -176,12 +176,12 @@
       "target": {
         "channel": "wework",
         "account_id": "wework-main",
-        "peer_id": "dd5bf6254c5b565c1f59edf6b29aa30c",
+        "peer_id": "ZhangHaiBo",
         "agent_id": "diet-assistant-dd5bf625"
       },
       "payload": {
         "kind": "meal_reminder",
-        "user_scope": "user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c",
+        "user_scope": "user:wework:wework-main:direct:zhanghaibo",
         "date": "today",
         "meal_type": "dinner",
         "stage": "after"

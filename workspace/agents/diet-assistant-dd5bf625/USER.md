@@ -4,4 +4,4 @@
 
 当前专属用户作用域：
 
-`user:wework:wework-main:direct:dd5bf6254c5b565c1f59edf6b29aa30c`
+`user:wework:wework-main:direct:zhanghaibo`

@@ -3,8 +3,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-USER_PEER_ID = "dd5bf6254c5b565c1f59edf6b29aa30c"
-USER_SCOPE = f"user:wework:wework-main:direct:{USER_PEER_ID}"
+USER_PEER_ID = "ZhangHaiBo"
+USER_SCOPE = "user:wework:wework-main:direct:zhanghaibo"
 AGENT_ID = "diet-assistant-dd5bf625"
 
 
@@ -42,3 +42,11 @@ def test_diet_agent_cron_targets_single_wework_peer() -> None:
             "nutrition_day_summary",
             "meal_reminder",
         }
+
+
+def test_diet_agent_prompt_requires_gender_inference() -> None:
+    tools_md = (ROOT / "workspace" / "agents" / AGENT_ID / "TOOLS.md").read_text(encoding="utf-8")
+
+    assert "gender=male" in tools_md
+    assert "成年男性" in tools_md
+    assert "profile_update" in tools_md

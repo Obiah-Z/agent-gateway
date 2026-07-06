@@ -61,6 +61,12 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _provided_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """只保留调用方明确提供的字段，避免默认空值覆盖已有档案。"""
+
+    return {key: value for key, value in fields.items() if value is not None}
+
+
 @dataclass(slots=True)
 class DietStore:
     """个人饮食数据存储。
@@ -87,23 +93,24 @@ class DietStore:
         scope = self._require_scope(user_scope)
         now = _now()
         existing = self.get_profile(scope) or {}
+        provided = _provided_fields(fields)
         profile = {
             "user_scope": scope,
-            "display_name": str(fields.get("display_name", existing.get("display_name", "")) or ""),
-            "gender": str(fields.get("gender", existing.get("gender", "")) or ""),
-            "birth_year": _as_int(fields.get("birth_year", existing.get("birth_year", 0))),
-            "height_cm": _as_float(fields.get("height_cm", existing.get("height_cm", 0.0))),
+            "display_name": str(provided.get("display_name", existing.get("display_name", "")) or ""),
+            "gender": str(provided.get("gender", existing.get("gender", "")) or ""),
+            "birth_year": _as_int(provided.get("birth_year", existing.get("birth_year", 0))),
+            "height_cm": _as_float(provided.get("height_cm", existing.get("height_cm", 0.0))),
             "current_weight_kg": _as_float(
-                fields.get("current_weight_kg", existing.get("current_weight_kg", 0.0))
+                provided.get("current_weight_kg", existing.get("current_weight_kg", 0.0))
             ),
             "target_weight_kg": _as_float(
-                fields.get("target_weight_kg", existing.get("target_weight_kg", 0.0))
+                provided.get("target_weight_kg", existing.get("target_weight_kg", 0.0))
             ),
-            "activity_level": str(fields.get("activity_level", existing.get("activity_level", "")) or ""),
-            "timezone": str(fields.get("timezone", existing.get("timezone", "Asia/Shanghai")) or "Asia/Shanghai"),
-            "diet_preferences": _as_list(fields.get("diet_preferences", existing.get("diet_preferences", []))),
-            "allergies": _as_list(fields.get("allergies", existing.get("allergies", []))),
-            "medical_notes": str(fields.get("medical_notes", existing.get("medical_notes", "")) or ""),
+            "activity_level": str(provided.get("activity_level", existing.get("activity_level", "")) or ""),
+            "timezone": str(provided.get("timezone", existing.get("timezone", "Asia/Shanghai")) or "Asia/Shanghai"),
+            "diet_preferences": _as_list(provided.get("diet_preferences", existing.get("diet_preferences", []))),
+            "allergies": _as_list(provided.get("allergies", existing.get("allergies", []))),
+            "medical_notes": str(provided.get("medical_notes", existing.get("medical_notes", "")) or ""),
             "created_at": _as_float(existing.get("created_at", now), now),
             "updated_at": now,
             "metadata": dict(existing.get("metadata", {}) if isinstance(existing.get("metadata"), dict) else {}),
@@ -601,35 +608,37 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
 
     def profile_update(
         *,
-        display_name: str = "",
-        gender: str = "",
-        birth_year: int = 0,
-        height_cm: float = 0.0,
-        current_weight_kg: float = 0.0,
-        target_weight_kg: float = 0.0,
-        activity_level: str = "",
-        timezone: str = "Asia/Shanghai",
+        display_name: str | None = None,
+        gender: str | None = None,
+        birth_year: int | None = None,
+        height_cm: float | None = None,
+        current_weight_kg: float | None = None,
+        target_weight_kg: float | None = None,
+        activity_level: str | None = None,
+        timezone: str | None = None,
         diet_preferences: list[Any] | None = None,
         allergies: list[Any] | None = None,
-        medical_notes: str = "",
+        medical_notes: str | None = None,
         user_scope: str = "",
         __runtime_context: dict[str, Any] | None = None,
     ) -> str:
         scope = _runtime_scope(__runtime_context, user_scope)
-        profile = diet_store.update_profile(
-            scope,
-            display_name=display_name,
-            gender=gender,
-            birth_year=birth_year,
-            height_cm=height_cm,
-            current_weight_kg=current_weight_kg,
-            target_weight_kg=target_weight_kg,
-            activity_level=activity_level,
-            timezone=timezone,
-            diet_preferences=diet_preferences or [],
-            allergies=allergies or [],
-            medical_notes=medical_notes,
+        updates = _provided_fields(
+            {
+                "display_name": display_name,
+                "gender": gender,
+                "birth_year": birth_year,
+                "height_cm": height_cm,
+                "current_weight_kg": current_weight_kg,
+                "target_weight_kg": target_weight_kg,
+                "activity_level": activity_level,
+                "timezone": timezone,
+                "diet_preferences": diet_preferences,
+                "allergies": allergies,
+                "medical_notes": medical_notes,
+            }
         )
+        profile = diet_store.update_profile(scope, **updates)
         return _json({"status": "saved", "profile": profile})
 
     def meal_log_add(
@@ -728,17 +737,30 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "display_name": {"type": "string"},
-                    "gender": {"type": "string"},
-                    "birth_year": {"type": "integer"},
-                    "height_cm": {"type": "number"},
-                    "current_weight_kg": {"type": "number"},
-                    "target_weight_kg": {"type": "number"},
-                    "activity_level": {"type": "string"},
-                    "timezone": {"type": "string"},
-                    "diet_preferences": {"type": "array"},
-                    "allergies": {"type": "array"},
-                    "medical_notes": {"type": "string"},
+                    "display_name": {"type": "string", "description": "用户昵称或展示名。"},
+                    "gender": {
+                        "type": "string",
+                        "enum": ["male", "female", "other", "unknown"],
+                        "description": (
+                            "用户性别。用户说“男/男性/成年男性/男生/我是男的”时写 male；"
+                            "说“女/女性/成年女性/女生/我是女的”时写 female。"
+                        ),
+                    },
+                    "birth_year": {
+                        "type": "integer",
+                        "description": "出生年份；如果用户只说年龄，按当前年份推算。",
+                    },
+                    "height_cm": {"type": "number", "description": "身高，单位 cm。"},
+                    "current_weight_kg": {"type": "number", "description": "当前体重，单位 kg。"},
+                    "target_weight_kg": {"type": "number", "description": "目标体重，单位 kg。"},
+                    "activity_level": {
+                        "type": "string",
+                        "description": "活动水平，例如 sedentary/light/moderate/high。",
+                    },
+                    "timezone": {"type": "string", "description": "用户所在时区。"},
+                    "diet_preferences": {"type": "array", "description": "长期饮食偏好。"},
+                    "allergies": {"type": "array", "description": "过敏或忌口。"},
+                    "medical_notes": {"type": "string", "description": "医疗相关备注。"},
                     "user_scope": {"type": "string"},
                 },
             },

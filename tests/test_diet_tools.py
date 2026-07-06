@@ -82,6 +82,51 @@ def test_diet_tools_use_runtime_context_scope(tmp_path: Path) -> None:
     assert plan["plan"]["meals"]["breakfast"]
 
 
+def test_profile_update_preserves_existing_fields_when_partially_updating(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:test"}
+
+    registry.dispatch(
+        "profile_update",
+        {
+            "height_cm": 166,
+            "current_weight_kg": 60,
+            "target_weight_kg": 55,
+            "activity_level": "sedentary",
+            "timezone": "Asia/Shanghai",
+        },
+        runtime_context=context,
+    )
+
+    raw = registry.dispatch(
+        "profile_update",
+        {"birth_year": 2003},
+        runtime_context=context,
+    )
+
+    profile = json.loads(raw)["profile"]
+    assert profile["birth_year"] == 2003
+    assert profile["height_cm"] == 166
+    assert profile["current_weight_kg"] == 60
+    assert profile["target_weight_kg"] == 55
+    assert profile["activity_level"] == "sedentary"
+
+
+def test_profile_update_schema_guides_gender_inference(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+
+    schema = registry.get("profile_update").schema()["input_schema"]
+    gender = schema["properties"]["gender"]
+
+    assert gender["enum"] == ["male", "female", "other", "unknown"]
+    assert "成年男性" in gender["description"]
+    assert "male" in gender["description"]
+
+
 def test_diet_plan_adjusts_dinner_after_repeated_high_dinners(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     scope = "user:wework:diet"
