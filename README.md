@@ -152,7 +152,8 @@ agent-gateway serve
 适合快速验证和最小部署：一个 gateway 服务带起完整运行链路。
 
 ```bash
-docker compose up -d --build
+docker compose build gateway
+docker compose up -d
 docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-init
 docker compose exec gateway agent-gateway postgres-check-schema
@@ -163,7 +164,8 @@ docker compose exec gateway agent-gateway postgres-check-schema
 适合长期运行：把入口、worker、投递、调度和 Dashboard 拆成不同服务。
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.roles.yml build gateway-api
+docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d
 ```
 
 | 服务 | 职责 |
@@ -181,7 +183,13 @@ docker compose \
   -f docker-compose.yml \
   -f docker-compose.roles.yml \
   -f docker-compose.workers.yml \
-  up -d --build
+  build gateway-api
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  up -d
 ```
 
 停止时必须使用同一组 Compose 文件：

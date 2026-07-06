@@ -51,15 +51,98 @@ GATEWAY_RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672/
 
 - `apt` 使用清华 Debian 镜像源。
 - `pip` 使用清华 PyPI 镜像源。
+- Gateway 各角色统一复用 `agent-gateway:local` 镜像，避免多角色模式下重复构建多个等价镜像。
+- 第三方依赖安装层只依赖 `pyproject.toml`，普通 Python 代码变更不会重新下载和安装依赖。
+- `config/`、`workspace/`、`data/` 通过 volume 挂载进入容器，不打入镜像；修改配置、提示词、Skill 或运行数据后通常只需要重启容器。
 
 如果 Docker daemon 配置了 registry mirror，基础镜像拉取会更快。该配置属于宿主机级别，不写入项目仓库。
 
+常用命令：
+
+```bash
+# 只在首次启动、Python 代码变更、依赖变更或 Dockerfile 变更后执行
+docker compose build gateway
+
+# 日常启动或重启，不重新构建镜像
+docker compose up -d
+```
+
+多角色 / 多 Worker 模式同理：先构建一个代表性 Gateway 服务，其他角色会复用同一个 `agent-gateway:local` 镜像。
+
+### 3.1 命令选择原则
+
+`build` 和 `up` 不需要每次都一起执行。它们分别解决两个问题：
+
+| 命令 | 作用 | 什么时候用 |
+| --- | --- | --- |
+| `docker compose ... build gateway-api` | 重新构建 Gateway 镜像 | 首次启动、改了 Python 代码、改了 `scripts/`、改了 `Dockerfile`、改了 `pyproject.toml` 或依赖版本 |
+| `docker compose ... up -d` | 启动或重启容器 | 日常启动、配置变更、`.env` 变更、`config/` 变更、`workspace/` 变更、Skill / Prompt / Cron 变更 |
+| `docker compose ... up -d --build` | 先触发构建判断，再启动容器 | 可以用，但不建议作为日常命令 |
+
+`up -d --build` 功能上接近“build + up”，但在多角色模式下 Compose 会对多个带 `build` 的 Gateway 服务做构建判断。当前项目已经让所有 Gateway 角色复用 `agent-gateway:local`，缓存命中时不会很慢，但最清晰、可控的做法仍然是：
+
+```bash
+# 代码或镜像相关文件变更后执行一次
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml build gateway-api
+
+# 启动或重启服务
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml up -d
+```
+
+如果只是改 `.env`、`config/`、`workspace/`、Skill、Prompt、Cron，不需要 build，直接执行 `up -d` 即可。
+
+### 3.2 多 Worker 模式速查
+
+当前长期运行推荐使用多 Worker 模式。日常最常用的是下面两组命令。
+
+日常启动或重启：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  up -d
+```
+
+代码变更后升级：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  build gateway-api
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  up -d
+```
+
+停止：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  down
+```
+
 ## 4. 单进程模式
+
+首次构建或代码变更后：
+
+```bash
+docker compose build gateway
+```
 
 启动：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 查看：
@@ -97,10 +180,16 @@ docker compose down
 
 多角色模式把默认 `gateway=all` 拆成多个进程，更接近最终分布式 lane 架构。
 
+首次构建或代码变更后：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml build gateway-api
+```
+
 启动：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d
 ```
 
 最终服务：
@@ -152,6 +241,16 @@ gateway-worker-2  GATEWAY_TASK_WORKER_ID=gateway-worker-2
 gateway-worker-3  GATEWAY_TASK_WORKER_ID=gateway-worker-3
 ```
 
+首次构建或代码变更后：
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.roles.yml \
+  -f docker-compose.workers.yml \
+  build gateway-api
+```
+
 启动：
 
 ```bash
@@ -159,7 +258,7 @@ docker compose \
   -f docker-compose.yml \
   -f docker-compose.roles.yml \
   -f docker-compose.workers.yml \
-  up -d --build
+  up -d
 ```
 
 查看：
@@ -280,7 +379,8 @@ ports:
 ```bash
 cd ~/Desktop/claw0/gateway
 git pull
-docker compose up -d --build
+docker compose build gateway
+docker compose up -d
 docker compose exec gateway agent-gateway doctor
 docker compose exec gateway agent-gateway postgres-check-schema
 ```
@@ -290,7 +390,8 @@ docker compose exec gateway agent-gateway postgres-check-schema
 ```bash
 cd ~/Desktop/claw0/gateway
 git pull
-docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml build gateway-api
+docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml exec gateway-api agent-gateway doctor
 docker compose -f docker-compose.yml -f docker-compose.roles.yml -f docker-compose.workers.yml exec gateway-api agent-gateway postgres-check-schema
 ```
