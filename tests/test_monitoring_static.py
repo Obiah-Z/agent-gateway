@@ -52,6 +52,8 @@ def test_monitoring_dashboard_includes_triage_and_delivery_detail_ui() -> None:
     index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
     assert "问题摘要" in index
+    assert "监控大屏" in index
+    assert "运行监控大屏" in index
     assert "指标趋势" in index
     assert "当前活跃告警" in index
     assert "delivery-detail" in index
@@ -114,13 +116,29 @@ def test_monitoring_dashboard_uses_compact_sidebar_navigation() -> None:
     index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
 
-    assert index.count("<a href=\"#") == 7
+    assert index.count("<a href=\"#") == 8
+    assert "监控大屏" in index
     assert "健康运行" in index
     assert "指标告警" in index
     assert "事件错误" in index
     assert "任务投递" in index
     assert "display: flex;" in styles
     assert "margin-top: auto;" in styles
+
+
+def test_monitoring_dashboard_includes_command_center_screen() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+    index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "screen-panel" in index
+    assert "screen-kpis" in index
+    assert "screen-flow-nodes" in index
+    assert "function renderScreen" in app_js
+    assert "压力雷达" in index
+    assert "最近关键事件" in index
+    assert ".screen-panel" in styles
+    assert ".screen-flow-node" in styles
 
 
 def test_monitoring_dashboard_formats_time_values_consistently() -> None:

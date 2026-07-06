@@ -118,6 +118,15 @@ const dom = {
   connectionDot: $("#connection-dot"),
   connectionLabel: $("#connection-label"),
   connectionDetail: $("#connection-detail"),
+  screenSubtitle: $("#screen-subtitle"),
+  screenStatusDot: $("#screen-status-dot"),
+  screenStatusLabel: $("#screen-status-label"),
+  screenUpdated: $("#screen-updated"),
+  screenKpis: $("#screen-kpis"),
+  screenFlowSummary: $("#screen-flow-summary"),
+  screenFlowNodes: $("#screen-flow-nodes"),
+  screenPressure: $("#screen-pressure"),
+  screenEvents: $("#screen-events"),
   metricHealth: $("#metric-health"),
   metricHealthDetail: $("#metric-health-detail"),
   metricUptime: $("#metric-uptime"),
@@ -737,6 +746,15 @@ async function refreshAll() {
       rpc("alerts.history", { limit: 20 }),
     ]);
     renderSummary(health, runtime, deliveryStats, metricsSummary);
+    renderScreen({
+      health,
+      runtime,
+      deliveryStats,
+      metricsSummary,
+      alertsActive,
+      events,
+      errors,
+    });
     renderIssues(buildIssues(health, runtime, deliveryStats, metricsSummary));
     renderHealth(health);
     renderRuntime(runtime);
@@ -854,6 +872,177 @@ function renderIssues(issues) {
     dom.issueList.appendChild(item);
   }
   appendCollapseToggle(dom.issueList, "issues", issues.length, () => renderIssues(issues));
+}
+
+function renderScreen({ health, runtime, deliveryStats, metricsSummary = {}, alertsActive = {}, events = {}, errors = {} }) {
+  const server = runtime.server || health.server || {};
+  const inbound = runtime.inbound || {};
+  const tasks = runtime.tasks || {};
+  const queue = tasks.queue || {};
+  const taskBroker = tasks.broker || queue.broker || {};
+  const delivery = deliveryStats || runtime.delivery || {};
+  const channels = runtime.channels || {};
+  const profiles = runtime.profiles || {};
+  const cron = runtime.cron || {};
+  const activeAlerts = Array.isArray(alertsActive?.items) ? alertsActive.items : [];
+  const errorItems = Array.isArray(errors?.items) ? errors.items : [];
+  const eventItems = Array.isArray(events?.items) ? events.items : [];
+  const healthStatus = normalizeStatus(health.status);
+  const brokerBacklog = Number(taskBroker.messages || 0);
+  const deliveryFailed = Number(delivery.failed || 0);
+  const errorPeak = Number(metricsSummary.events?.max_errors_5m || 0);
+
+  dom.screenStatusDot.className = `screen-status-dot is-${healthStatus}`;
+  dom.screenStatusLabel.textContent = statusLabel(health.status);
+  dom.screenUpdated.textContent = `刷新于 ${formatTimestamp(Date.now() / 1000)}`;
+  dom.screenSubtitle.textContent = server.running
+    ? `服务已运行 ${formatDuration(server.uptime_seconds)}，当前展示入站、执行、投递与告警关键链路。`
+    : "服务运行状态未知，请确认控制面连接。";
+
+  const kpis = [
+    {
+      title: "整体健康",
+      value: statusLabel(health.status),
+      detail: `${health.summary?.critical || 0} 严重 / ${health.summary?.warning || 0} 注意`,
+      tone: healthStatus,
+    },
+    {
+      title: "入站压力",
+      value: `${inbound.queued_messages ?? 0}`,
+      detail: `运行 ${inbound.running_tasks ?? 0}/${inbound.max_concurrent_lanes ?? 0}，最老等待 ${formatSecondsLabel(inbound.oldest_wait_seconds)}`,
+      tone: Number(inbound.queued_messages || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      title: "Worker 池",
+      value: `${queue.running ?? 0}/${tasks.concurrency ?? 0}`,
+      detail: `待执行 ${queue.pending ?? 0}，重试 ${queue.retrying ?? 0}`,
+      tone: Number(queue.pending || 0) > 0 || Number(queue.retrying || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      title: "投递队列",
+      value: `${delivery.pending ?? 0}`,
+      detail: `重试 ${delivery.retrying ?? 0}，失败 ${delivery.failed ?? 0}`,
+      tone: deliveryFailed > 0 ? "critical" : Number(delivery.pending || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      title: "活跃告警",
+      value: `${activeAlerts.length}`,
+      detail: `最近错误峰值 ${errorPeak}，错误事件 ${errorItems.length}`,
+      tone: activeAlerts.length || errorPeak ? "critical" : "ok",
+    },
+    {
+      title: "可用能力",
+      value: `${profiles.available ?? 0}/${profiles.count ?? 0}`,
+      detail: `通道 ${channels.active ?? 0}/${channels.count ?? 0}，Cron ${cron.enabled ?? 0}/${cron.count ?? 0}`,
+      tone: Number(profiles.available || 0) > 0 && Number(channels.active || 0) > 0 ? "ok" : "warning",
+    },
+  ];
+
+  clearNode(dom.screenKpis);
+  for (const item of kpis) {
+    const card = document.createElement("article");
+    card.className = `screen-kpi screen-${normalizeStatus(item.tone)}`;
+    appendText(card, "span", item.title);
+    appendText(card, "strong", item.value);
+    appendText(card, "small", item.detail);
+    dom.screenKpis.appendChild(card);
+  }
+
+  const flow = [
+    {
+      label: "入站",
+      value: `${inbound.queued_messages ?? 0}`,
+      detail: "排队消息",
+      tone: Number(inbound.queued_messages || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      label: "调度",
+      value: `${taskBroker.enabled ? brokerBacklog : queue.pending ?? 0}`,
+      detail: taskBroker.enabled ? "Broker 积压" : "本地待执行",
+      tone: brokerBacklog > 0 || Number(queue.pending || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      label: "Worker",
+      value: `${queue.running ?? 0}`,
+      detail: `并发上限 ${tasks.concurrency ?? 0}`,
+      tone: Number(queue.running || 0) >= Number(tasks.concurrency || 0) && Number(tasks.concurrency || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      label: "Agent",
+      value: `${profiles.available ?? 0}`,
+      detail: "可用 Profile",
+      tone: Number(profiles.available || 0) > 0 ? "ok" : "critical",
+    },
+    {
+      label: "投递",
+      value: `${delivery.pending ?? 0}`,
+      detail: `失败 ${delivery.failed ?? 0}`,
+      tone: deliveryFailed > 0 ? "critical" : Number(delivery.pending || 0) > 0 ? "warning" : "ok",
+    },
+    {
+      label: "通道",
+      value: `${channels.active ?? 0}`,
+      detail: "活跃通道",
+      tone: Number(channels.active || 0) > 0 ? "ok" : "warning",
+    },
+  ];
+
+  dom.screenFlowSummary.textContent = taskBroker.enabled
+    ? `入站 Broker 已启用，分区 ${taskBroker.partitions ?? 0}，prefetch ${taskBroker.prefetch ?? 0}`
+    : "当前使用本地入站队列或未启用 Broker。";
+  clearNode(dom.screenFlowNodes);
+  for (const [index, node] of flow.entries()) {
+    const item = document.createElement("div");
+    item.className = `screen-flow-node screen-${normalizeStatus(node.tone)}`;
+    appendText(item, "span", node.label);
+    appendText(item, "strong", node.value);
+    appendText(item, "small", node.detail);
+    dom.screenFlowNodes.appendChild(item);
+    if (index < flow.length - 1) {
+      appendText(dom.screenFlowNodes, "span", "→", "screen-flow-arrow");
+    }
+  }
+
+  const pressureRows = [
+    ["入站排队", Number(inbound.queued_messages || 0), Math.max(Number(inbound.global_queue_limit || 0), 1)],
+    ["Broker 积压", brokerBacklog, Math.max(brokerBacklog, 20)],
+    ["Worker 占用", Number(queue.running || 0), Math.max(Number(tasks.concurrency || 0), 1)],
+    ["投递失败", deliveryFailed, Math.max(deliveryFailed, 5)],
+  ];
+  clearNode(dom.screenPressure);
+  dom.screenPressure.className = "screen-pressure";
+  for (const [label, value, max] of pressureRows) {
+    const row = document.createElement("div");
+    row.className = "screen-pressure-row";
+    const head = document.createElement("div");
+    appendText(head, "span", label);
+    appendText(head, "strong", String(value));
+    row.appendChild(head);
+    const bar = document.createElement("div");
+    bar.className = "screen-pressure-bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${Math.min(100, Math.round((value / max) * 100))}%`;
+    bar.appendChild(fill);
+    row.appendChild(bar);
+    dom.screenPressure.appendChild(row);
+  }
+
+  const keyEvents = [...errorItems, ...eventItems]
+    .sort((left, right) => Number(right.timestamp || 0) - Number(left.timestamp || 0))
+    .slice(0, 5);
+  clearNode(dom.screenEvents);
+  dom.screenEvents.className = keyEvents.length ? "screen-events" : "screen-events empty";
+  if (!keyEvents.length) {
+    dom.screenEvents.textContent = "暂无事件数据";
+  } else {
+    for (const event of keyEvents) {
+      const row = document.createElement("div");
+      row.className = `screen-event screen-${normalizeStatus(event.status)}`;
+      appendText(row, "strong", eventLabel(event));
+      appendText(row, "small", `${formatShortTime(event.timestamp)} · ${describeEventContext(event)}`);
+      dom.screenEvents.appendChild(row);
+    }
+  }
 }
 
 function renderSummary(health, runtime, deliveryStats, metricsSummary = {}) {

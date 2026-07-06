@@ -17,6 +17,7 @@
           </div>
         </div>
         <nav class="side-nav">
+          <a href="#screen-panel"><span class="side-dot"></span>监控大屏</a>
           <a href="#issue-panel"><span class="side-dot"></span>问题摘要</a>
           <a href="#overview-panel"><span class="side-dot"></span>运行总览</a>
           <a href="#health-panel"><span class="side-dot"></span>健康运行</a>
@@ -64,6 +65,55 @@
 
         <section id="alert" class="alert" hidden></section>
         <section id="toast" class="toast" hidden></section>
+
+      <section id="screen-panel" class="screen-panel" aria-label="监控大屏">
+        <div class="screen-ambient"></div>
+        <div class="screen-head">
+          <div>
+            <p class="eyebrow">Command Center</p>
+            <h2>运行监控大屏</h2>
+            <p id="screen-subtitle" class="screen-subtitle">连接控制面后展示实时运行态。</p>
+          </div>
+          <div class="screen-status">
+            <span id="screen-status-dot" class="screen-status-dot is-muted"></span>
+            <div>
+              <strong id="screen-status-label">等待数据</strong>
+              <small id="screen-updated">未刷新</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen-layout">
+          <section class="screen-left">
+            <div id="screen-kpis" class="screen-kpis">
+              <article class="screen-kpi">
+                <span>整体健康</span>
+                <strong>--</strong>
+                <small>等待健康检查</small>
+              </article>
+            </div>
+
+            <div class="screen-flow" aria-label="运行链路">
+              <div class="screen-flow-head">
+                <span>链路视图</span>
+                <strong id="screen-flow-summary">入站到出站的关键节点</strong>
+              </div>
+              <div id="screen-flow-nodes" class="screen-flow-nodes"></div>
+            </div>
+          </section>
+
+          <aside class="screen-right">
+            <div class="screen-mini-card">
+              <span>压力雷达</span>
+              <div id="screen-pressure" class="screen-pressure">暂无压力数据</div>
+            </div>
+            <div class="screen-mini-card">
+              <span>最近关键事件</span>
+              <div id="screen-events" class="screen-events">暂无事件数据</div>
+            </div>
+          </aside>
+        </div>
+      </section>
 
       <section id="issue-panel" class="panel issue-panel">
         <div class="section-head">
