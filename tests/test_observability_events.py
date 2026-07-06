@@ -71,6 +71,15 @@ def test_runtime_event_store_ignores_expected_rejections_in_recent_errors(tmp_pa
         component="feishu",
         message="Feishu webhook request rejected",
         channel="feishu",
+        error="empty request",
+        metadata={"reason": "empty request"},
+    )
+    store.record(
+        "feishu.event.rejected",
+        status="rejected",
+        component="feishu",
+        message="Feishu webhook request rejected",
+        channel="feishu",
         error="method not allowed",
         metadata={"reason": "method not allowed"},
     )
@@ -88,6 +97,7 @@ def test_runtime_event_store_ignores_expected_rejections_in_recent_errors(tmp_pa
     errors = store.recent_errors(limit=10, component="feishu")
 
     assert [event["error"] for event in events] == [
+        "empty request",
         "method not allowed",
         "verification token mismatch",
     ]

@@ -19,6 +19,7 @@ from typing import Any
 
 ERROR_STATUSES = {"error", "failed", "rejected", "critical"}
 IGNORED_REJECTION_REASONS = {
+    "empty request",
     "method not allowed",
     "duplicate event",
     "event ignored by parser",
