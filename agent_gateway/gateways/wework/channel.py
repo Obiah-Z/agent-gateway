@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import time
 import xml.etree.ElementTree as ET
-import re
 from urllib.parse import parse_qs
-from typing import Any
 
 try:
     import httpx
@@ -39,7 +37,7 @@ class WeWorkChannel(Channel):
         self.callback_token = str(account.token or account.config.get("callback_token", ""))
         self.encoding_aes_key = str(account.config.get("encoding_aes_key", ""))
         self.api_base = str(account.config.get("api_base", "https://qyapi.weixin.qq.com")).rstrip("/")
-        self.render_mode = str(account.config.get("render_mode", "auto") or "auto").strip().lower()
+        self.render_mode = str(account.config.get("render_mode", "markdown") or "markdown").strip().lower()
         self._http = httpx.Client(timeout=15.0, trust_env=False)
         self._access_token = ""
         self._token_expires_at = 0.0
@@ -50,7 +48,7 @@ class WeWorkChannel(Channel):
         return None
 
     def send(self, outbound: OutboundMessage) -> bool:
-        """通过企业微信应用消息接口发送文本或 Markdown 消息。"""
+        """通过企业微信应用消息接口发送 Markdown 或普通文本消息。"""
 
         token = self._refresh_access_token()
         if not token:
@@ -225,12 +223,10 @@ class WeWorkChannel(Channel):
     def _message_type(self, outbound: OutboundMessage) -> str:
         """根据配置和内容选择企业微信消息类型。"""
 
-        configured = str(outbound.metadata.get("render_mode") or self.render_mode or "auto").lower()
-        if configured in {"markdown", "md"}:
-            return "markdown"
+        configured = str(outbound.metadata.get("render_mode") or self.render_mode or "markdown").lower()
         if configured in {"text", "plain"}:
             return "text"
-        return "markdown" if _looks_like_markdown(outbound.text) else "text"
+        return "markdown"
 
 
 def _first(query: dict[str, list[str]], key: str) -> str:
@@ -264,22 +260,3 @@ def _strip_namespace(tag: str) -> str:
     """去掉 ElementTree 解析出的 XML namespace 前缀。"""
 
     return tag.rsplit("}", 1)[-1]
-
-
-def _looks_like_markdown(text: str) -> bool:
-    """识别常见 Markdown 结构，避免普通文本被不必要地按 Markdown 发送。"""
-
-    if not text:
-        return False
-    patterns = (
-        r"^#{1,6}\s+",
-        r"^\s*[-*+]\s+",
-        r"^\s*\d+\.\s+",
-        r"```",
-        r"`[^`]+`",
-        r"\*\*[^*]+\*\*",
-        r"__[^_]+__",
-        r"\[[^\]]+\]\([^)]+\)",
-        r"^\|.+\|$",
-    )
-    return any(re.search(pattern, text, flags=re.MULTILINE) for pattern in patterns)

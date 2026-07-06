@@ -322,15 +322,12 @@ def test_wework_webhook_server_deduplicates_text_callback(tmp_path: Path) -> Non
     asyncio.run(_run())
 
 
-def test_wework_channel_sends_text_message() -> None:
+def test_wework_channel_sends_text_message_when_render_mode_is_text() -> None:
     token = "token-123"
     corp_id = "ww1234567890abcdef"
     encoding_aes_key = base64.b64encode(b"12345678901234567890123456789012").decode().rstrip("=")
-    account = _build_wework_account(
-        token=token,
-        corp_id=corp_id,
-        encoding_aes_key=encoding_aes_key,
-    )
+    account = _build_wework_account(token=token, corp_id=corp_id, encoding_aes_key=encoding_aes_key)
+    account.config["render_mode"] = "text"
     channel = WeWorkChannel(account)
     fake_http = FakeHTTPClient()
     channel._http = fake_http
@@ -365,7 +362,7 @@ def test_wework_channel_sends_text_message() -> None:
     ]
 
 
-def test_wework_channel_sends_markdown_message_for_markdown_content() -> None:
+def test_wework_channel_sends_markdown_message_by_default() -> None:
     token = "token-123"
     corp_id = "ww1234567890abcdef"
     encoding_aes_key = base64.b64encode(b"12345678901234567890123456789012").decode().rstrip("=")
