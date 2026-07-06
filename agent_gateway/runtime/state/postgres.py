@@ -27,6 +27,8 @@ POSTGRES_TIME_COLUMNS = {
     "started_at",
     "timestamp",
     "updated_at",
+    "logged_at",
+    "recorded_at",
 }
 
 
@@ -321,11 +323,16 @@ def _column_type(table: str, column: str) -> str:
         "before",
         "after",
         "config",
+        "diet_preferences",
+        "allergies",
         "labels",
         "memory_policy",
         "metadata",
+        "items",
+        "meals",
         "payload",
         "prompt_policy",
+        "risk_flags",
         "actions",
         "blocks",
         "structured_blocks",
@@ -349,9 +356,23 @@ def _column_type(table: str, column: str) -> str:
         "timestamp",
         "updated_at",
         "value",
+        "weight_kg",
+        "height_cm",
+        "current_weight_kg",
+        "target_weight_kg",
+        "target_calories",
+        "actual_calories",
+        "estimated_calories",
+        "protein_g",
+        "carbs_g",
+        "fat_g",
+        "confidence",
         "expires_at",
+        "logged_at",
+        "recorded_at",
     }
     int_columns = {
+        "birth_year",
         "message_count",
         "offset_value",
         "priority",
@@ -467,6 +488,14 @@ class PostgresReadRepository(StateReadRepository):
         if table == "cron_runs":
             return self._list_generic_rows(table, limit=limit, filters=filters)
         if table == "news_items":
+            return self._list_generic_rows(table, limit=limit, filters=filters)
+        if table in {
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
+        }:
             return self._list_generic_rows(table, limit=limit, filters=filters)
         if table == "feishu_card_states":
             return self._list_generic_rows(table, limit=limit, filters=filters)
@@ -641,6 +670,18 @@ class PostgresReadRepository(StateReadRepository):
                 value = str(filters.get(key, ""))
                 if value:
                     clauses.append(f"{key} = %({key})s")
+                    params[key] = value
+        if table in {
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
+        }:
+            for key in ("user_scope", "id", "meal_date", "plan_date", "date", "meal_type", "status"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{_quote_ident(key)} = %({key})s")
                     params[key] = value
         if table == "feishu_card_states":
             for key in ("card_id", "owner_account_id", "peer_id", "message_id"):
@@ -985,6 +1026,11 @@ class PostgresReadRepository(StateReadRepository):
             "channel_offsets",
             "cron_runs",
             "news_items",
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
             "feishu_card_states",
             "session_lanes",
             "session_lane_events",
@@ -1014,6 +1060,11 @@ class PostgresReadRepository(StateReadRepository):
             "channel_offsets": "key",
             "cron_runs": "id",
             "news_items": "key",
+            "user_profiles": "user_scope",
+            "weight_logs": "id",
+            "meal_logs": "id",
+            "daily_nutrition_summaries": "id",
+            "diet_plans": "id",
             "feishu_card_states": "card_id",
             "session_lanes": "session_key",
             "session_lane_events": "id",
@@ -1043,6 +1094,11 @@ class PostgresReadRepository(StateReadRepository):
             "channel_offsets": "updated_at",
             "cron_runs": "run_at",
             "news_items": "updated_at",
+            "user_profiles": "updated_at",
+            "weight_logs": "recorded_at",
+            "meal_logs": "logged_at",
+            "daily_nutrition_summaries": "updated_at",
+            "diet_plans": "created_at",
             "feishu_card_states": "updated_at",
             "session_lanes": "updated_at",
             "session_lane_events": "occurred_at",
@@ -1095,6 +1151,14 @@ class PostgresWriteRepository:
             return self._append_cron_run(row)
         if table == "news_items":
             return self._append_news_item(row)
+        if table in {
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
+        }:
+            return self._upsert_generic_row(table, row)
         if table == "feishu_card_states":
             return self._append_feishu_card_state(row)
         if table == "session_lanes":
@@ -1166,6 +1230,14 @@ class PostgresWriteRepository:
             return self._upsert_cron_run(row)
         if table == "news_items":
             return self._upsert_news_item(row)
+        if table in {
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
+        }:
+            return self._upsert_generic_row(table, row)
         if table == "feishu_card_states":
             return self._upsert_feishu_card_state(row)
         if table == "session_lanes":
@@ -1211,6 +1283,14 @@ class PostgresWriteRepository:
             return self._delete_cron_run(key)
         if table == "news_items":
             return self._delete_news_item(key)
+        if table in {
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
+        }:
+            return self._delete_generic_row(table, key)
         if table == "feishu_card_states":
             return self._delete_feishu_card_state(key)
         if table == "session_lanes":
@@ -2056,6 +2136,21 @@ class PostgresWriteRepository:
         self.query("news_items", sql="DELETE FROM news_items WHERE key = %(id)s", params={"id": key})
         return True
 
+    def _upsert_generic_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(row)
+        primary_key = self._primary_key(table)
+        if not payload.get(primary_key):
+            raise ValueError(f"missing primary key for {table}: {primary_key}")
+        sql = self._build_upsert_sql(table)
+        rows = self.query(table, sql=sql, params={"row": payload})
+        return rows[0] if rows else payload
+
+    def _delete_generic_row(self, table: str, key: str) -> bool:
+        primary_key = self._primary_key(table)
+        sql = f"DELETE FROM {self._table_name(table)} WHERE {_quote_ident(primary_key)} = %(id)s"
+        self.query(table, sql=sql, params={"id": key})
+        return True
+
     def _append_feishu_card_state(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row)
         if not payload.get("card_id"):
@@ -2263,11 +2358,17 @@ class PostgresWriteRepository:
             "metrics",
             "memory_entries",
             "config_audits",
+            "webhook_dedup_entries",
             "feishu_webhook_events",
             "feishu_onboarding_sessions",
             "channel_offsets",
             "cron_runs",
             "news_items",
+            "user_profiles",
+            "weight_logs",
+            "meal_logs",
+            "daily_nutrition_summaries",
+            "diet_plans",
             "feishu_card_states",
             "session_lanes",
             "session_lane_events",
@@ -2297,6 +2398,11 @@ class PostgresWriteRepository:
             "channel_offsets": "key",
             "cron_runs": "id",
             "news_items": "key",
+            "user_profiles": "user_scope",
+            "weight_logs": "id",
+            "meal_logs": "id",
+            "daily_nutrition_summaries": "id",
+            "diet_plans": "id",
             "feishu_card_states": "card_id",
             "session_lanes": "session_key",
             "session_lane_events": "id",
@@ -2620,6 +2726,96 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
             "metadata",
         ),
         indexes=(("store_name", "state"), ("source_id", "updated_at"), ("updated_at",)),
+    ),
+    PostgresTableSpec(
+        name="user_profiles",
+        primary_key="user_scope",
+        time_column="updated_at",
+        columns=(
+            "user_scope",
+            "display_name",
+            "gender",
+            "birth_year",
+            "height_cm",
+            "current_weight_kg",
+            "target_weight_kg",
+            "activity_level",
+            "timezone",
+            "diet_preferences",
+            "allergies",
+            "medical_notes",
+            "created_at",
+            "updated_at",
+            "metadata",
+        ),
+        indexes=(("updated_at",),),
+    ),
+    PostgresTableSpec(
+        name="weight_logs",
+        primary_key="id",
+        time_column="recorded_at",
+        columns=("id", "user_scope", "weight_kg", "recorded_at", "source", "metadata"),
+        indexes=(("user_scope", "recorded_at"),),
+    ),
+    PostgresTableSpec(
+        name="meal_logs",
+        primary_key="id",
+        time_column="logged_at",
+        columns=(
+            "id",
+            "user_scope",
+            "meal_date",
+            "meal_type",
+            "raw_text",
+            "items",
+            "estimated_calories",
+            "protein_g",
+            "carbs_g",
+            "fat_g",
+            "confidence",
+            "logged_at",
+            "metadata",
+        ),
+        indexes=(("user_scope", "meal_date"), ("user_scope", "logged_at"), ("meal_type", "logged_at")),
+    ),
+    PostgresTableSpec(
+        name="daily_nutrition_summaries",
+        primary_key="id",
+        time_column="updated_at",
+        columns=(
+            "id",
+            "user_scope",
+            "date",
+            "target_calories",
+            "actual_calories",
+            "protein_g",
+            "carbs_g",
+            "fat_g",
+            "summary_text",
+            "risk_flags",
+            "created_at",
+            "updated_at",
+            "metadata",
+        ),
+        indexes=(("user_scope", "date"), ("updated_at",)),
+    ),
+    PostgresTableSpec(
+        name="diet_plans",
+        primary_key="id",
+        time_column="created_at",
+        columns=(
+            "id",
+            "user_scope",
+            "plan_date",
+            "target_calories",
+            "meals",
+            "shopping_tips",
+            "generated_reason",
+            "status",
+            "created_at",
+            "metadata",
+        ),
+        indexes=(("user_scope", "plan_date"), ("status", "created_at")),
     ),
     PostgresTableSpec(
         name="feishu_card_states",

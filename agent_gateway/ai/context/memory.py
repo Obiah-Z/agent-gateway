@@ -79,6 +79,11 @@ class MemoryStore:
             return
         try:
             method(content, category=category, user_scope=user_scope)
+        except TypeError:
+            try:
+                method(content, category=category)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -92,6 +97,12 @@ class MemoryStore:
                 try:
                     method(content, category=category, user_scope=user_scope)
                     return
+                except TypeError:
+                    try:
+                        method(content, category=category)
+                        return
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         self._mirror(content, category, user_scope=user_scope)

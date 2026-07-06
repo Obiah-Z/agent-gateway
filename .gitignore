@@ -15,7 +15,8 @@ data/
 workspace/.sessions/
 workspace/.agents/
 workspace/cron/
-workspace/memory/daily/
+workspace/memory/
+workspace/diet/
 workspace/delivery-queue/
 .DS_Store
 Thumbs.db

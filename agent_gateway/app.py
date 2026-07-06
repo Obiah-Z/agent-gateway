@@ -19,6 +19,7 @@ from agent_gateway.config_loader import (
 from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.ai.context.prompt import PromptAssembler
 from agent_gateway.ai.context.memory import MemoryStore, register_memory_tools
+from agent_gateway.ai.context.diet import DietStore, register_diet_tools
 from agent_gateway.ai.context.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
 from agent_gateway.runtime.observability.events import RuntimeEventStore
@@ -87,6 +88,7 @@ class GatewayApplication:
     sessions: SessionStore  # 会话持久化存储，负责读写多轮对话历史。
     tools: ToolRegistry  # 工具注册表，向模型暴露可调用工具及 schema。
     memory_store: MemoryStore  # 长期记忆存储，负责记忆写入、检索和召回。
+    diet_store: DietStore  # 个人饮食与体重管理结构化存储。
     skills_manager: SkillsManager  # Skill 发现与注入管理器。
     prompt_assembler: PromptAssembler  # System prompt 组装器。
     runner: AgentLoopRunner  # Agent Loop 执行器，负责模型调用和工具闭环。
@@ -201,6 +203,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
 
     sessions = SessionStore(settings.sessions_dir)
     memory_store = MemoryStore(settings.workspace_root)
+    diet_store = DietStore(settings.workspace_root)
     event_store = RuntimeEventStore(
         settings.events_dir,
         retention_days=settings.events_retention_days,
@@ -237,6 +240,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     task_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
     event_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
     memory_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
+    diet_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None
     metrics_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
     alert_store.read_backend = state_bundle.read if hasattr(state_bundle.read, "list") else None  # type: ignore[assignment]
     sessions.backup_sink = state_bundle.backup
@@ -248,6 +252,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     task_store.write_backend = primary_write
     event_store.write_backend = primary_write
     memory_store.write_backend = primary_write
+    diet_store.write_backend = primary_write
     metrics_store.write_backend = primary_write
     alert_store.write_backend = primary_write
 
@@ -288,6 +293,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         default_timeout=settings.tool_timeout_seconds,
     )
     register_memory_tools(tools, memory_store)
+    register_diet_tools(tools, diet_store)
     register_web_search_tools(tools, settings)
     prompt_assembler = PromptAssembler(
         settings.workspace_root,
@@ -358,6 +364,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         task_queue=task_queue,
         state_read_repository=state_bundle.read,
         state_write_repository=primary_write,
+        diet_store=diet_store,
     )
     task_worker = TaskWorkerRuntime(
         task_queue,
@@ -452,6 +459,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         sessions=sessions,
         tools=tools,
         memory_store=memory_store,
+        diet_store=diet_store,
         skills_manager=skills_manager,
         prompt_assembler=prompt_assembler,
         runner=runner,

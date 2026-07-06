@@ -30,6 +30,11 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
         "channel_offsets",
         "cron_runs",
         "news_items",
+        "user_profiles",
+        "weight_logs",
+        "meal_logs",
+        "daily_nutrition_summaries",
+        "diet_plans",
         "feishu_card_states",
         "session_lanes",
         "session_lane_events",
@@ -55,11 +60,16 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
     assert "offset_value" in POSTGRES_STATE_TABLES[15].columns
     assert "output_preview" in POSTGRES_STATE_TABLES[16].columns
     assert "item_id" in POSTGRES_STATE_TABLES[17].columns
-    assert "page_index" in POSTGRES_STATE_TABLES[18].columns
-    assert "owner_token" in POSTGRES_STATE_TABLES[19].columns
-    assert "renewed_at" in POSTGRES_STATE_TABLES[19].columns
-    assert POSTGRES_STATE_TABLES[20].primary_key == "id"
-    assert "occurred_at" in POSTGRES_STATE_TABLES[20].columns
+    assert "user_scope" in POSTGRES_STATE_TABLES[18].columns
+    assert "weight_kg" in POSTGRES_STATE_TABLES[19].columns
+    assert "estimated_calories" in POSTGRES_STATE_TABLES[20].columns
+    assert "actual_calories" in POSTGRES_STATE_TABLES[21].columns
+    assert "target_calories" in POSTGRES_STATE_TABLES[22].columns
+    assert "page_index" in POSTGRES_STATE_TABLES[23].columns
+    assert "owner_token" in POSTGRES_STATE_TABLES[24].columns
+    assert "renewed_at" in POSTGRES_STATE_TABLES[24].columns
+    assert POSTGRES_STATE_TABLES[25].primary_key == "id"
+    assert "occurred_at" in POSTGRES_STATE_TABLES[25].columns
 
 
 def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
@@ -75,6 +85,11 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE TABLE IF NOT EXISTS "channel_offsets"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "cron_runs"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "news_items"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "user_profiles"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "weight_logs"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "meal_logs"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "daily_nutrition_summaries"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "diet_plans"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "feishu_card_states"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "session_lanes"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "session_lane_events"' in sql
@@ -92,6 +107,8 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE INDEX IF NOT EXISTS "idx_channel_offsets_channel_account_id"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_cron_runs_job_id_run_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_news_items_store_name_state"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_meal_logs_user_scope_meal_date"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_diet_plans_user_scope_plan_date"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_card_states_owner_account_id_updated_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_session_lanes_state_updated_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_session_lanes_worker_id_updated_at"' in sql

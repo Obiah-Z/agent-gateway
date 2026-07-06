@@ -1,0 +1,194 @@
+import json
+from pathlib import Path
+
+from agent_gateway.ai.context.diet import DietStore, register_diet_tools
+from agent_gateway.ai.tools.registry import ToolRegistry
+
+
+def test_diet_store_isolates_meal_logs_by_user_scope(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+
+    store.add_meal_log(
+        "user:alice",
+        meal_type="breakfast",
+        raw_text="燕麦和鸡蛋",
+        estimated_calories=350,
+        protein_g=20,
+    )
+    store.add_meal_log(
+        "user:bob",
+        meal_type="breakfast",
+        raw_text="牛肉饭",
+        estimated_calories=750,
+        protein_g=35,
+    )
+
+    alice_meals = store.list_meal_logs("user:alice")
+    bob_summary = store.summarize_day("user:bob")
+
+    assert len(alice_meals) == 1
+    assert alice_meals[0]["raw_text"] == "燕麦和鸡蛋"
+    assert bob_summary["actual_calories"] == 750
+    assert "燕麦" not in json.dumps(bob_summary, ensure_ascii=False)
+
+
+def test_diet_tools_use_runtime_context_scope(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+
+    profile_raw = registry.dispatch(
+        "profile_update",
+        {
+            "height_cm": 178,
+            "current_weight_kg": 82,
+            "target_weight_kg": 75,
+            "diet_preferences": ["中餐", "外卖"],
+        },
+        runtime_context={"memory_user_scope": "user:wework:test"},
+    )
+    meal_raw = registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_type": "lunch",
+            "raw_text": "牛肉饭一份，无糖可乐",
+            "estimated_calories": 780,
+            "protein_g": 38,
+            "confidence": 0.7,
+        },
+        runtime_context={"memory_user_scope": "user:wework:test"},
+    )
+    summary_raw = registry.dispatch(
+        "nutrition_day_summary",
+        {},
+        runtime_context={"memory_user_scope": "user:wework:test"},
+    )
+    plan_raw = registry.dispatch(
+        "diet_plan_generate",
+        {},
+        runtime_context={"memory_user_scope": "user:wework:test"},
+    )
+
+    profile = json.loads(profile_raw)
+    meal = json.loads(meal_raw)
+    summary = json.loads(summary_raw)
+    plan = json.loads(plan_raw)
+
+    assert profile["status"] == "saved"
+    assert profile["profile"]["user_scope"] == "user:wework:test"
+    assert meal["meal"]["user_scope"] == "user:wework:test"
+    assert summary["summary"]["actual_calories"] == 780
+    assert plan["plan"]["user_scope"] == "user:wework:test"
+    assert plan["plan"]["meals"]["breakfast"]
+
+
+def test_diet_plan_adjusts_dinner_after_repeated_high_dinners(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    scope = "user:wework:diet"
+    for day in range(1, 4):
+        store.add_meal_log(
+            scope,
+            meal_date=f"2026-07-0{day}",
+            meal_type="dinner",
+            raw_text="重油外卖晚餐",
+            estimated_calories=850,
+        )
+
+    plan = store.generate_plan(scope, plan_date="2026-07-04")
+
+    adjustment = plan["metadata"]["adjustment"]
+    assert adjustment["lighter_dinner"] is True
+    assert adjustment["high_dinner_count"] == 3
+    assert "自动降低晚餐油脂" in plan["generated_reason"]
+    assert "半拳粗粮主食" in plan["meals"]["dinner"][0]
+
+
+def test_diet_plan_adjusts_for_low_protein_and_missing_breakfast(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    scope = "user:wework:diet"
+    for day in range(1, 7):
+        store.add_meal_log(
+            scope,
+            meal_date=f"2026-07-0{day}",
+            meal_type="lunch" if day % 2 else "dinner",
+            raw_text="普通简餐",
+            estimated_calories=520,
+            protein_g=12,
+        )
+
+    plan = store.generate_plan(scope, plan_date="2026-07-07")
+
+    adjustment = plan["metadata"]["adjustment"]
+    assert adjustment["protein_focus"] is True
+    assert adjustment["breakfast_simple"] is True
+    assert "提高蛋白质优先级" in plan["generated_reason"]
+    assert "固定早餐" in plan["meals"]["breakfast"][0]
+    assert "双蛋白" in plan["meals"]["lunch"][0]
+
+
+def test_diet_today_status_reports_meals_plan_weight_and_flags(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    scope = "user:wework:diet"
+    store.update_profile(scope, height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log(scope, 81.5, recorded_at=1783290000.0)
+    store.generate_plan(scope, plan_date="2026-07-06")
+    store.add_meal_log(
+        scope,
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭一份",
+        estimated_calories=780,
+        protein_g=30,
+    )
+
+    status = store.today_status(scope, date="2026-07-06")
+
+    assert status["date"] == "2026-07-06"
+    assert status["meal_count"] == 1
+    assert status["actual_calories"] == 780
+    assert status["latest_weight"]["weight_kg"] == 81.5
+    assert status["plan"]["plan_date"] == "2026-07-06"
+    assert status["missing_meals"] == ["breakfast", "dinner"]
+    assert status["trend_7d"]["average_calories"] == 780.0
+    assert "missing_meals" in status["risk_flags"]
+
+
+def test_diet_progress_summary_reports_daily_trends(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    scope = "user:wework:diet"
+    store.add_weight_log(scope, 82.0, recorded_at=100.0)
+    store.add_weight_log(scope, 81.2, recorded_at=200.0)
+    store.add_meal_log(
+        scope,
+        meal_date="2026-07-05",
+        meal_type="breakfast",
+        raw_text="鸡蛋豆浆",
+        estimated_calories=320,
+        protein_g=22,
+    )
+    store.add_meal_log(
+        scope,
+        meal_date="2026-07-05",
+        meal_type="lunch",
+        raw_text="牛肉饭",
+        estimated_calories=720,
+        protein_g=35,
+    )
+    store.add_meal_log(
+        scope,
+        meal_date="2026-07-06",
+        meal_type="dinner",
+        raw_text="鸡胸沙拉",
+        estimated_calories=460,
+        protein_g=42,
+    )
+
+    progress = store.progress_summary(scope, days=7)
+
+    assert progress["meal_count"] == 3
+    assert progress["weight_change_kg"] == -0.8
+    assert progress["average_calories"] == 750.0
+    assert progress["average_protein_g"] == 49.5
+    assert progress["missing_meal_days"] == 2
+    assert progress["daily"][0]["date"] == "2026-07-06"
+    assert progress["daily"][0]["missing_meals"] == ["breakfast", "lunch"]
