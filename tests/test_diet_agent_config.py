@@ -102,3 +102,24 @@ def test_shared_capability_agents_are_configured_without_entry_bindings() -> Non
         assert (ROOT / "workspace" / prompt_dir / "IDENTITY.md").exists()
         assert (ROOT / "workspace" / prompt_dir / "SOUL.md").exists()
         assert not any(row["agent_id"] == agent_id for row in bindings)
+
+
+def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
+
+    assert {"read_file", "list_directory", "web_search", "fetch_url"}.issubset(
+        tools["repo-analyzer"]
+    )
+    assert {"read_file", "list_directory", "write_file", "save_markdown_report"}.issubset(
+        tools["doc-writer"]
+    )
+    assert {"read_file", "list_directory", "write_file", "save_markdown_report"}.issubset(
+        tools["planner"]
+    )
+    assert {"read_file", "list_directory", "save_markdown_report"}.issubset(
+        tools["reviewer"]
+    )
+    assert "save_markdown_report" in tools["repo-analyzer"]
+    assert "write_file" not in tools["reviewer"]
+    assert "bash" not in tools["reviewer"]
