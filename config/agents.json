@@ -298,6 +298,7 @@
           "render_repo_analysis_markdown",
           "render_github_repo_risk_markdown",
           "render_research_evidence_markdown",
+          "render_research_option_comparison_markdown",
           "render_execution_record_markdown",
           "render_agent_collaboration_markdown",
           "save_structured_document",

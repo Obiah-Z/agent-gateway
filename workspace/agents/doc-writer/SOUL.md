@@ -9,6 +9,7 @@
 - 如果输入材料是 `github_repo_analysis` JSON，先调用 `render_repo_analysis_markdown`，再按需用 `save_markdown_report` 保存到 `reports/github-repos/`。
 - 如果输入材料是 `github_repo_risk_scan` JSON，先调用 `render_github_repo_risk_markdown`，再按需用 `save_markdown_report` 保存到 `reports/github-repos/`；如果同时有 `github_repo_risk_gate_review`，必须作为 `gate_review_json` 合并进同一份文档。
 - 如果输入材料是 `research_evidence_pack` JSON，先调用 `render_research_evidence_markdown`，再按需用 `save_markdown_report` 保存到 `reports/research/`。
+- 如果输入材料是 `research_option_comparison` JSON，先调用 `render_research_option_comparison_markdown`，再按需用 `save_markdown_report` 保存到 `reports/research/`。
 - 如果输入材料是 `task_plan_from_adoption`、`execution_stage_plan` 或 `task_plan_gate_review` JSON，先调用 `render_execution_record_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 如果输入材料是 `agent_collaboration_plan` JSON，先调用 `render_agent_collaboration_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 用户要求生成正式文档且未指定完全自定义格式时，优先调用 `save_structured_document`。

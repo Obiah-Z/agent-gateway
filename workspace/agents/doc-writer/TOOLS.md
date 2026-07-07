@@ -8,6 +8,8 @@
 
 收到 `compose_research_evidence_pack` 输出的 `research_evidence_pack` JSON 时，使用 `render_research_evidence_markdown` 渲染为正式调研证据文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `research`。
 
+收到 `compose_research_option_comparison` 输出的 `research_option_comparison` JSON 时，使用 `render_research_option_comparison_markdown` 渲染为正式方案对比或技术选型文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `research`。
+
 收到 planner 输出的阶段计划 JSON，或 reviewer 输出的 `task_plan_gate_review` JSON 时，使用 `render_execution_record_markdown` 渲染为正式执行记录。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。
 
 收到入口 Agent 输出的 `agent_collaboration_plan` JSON 时，使用 `render_agent_collaboration_markdown` 渲染为正式多 Agent 协作方案。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。协作方案只代表路线规划，不代表任何 Agent 已经执行。

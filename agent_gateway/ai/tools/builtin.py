@@ -1727,6 +1727,90 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_research_option_comparison_markdown(
+        comparison_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 research 的方案对比 JSON 渲染成正式 Markdown 选型报告。"""
+
+        if not comparison_json.strip():
+            return "Error: comparison_json is required"
+        comparison = json.loads(comparison_json)
+        if not isinstance(comparison, dict):
+            return "Error: comparison_json must be a JSON object"
+        if comparison.get("type") != "research_option_comparison":
+            return "Error: comparison_json type must be research_option_comparison"
+
+        topic = str(comparison.get("topic") or "方案对比").strip()
+        document_title = title.strip() or f"方案对比：{topic}"
+        summary = "\n".join(
+            [
+                f"- 主题：{topic}",
+                f"- 决策问题：{comparison.get('decision_question') or '待补充'}",
+                f"- 推荐方案：{comparison.get('recommended_option') or '待定'}",
+                f"- 证据质量：{comparison.get('evidence_quality') or 'unknown'}",
+                f"- 来源数量：{comparison.get('source_count', 0)}，一手来源：{comparison.get('primary_source_count', 0)}",
+                f"- 时效说明：{comparison.get('freshness') or '未说明'}",
+                f"- 下游用途：{comparison.get('downstream_use') or '未说明'}",
+            ]
+        )
+
+        option_rows = []
+        for option in comparison.get("options") or []:
+            if not isinstance(option, dict):
+                continue
+            option_rows.append(
+                [
+                    option.get("name") or "未命名方案",
+                    option.get("score", 0),
+                    "；".join(_clean_strings(option.get("strengths") if isinstance(option.get("strengths"), list) else [])) or "待补充",
+                    "；".join(_clean_strings(option.get("weaknesses") if isinstance(option.get("weaknesses"), list) else [])) or "待补充",
+                    "；".join(_clean_strings(option.get("best_for") if isinstance(option.get("best_for"), list) else [])) or "待补充",
+                    "；".join(_clean_strings(option.get("avoid_when") if isinstance(option.get("avoid_when"), list) else [])) or "待补充",
+                ]
+            )
+
+        source_rows = []
+        for index, source in enumerate(comparison.get("sources") or [], start=1):
+            if not isinstance(source, dict):
+                continue
+            source_rows.append(
+                [
+                    index,
+                    source.get("title") or "未命名来源",
+                    source.get("source_type") or "unknown",
+                    source.get("fact") or "未摘录事实",
+                    source.get("url") or "未提供",
+                ]
+            )
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(comparison, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section("评价维度", _markdown_bullets(comparison.get("criteria"))),
+                _markdown_section("约束条件", _markdown_bullets(comparison.get("constraints"))),
+                _markdown_section(
+                    "候选方案对比",
+                    _markdown_table(["方案", "评分", "优势", "短板", "适合场景", "不适合场景"], option_rows),
+                ),
+                _markdown_section(
+                    "来源依据",
+                    _markdown_table(["序号", "来源", "类型", "事实摘录", "URL"], source_rows),
+                ),
+                _markdown_section("不确定点", _markdown_bullets(comparison.get("uncertainty"))),
+                _markdown_section("建议下一步", _markdown_bullets(comparison.get("next_actions"))),
+            ]
+        ) + metadata
+
     def render_execution_record_markdown(
         task_plan_json: str,
         gate_review_json: str = "",
@@ -4087,6 +4171,35 @@ def register_builtin_tools(
             },
             handler=render_research_evidence_markdown,
             tags=("document", "markdown", "research", "evidence"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_research_option_comparison_markdown",
+            description=(
+                "Render a research_option_comparison JSON object from research into "
+                "a formal Chinese Markdown option comparison or technology selection report."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["comparison_json"],
+                "properties": {
+                    "comparison_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_option_comparison.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw comparison metadata.",
+                    },
+                },
+            },
+            handler=render_research_option_comparison_markdown,
+            tags=("document", "markdown", "research", "comparison"),
         )
     )
     registry.register(

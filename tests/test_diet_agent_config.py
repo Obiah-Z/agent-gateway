@@ -238,6 +238,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "render_repo_analysis_markdown",
         "render_github_repo_risk_markdown",
         "render_research_evidence_markdown",
+        "render_research_option_comparison_markdown",
         "render_execution_record_markdown",
         "render_agent_collaboration_markdown",
         "save_structured_document",
@@ -354,6 +355,10 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_research_evidence_markdown" in identity
     assert "render_research_evidence_markdown" in soul
     assert "render_research_evidence_markdown" in tools_md
+    assert "render_research_option_comparison_markdown" in identity
+    assert "render_research_option_comparison_markdown" in soul
+    assert "render_research_option_comparison_markdown" in tools_md
+    assert "research_option_comparison" in tools_md
     assert "reports/research" in soul
     assert "render_execution_record_markdown" in identity
     assert "render_execution_record_markdown" in soul
@@ -533,6 +538,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "review_github_repo_risk_gate",
         "compose_repo_review_task_plan",
         "render_research_evidence_markdown",
+        "render_research_option_comparison_markdown",
         "review_research_evidence_gate",
         "render_execution_record_markdown",
         "render_agent_collaboration_markdown",

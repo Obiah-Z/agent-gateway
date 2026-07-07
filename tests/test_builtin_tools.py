@@ -961,6 +961,70 @@ def test_render_research_evidence_markdown_formats_sources_and_gaps(tmp_path: Pa
     assert "```json" in markdown
 
 
+def test_render_research_option_comparison_markdown_formats_decision_report(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    comparison = {
+        "type": "research_option_comparison",
+        "topic": "入站队列中间件选型",
+        "decision_question": "Gateway 分布式入站削峰优先选择 RabbitMQ 还是 Redis？",
+        "criteria": ["可靠投递", "削峰能力", "会话串行协同"],
+        "constraints": ["优先企业级可靠性", "保留 Redis 做协调层"],
+        "recommended_option": "RabbitMQ",
+        "evidence_quality": "strong",
+        "source_count": 2,
+        "primary_source_count": 2,
+        "options": [
+            {
+                "name": "RabbitMQ",
+                "score": 86,
+                "strengths": ["确认机制成熟", "适合削峰"],
+                "weaknesses": ["会话串行仍需协调层"],
+                "best_for": ["企业级可靠队列"],
+                "avoid_when": ["只需要轻量协调"],
+            },
+            {
+                "name": "Redis",
+                "score": 72,
+                "strengths": ["轻量"],
+                "weaknesses": ["消息队列语义不足"],
+                "best_for": ["锁和 ready index"],
+                "avoid_when": ["需要完整可靠队列"],
+            },
+        ],
+        "sources": [
+            {
+                "title": "RabbitMQ docs",
+                "url": "https://www.rabbitmq.com/docs",
+                "source_type": "official",
+                "fact": "RabbitMQ documents acknowledgements and durable queues.",
+            }
+        ],
+        "uncertainty": ["仍需本机压测确认容量。"],
+        "freshness": "2026-07-07 检索",
+        "next_actions": ["把推荐方案「RabbitMQ」交给 planner 拆成验证计划。"],
+        "downstream_use": "供 planner、reviewer 和 doc-writer 复用。",
+    }
+
+    markdown = registry.dispatch(
+        "render_research_option_comparison_markdown",
+        {
+            "comparison_json": json.dumps(comparison, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 方案对比：入站队列中间件选型")
+    assert "- 推荐方案：RabbitMQ" in markdown
+    assert "## 候选方案对比" in markdown
+    assert "| RabbitMQ | 86 | 确认机制成熟；适合削峰 | 会话串行仍需协调层 | 企业级可靠队列 | 只需要轻量协调 |" in markdown
+    assert "| 1 | RabbitMQ docs | official | RabbitMQ documents acknowledgements and durable queues. | https://www.rabbitmq.com/docs |" in markdown
+    assert "- 仍需本机压测确认容量。" in markdown
+    assert "```json" in markdown
+
+
 def test_render_execution_record_markdown_formats_plan_and_gate_review(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
