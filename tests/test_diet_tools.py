@@ -292,3 +292,64 @@ def test_diet_coach_briefing_reports_risks_and_actions(tmp_path: Path) -> None:
     assert any("补齐早餐、午餐、晚餐" in action for action in briefing["suggested_actions"])
     assert any("一掌蛋白质" in action for action in briefing["suggested_actions"])
     assert briefing["recent_daily"][0]["date"] == "2026-07-06"
+
+
+def test_diet_daily_loop_combines_today_plan_weight_and_actions(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=1783290000.0)
+    store.generate_plan("user:wework:diet", plan_date="2026-07-06")
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭一份",
+        estimated_calories=780,
+        protein_g=30,
+    )
+    store.add_meal_log(
+        "user:other",
+        meal_date="2026-07-06",
+        meal_type="breakfast",
+        raw_text="燕麦",
+        estimated_calories=300,
+        protein_g=12,
+    )
+
+    loop = json.loads(
+        registry.dispatch(
+            "diet_daily_loop_generate",
+            {"date": "2026-07-06", "days": 7},
+            runtime_context=context,
+        )
+    )["loop"]
+
+    assert loop["type"] == "diet_daily_loop"
+    assert loop["user_scope"] == "user:wework:diet"
+    assert loop["date"] == "2026-07-06"
+    assert loop["profile_complete"] is True
+    assert loop["actual_calories"] == 780
+    assert loop["latest_weight"]["weight_kg"] == 81.5
+    assert loop["plan_status"] == "available"
+    assert loop["plan"]["plan_date"] == "2026-07-06"
+    assert loop["missing_meals"] == ["breakfast", "dinner"]
+    assert "missing_meals" in loop["risk_flags"]
+    assert any("补记缺失餐次" in action for action in loop["next_actions"])
+    serialized = json.dumps(loop, ensure_ascii=False)
+    assert "user:other" not in serialized
+    assert "recent_meals" not in loop
+
+
+def test_diet_daily_loop_reports_missing_plan_without_auto_generating(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    loop = store.daily_loop("user:wework:diet", date="2026-07-06")
+
+    assert loop["plan_status"] == "missing"
+    assert loop["plan"] is None
+    assert store.get_plan("user:wework:diet", plan_date="2026-07-06") is None
+    assert "今日计划缺失" in loop["reminders"]
+    assert any("生成今日饮食计划" in action for action in loop["next_actions"])

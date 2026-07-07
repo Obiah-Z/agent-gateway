@@ -180,6 +180,7 @@
           "weight_log_add",
           "progress_summary",
           "diet_coach_briefing",
+          "diet_daily_loop_generate",
           "memory_search",
           "memory_write"
         ]

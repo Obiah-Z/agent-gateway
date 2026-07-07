@@ -16,6 +16,7 @@
 - 查询当天饮食时，使用 `meal_log_list` 或 `nutrition_day_summary`。
 - 生成计划时，使用 `diet_plan_generate`。
 - 记录体重时，使用 `weight_log_add`。
+- 用户询问“今天怎么吃 / 今天还缺什么 / 饮食闭环 / 晚间收口 / 今日执行情况”时，优先使用 `diet_daily_loop_generate`。
 - 用户询问“最近趋势 / 周总结 / 减脂进展 / 下一步怎么调整”时，优先使用 `diet_coach_briefing`。
 - 只有长期稳定偏好才写入 `memory_write`。
 

@@ -387,6 +387,62 @@ class DietStore:
             "risk_flags": self._today_risk_flags(summary, missing, profile),
         }
 
+    def daily_loop(self, user_scope: str, *, date: str = "", days: int = 7) -> dict[str, Any]:
+        """生成面向聊天场景的每日饮食执行闭环。
+
+        只聚合已有事实，不自动生成计划，避免用户查询状态时产生隐式写入。
+        """
+
+        scope = self._require_scope(user_scope)
+        safe_days = max(1, min(int(days or 7), 30))
+        status = self.today_status(scope, date=date)
+        briefing = self.coach_briefing(scope, days=safe_days)
+        plan = status.get("plan") if isinstance(status.get("plan"), dict) else None
+        missing_meals = list(status.get("missing_meals", []))
+        risk_flags = sorted(
+            set(
+                [
+                    *[str(flag) for flag in status.get("risk_flags", [])],
+                    *[str(flag) for flag in briefing.get("risk_flags", [])],
+                ]
+            )
+        )
+        return {
+            "type": "diet_daily_loop",
+            "user_scope": scope,
+            "date": status["date"],
+            "profile_complete": bool(status.get("profile_complete")),
+            "target_calories": status.get("target_calories", 0.0),
+            "actual_calories": status.get("actual_calories", 0.0),
+            "protein_g": status.get("protein_g", 0.0),
+            "carbs_g": status.get("carbs_g", 0.0),
+            "fat_g": status.get("fat_g", 0.0),
+            "meal_count": status.get("meal_count", 0),
+            "missing_meals": missing_meals,
+            "latest_weight": status.get("latest_weight"),
+            "plan_status": "available" if plan else "missing",
+            "plan": plan,
+            "trend": {
+                "days": briefing.get("days", safe_days),
+                "weight_change_kg": briefing.get("weight_change_kg", 0.0),
+                "average_calories": briefing.get("average_calories", 0.0),
+                "average_protein_g": briefing.get("average_protein_g", 0.0),
+                "missing_meal_days": briefing.get("missing_meal_days", 0),
+            },
+            "risk_flags": risk_flags,
+            "highlights": briefing.get("highlights", []),
+            "next_actions": self._daily_loop_actions(
+                status=status,
+                briefing=briefing,
+                plan_available=plan is not None,
+            ),
+            "reminders": self._daily_loop_reminders(
+                missing_meals,
+                plan_available=plan is not None,
+            ),
+            "note": "每日闭环只汇总已记录的数据；如果缺少计划或餐食，请先补齐后再复盘。",
+        }
+
     def _target_calories(self, profile: dict[str, Any]) -> float:
         current = _as_float(profile.get("current_weight_kg"))
         target = _as_float(profile.get("target_weight_kg"))
@@ -588,6 +644,43 @@ class DietStore:
         if not actions:
             actions.append("保持当前记录节奏，下一步关注晚餐油脂和每日蛋白质是否稳定。")
         return actions[:5]
+
+    @staticmethod
+    def _daily_loop_actions(
+        *,
+        status: dict[str, Any],
+        briefing: dict[str, Any],
+        plan_available: bool,
+    ) -> list[str]:
+        actions: list[str] = []
+        if not status.get("profile_complete"):
+            actions.append("先补充身高、当前体重、目标体重和活动水平。")
+        if not plan_available:
+            actions.append("生成今日饮食计划，再按计划执行三餐。")
+        missing_meals = list(status.get("missing_meals", []))
+        if missing_meals:
+            actions.append(f"补记缺失餐次：{'、'.join(missing_meals)}。")
+        risks = set(str(flag) for flag in briefing.get("risk_flags", []))
+        if "protein_low" in risks:
+            actions.append("下一餐优先补足一掌蛋白质。")
+        if "calories_over_target" in risks:
+            actions.append("下一餐减少油炸、重酱汁和含糖饮料。")
+        if "calories_too_low" in risks:
+            actions.append("不要继续极端压低热量，先补足蛋白质和蔬菜。")
+        if not actions:
+            actions.append("按当前计划执行，晚间做一次营养总结。")
+        return actions[:5]
+
+    @staticmethod
+    def _daily_loop_reminders(missing_meals: list[str], *, plan_available: bool) -> list[str]:
+        reminders: list[str] = []
+        if not plan_available:
+            reminders.append("今日计划缺失")
+        if missing_meals:
+            reminders.append("餐食记录未闭环")
+        if not reminders:
+            reminders.append("今日记录闭环正常")
+        return reminders
 
     def _backend_get(self, table: str, key: str) -> dict[str, Any] | None:
         backend = self.read_backend
@@ -809,6 +902,16 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "briefing": diet_store.coach_briefing(scope, days=days)})
 
+    def diet_daily_loop_generate(
+        *,
+        date: str = "",
+        days: int = 7,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json({"status": "ok", "loop": diet_store.daily_loop(scope, date=date, days=days)})
+
     registry.register(
         RegisteredTool(
             name="profile_get",
@@ -959,5 +1062,21 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_coach_briefing,
             tags=("diet", "briefing", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_daily_loop_generate",
+            description="Generate a user-facing daily diet execution loop from today's records, plan, weight, risks, and next actions.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "days": {"type": "integer"},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_daily_loop_generate,
+            tags=("diet", "daily", "summary", "read"),
         )
     )
