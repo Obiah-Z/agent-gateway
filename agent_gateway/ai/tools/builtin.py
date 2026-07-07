@@ -2567,6 +2567,33 @@ def register_builtin_tools(
                     "expected_output": "正式 Markdown 文档。",
                 },
             ],
+            "research-option-validation": [
+                {
+                    "agent_id": "research",
+                    "purpose": "围绕技术选型、方案对比或中间件取舍做来源核验，并输出结构化方案对比。",
+                    "expected_output": "research_option_comparison JSON。",
+                },
+                {
+                    "agent_id": "reviewer",
+                    "purpose": "审查方案对比是否具备决策问题、候选方案、评价维度、来源、推荐项和不确定点。",
+                    "expected_output": "research_option_comparison_gate_review JSON。",
+                },
+                {
+                    "agent_id": "planner",
+                    "purpose": "把方案对比和门禁结论转成最小验证计划，no-go 时只安排补证。",
+                    "expected_output": "task_plan_from_research_option_comparison JSON。",
+                },
+                {
+                    "agent_id": "reviewer",
+                    "purpose": "审查方案验证计划是否具备执行前条件，并阻止 no-go 计划直接进入实现。",
+                    "expected_output": "task_plan_gate_review JSON。",
+                },
+                {
+                    "agent_id": "doc-writer",
+                    "purpose": "把方案对比、门禁结论和验证计划整理成正式 Markdown 方案验证文档。",
+                    "expected_output": "正式 Markdown 方案验证计划或报告路径。",
+                },
+            ],
             "plan-review-document": [
                 {
                     "agent_id": "planner",
@@ -2602,6 +2629,9 @@ def register_builtin_tools(
             "github": "repo-adoption",
             "document": "research-document",
             "research": "research-document",
+            "option-validation": "research-option-validation",
+            "technology-selection": "research-option-validation",
+            "tech-selection": "research-option-validation",
             "planning": "plan-review-document",
             "review": "plan-review-document",
             "ops": "ops-diagnosis",
@@ -2660,6 +2690,33 @@ def register_builtin_tools(
         text = f"{user_text} {context_hint}".strip()
         normalized = text.lower()
         catalog = [
+            {
+                "intent": "research-option-validation",
+                "agent": "research",
+                "keywords": (
+                    "技术选型",
+                    "方案对比",
+                    "中间件取舍",
+                    "为什么选择",
+                    "为什么选",
+                    "选 rabbitmq",
+                    "选 redis",
+                    "选 kafka",
+                    "对比",
+                    "验证计划",
+                    "最小验证",
+                    "落地计划",
+                    "正式报告",
+                    "selection",
+                    "comparison",
+                    "validation plan",
+                ),
+                "reason": "用户不只是要资料对比，还需要方案门禁、验证计划或正式文档，适合 research → reviewer → planner → reviewer → doc-writer 协作。",
+                "next": "调用 plan_agent_collaboration，task_type 使用 research-option-validation，按 research → reviewer → planner → reviewer → doc-writer 串联。",
+                "direct": False,
+                "requires_collaboration": True,
+                "collaboration_task_type": "research-option-validation",
+            },
             {
                 "intent": "repo-adoption",
                 "agent": "repo-analyzer",
@@ -2850,6 +2907,32 @@ def register_builtin_tools(
             "是否值得",
             "adoption",
         )
+        option_triggers = (
+            "技术选型",
+            "方案对比",
+            "中间件取舍",
+            "为什么选择",
+            "为什么选",
+            "选型",
+            "对比",
+            "selection",
+            "comparison",
+        )
+        option_workflow_triggers = (
+            "验证计划",
+            "最小验证",
+            "落地计划",
+            "计划",
+            "报告",
+            "文档",
+            "审查",
+            "门禁",
+            "风险",
+            "validation",
+            "report",
+            "document",
+            "review",
+        )
 
         def intent_score(row: dict[str, Any]) -> int:
             score_value = _keyword_score(normalized, row["keywords"])
@@ -2857,6 +2940,11 @@ def register_builtin_tools(
                 has_repo = _keyword_score(normalized, repo_triggers) > 0
                 has_adoption = _keyword_score(normalized, adoption_triggers) > 0
                 if not (has_repo and has_adoption):
+                    return 0
+            if row.get("intent") == "research-option-validation":
+                has_option = _keyword_score(normalized, option_triggers) > 0
+                has_workflow = _keyword_score(normalized, option_workflow_triggers) > 0
+                if not (has_option and has_workflow):
                     return 0
             return score_value
 
@@ -4872,7 +4960,7 @@ def register_builtin_tools(
                     "user_goal": {"type": "string"},
                     "task_type": {
                         "type": "string",
-                        "description": "repo-adoption/research-document/plan-review-document/ops-diagnosis or common aliases.",
+                        "description": "repo-adoption/research-document/research-option-validation/plan-review-document/ops-diagnosis or common aliases.",
                     },
                     "preferred_agents": {"type": "array", "items": {"type": "string"}},
                     "constraints": {"type": "array", "items": {"type": "string"}},

@@ -11,6 +11,7 @@
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
 - 如果一个任务明显需要多个 Agent 串联，例如“调研并写报告”“分析仓库并给采纳计划”“分析仓库风险后形成执行计划/报告”“规划后审查再成文”，调用 `plan_agent_collaboration`。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
+- 技术选型、方案对比或中间件取舍如果同时要求验证计划、风险审查、落地计划或正式报告，`plan_agent_collaboration` 的 `task_type` 使用 `research-option-validation`，路线应包含 research、reviewer、planner、reviewer、doc-writer。
 - 已生成协作路线后，调用 `format_entry_response` 并传入 `collaboration_plan_json`，让用户看到阶段路线和未自动执行声明。
 - 需要解释“为什么推荐这个 Agent / 为什么需要多 Agent 协作”时，调用 `explain_agent_route`，不要手写不稳定的路线说明。
 - 需要向用户说明推荐 Agent 或交接摘要时，使用 `format_entry_response` 输出最终回复。

@@ -490,6 +490,8 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
         encoding="utf-8"
     )
     assert "repo-adoption" in main_soul
+    assert "research-option-validation" in main_soul
+    assert "research-option-validation" in main_tools
     assert "requires_collaboration=true" in main_soul
     assert "requires_collaboration=true" in main_tools
     assert "collaboration_plan_json" in main_soul
@@ -500,17 +502,25 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
     assert "prepare_entry_route_response" in main_tools
     assert "repo-analyzer、reviewer、planner、doc-writer" in main_soul
     assert "repo-analyzer → reviewer → planner → doc-writer" in main_tools
+    assert "research、reviewer、planner、reviewer、doc-writer" in main_soul
+    assert "research → reviewer → planner → reviewer → doc-writer" in main_tools
 
     for agent_id in ("feishu-entry", "wework-entry"):
         soul = (ROOT / "workspace" / "agents" / agent_id / "SOUL.md").read_text(
             encoding="utf-8"
         )
+        tools_md = (ROOT / "workspace" / "agents" / agent_id / "TOOLS.md").read_text(
+            encoding="utf-8"
+        )
         assert "repo-adoption" in soul
+        assert "research-option-validation" in soul
+        assert "research-option-validation" in tools_md
         assert "requires_collaboration=true" in soul
         assert "collaboration_plan_json" in soul
         assert "explain_agent_route" in soul
         assert "prepare_entry_route_response" in soul
         assert "repo-analyzer、reviewer、planner、doc-writer" in soul
+        assert "research、reviewer、planner、reviewer、doc-writer" in soul
 
 
 def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> None:
@@ -569,6 +579,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "diet_day_review_plan_generate",
         "build_agent_handoff_prompt",
         "plan_agent_collaboration",
+        "research-option-validation",
         "explain_agent_route",
         "prepare_entry_route_response",
     ]:

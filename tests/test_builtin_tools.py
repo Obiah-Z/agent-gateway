@@ -1420,6 +1420,47 @@ def test_plan_agent_collaboration_builds_repo_adoption_route(tmp_path: Path) -> 
     assert "不代表任何 Agent 已经执行" in data["note"]
 
 
+def test_plan_agent_collaboration_builds_research_option_validation_route(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "plan_agent_collaboration",
+        {
+            "user_goal": "对比 RabbitMQ、Redis、Kafka，并形成 Gateway 入站队列选型验证计划和正式报告。",
+            "task_type": "research-option-validation",
+            "constraints": ["只形成验证计划，不直接改生产配置"],
+            "expected_output": "Markdown 方案验证计划",
+            "should_persist": True,
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "agent_collaboration_plan"
+    assert data["task_type"] == "research-option-validation"
+    assert [stage["agent_id"] for stage in data["handoff_sequence"]] == [
+        "research",
+        "reviewer",
+        "planner",
+        "reviewer",
+        "doc-writer",
+    ]
+    assert data["handoff_sequence"][0]["expected_output"] == "research_option_comparison JSON。"
+    assert data["handoff_sequence"][1]["expected_output"] == (
+        "research_option_comparison_gate_review JSON。"
+    )
+    assert data["handoff_sequence"][2]["expected_output"] == (
+        "task_plan_from_research_option_comparison JSON。"
+    )
+    assert data["handoff_sequence"][3]["expected_output"] == "task_plan_gate_review JSON。"
+    assert "正式 Markdown 方案验证计划" in data["handoff_sequence"][4]["expected_output"]
+    assert data["handoff_sequence"][0]["input_contract"]["constraints"] == [
+        "只形成验证计划，不直接改生产配置"
+    ]
+
+
 def test_classify_task_intent_routes_github_repo_analysis(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
@@ -1459,6 +1500,32 @@ def test_classify_task_intent_routes_repo_adoption_collaboration(tmp_path: Path)
     assert data["requires_collaboration"] is True
     assert data["collaboration_task_type"] == "repo-adoption"
     assert "plan_agent_collaboration" in data["suggested_next_step"]
+
+
+def test_classify_task_intent_routes_research_option_validation_collaboration(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {
+            "user_text": (
+                "帮我做 RabbitMQ、Redis、Kafka 的技术选型和方案对比，"
+                "输出验证计划、风险审查和正式报告"
+            )
+        },
+    )
+
+    data = json.loads(result)
+    assert data["intent"] == "research-option-validation"
+    assert data["recommended_agent_id"] == "research"
+    assert data["requires_collaboration"] is True
+    assert data["collaboration_task_type"] == "research-option-validation"
+    assert "research → reviewer → planner → reviewer → doc-writer" in data[
+        "suggested_next_step"
+    ]
 
 
 def test_classify_task_intent_routes_planning_request(tmp_path: Path) -> None:
