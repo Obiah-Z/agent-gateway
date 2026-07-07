@@ -2323,6 +2323,51 @@ def test_format_agent_capability_catalog_outputs_user_facing_directory(
     assert "不代表目标 Agent 已经自动执行" in result
 
 
+def test_match_agent_capability_recommends_agent_from_catalog(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    catalog = {
+        "type": "agent_capability_catalog",
+        "count": 2,
+        "agents": [
+            {
+                "id": "doc-writer",
+                "name": "DocWriter",
+                "personality": "正式、清晰",
+                "duties": ["生成 README、报告、手册和 Markdown 文档。"],
+                "handoff_inputs": ["`source_material`：已有分析、计划或审查结论。"],
+                "tools": ["render_repo_analysis_markdown", "save_markdown_report"],
+            },
+            {
+                "id": "ops",
+                "name": "GatewayOps",
+                "personality": "只读排障",
+                "duties": ["查看 Docker、日志和运行状态。"],
+                "handoff_inputs": ["`symptom`：错误现象。"],
+                "tools": ["ops_readonly_health"],
+            },
+        ],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "match_agent_capability",
+            {
+                "user_goal": "把已有材料整理成 Markdown 报告",
+                "catalog_json": json.dumps(catalog, ensure_ascii=False),
+            },
+        )
+    )
+
+    assert data["type"] == "agent_capability_match"
+    assert data["recommended_agent_id"] == "doc-writer"
+    assert data["confidence"] > 0.35
+    assert data["matches"][0]["agent_id"] == "doc-writer"
+    assert "文档" in data["matches"][0]["matched_terms"] or "报告" in data["matches"][0]["matched_terms"]
+    assert "build_agent_handoff_prompt" in data["next_actions"][0]
+    assert "不代表目标 Agent 已经自动执行" in data["boundary"]
+
+
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)

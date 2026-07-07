@@ -3896,6 +3896,120 @@ def register_builtin_tools(
         )
         return "\n".join(lines).strip()
 
+    def match_agent_capability(
+        user_goal: str,
+        catalog_json: str,
+        preferred_agent_ids: list[str] | None = None,
+    ) -> str:
+        """基于真实 Agent 能力目录，为用户目标推荐最合适的 Agent。"""
+
+        if not user_goal.strip():
+            return "Error: user_goal is required"
+        if not catalog_json.strip():
+            return "Error: catalog_json is required"
+        catalog = json.loads(catalog_json)
+        if not isinstance(catalog, dict):
+            return "Error: catalog_json must be a JSON object"
+        if catalog.get("type") != "agent_capability_catalog":
+            return "Error: catalog_json type must be agent_capability_catalog"
+
+        preferred = {item.strip() for item in preferred_agent_ids or [] if item.strip()}
+        goal_text = user_goal.strip()
+        normalized_goal = goal_text.lower()
+        matches = []
+        for item in catalog.get("agents") or []:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("id") or "").strip()
+            if preferred and agent_id not in preferred:
+                continue
+            duties = _clean_strings(item.get("duties") if isinstance(item.get("duties"), list) else [])
+            handoff_inputs = _clean_strings(
+                item.get("handoff_inputs") if isinstance(item.get("handoff_inputs"), list) else []
+            )
+            tools = _clean_strings(item.get("tools") if isinstance(item.get("tools"), list) else [])
+            searchable = " ".join(
+                [
+                    agent_id,
+                    str(item.get("name") or ""),
+                    str(item.get("personality") or ""),
+                    " ".join(duties),
+                    " ".join(handoff_inputs),
+                    " ".join(tools),
+                ]
+            ).lower()
+            tokens = [
+                token
+                for token in re.split(r"[\s,，。！？；;:：/\\()（）\[\]【】`\"'<>]+", normalized_goal)
+                if len(token) >= 2
+            ]
+            token_hits = [token for token in tokens if token in searchable]
+            direct_hits = []
+            for keyword in (
+                "仓库",
+                "github",
+                "repo",
+                "文档",
+                "报告",
+                "计划",
+                "规划",
+                "审查",
+                "风险",
+                "调研",
+                "搜索",
+                "运维",
+                "docker",
+                "饮食",
+                "体重",
+                "待办",
+                "复盘",
+            ):
+                if keyword in normalized_goal and keyword in searchable:
+                    direct_hits.append(keyword)
+            score = len(set(token_hits)) + len(set(direct_hits)) * 2
+            if agent_id in preferred:
+                score += 1
+            matches.append(
+                {
+                    "agent_id": agent_id,
+                    "name": item.get("name") or agent_id,
+                    "score": score,
+                    "matched_terms": sorted(set(token_hits + direct_hits))[:10],
+                    "reason": (
+                        f"目标与该 Agent 的职责或工具命中：{', '.join(sorted(set(token_hits + direct_hits))[:6])}。"
+                        if score > 0
+                        else "未发现明显命中，仅作为低置信备选。"
+                    ),
+                    "handoff_inputs": handoff_inputs[:6],
+                }
+            )
+
+        matches.sort(key=lambda row: (-int(row["score"]), str(row["agent_id"])))
+        best = matches[0] if matches else None
+        confidence = 0.0
+        if best:
+            confidence = min(0.95, 0.35 + int(best["score"]) * 0.12)
+        return json.dumps(
+            {
+                "type": "agent_capability_match",
+                "user_goal": goal_text,
+                "recommended_agent_id": best["agent_id"] if best and best["score"] > 0 else "main",
+                "confidence": round(confidence if best and best["score"] > 0 else 0.35, 2),
+                "matches": matches[:5],
+                "next_actions": (
+                    [
+                        "调用 build_agent_handoff_prompt 生成交接提示。",
+                        "再用 format_entry_response 向用户说明推荐 Agent 和边界。",
+                    ]
+                    if best and best["score"] > 0
+                    else ["未找到明确匹配，先由入口 Agent 追问目标、输入材料和期望输出。"]
+                ),
+                "boundary": "这是基于当前 Agent 能力目录的推荐，不代表目标 Agent 已经自动执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def explain_agent_route(
         user_goal: str,
         intent: str,
@@ -6120,6 +6234,36 @@ def register_builtin_tools(
             },
             handler=format_agent_capability_catalog,
             tags=("agent", "catalog", "format", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="match_agent_capability",
+            description=(
+                "Recommend the best matching agent for a user goal based on an "
+                "agent_capability_catalog JSON object. This does not execute agents."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_goal", "catalog_json"],
+                "properties": {
+                    "user_goal": {
+                        "type": "string",
+                        "description": "Original user goal or task description.",
+                    },
+                    "catalog_json": {
+                        "type": "string",
+                        "description": "JSON string returned by list_agent_capabilities.",
+                    },
+                    "preferred_agent_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional subset of agent ids to consider.",
+                    },
+                },
+            },
+            handler=match_agent_capability,
+            tags=("agent", "catalog", "match", "routing"),
         )
     )
     registry.register(

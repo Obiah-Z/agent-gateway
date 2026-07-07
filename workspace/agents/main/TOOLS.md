@@ -39,6 +39,7 @@
 - 先调用 `list_agent_capabilities` 读取当前配置和提示词中的真实能力目录。
 - 如果用户只问少数 Agent，用 `agent_ids` 过滤。
 - 再调用 `format_agent_capability_catalog` 转成用户可读中文目录。
+- 如果用户问“这个任务该交给谁”，在读取目录后调用 `match_agent_capability`，再按结果生成交接建议。
 - 不要凭记忆列 Agent 能力，避免和配置漂移。
 
 ## `format_entry_response`
