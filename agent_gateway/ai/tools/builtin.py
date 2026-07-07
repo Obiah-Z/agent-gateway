@@ -748,6 +748,40 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_entry_response(
+        intent: str,
+        recommended_agent_id: str,
+        reason: str,
+        current_reply: str,
+        context_summary: str = "",
+        handoff_prompt: str = "",
+        can_answer_directly: bool = False,
+    ) -> str:
+        """把入口 Agent 的分类和委派结论格式化为稳定中文回复。"""
+
+        normalized_intent = intent.strip() or "unknown"
+        agent_id = recommended_agent_id.strip() or "main"
+        if can_answer_directly or agent_id == "main":
+            return "\n".join(
+                [
+                    current_reply.strip() or "我可以先直接处理这个问题。",
+                    "",
+                    f"判断：这属于 {normalized_intent}，当前由 `main` 直接处理。",
+                ]
+            ).strip()
+
+        lines = [
+            f"判断：这属于 {normalized_intent}。",
+            f"建议交给：`{agent_id}`。",
+            f"原因：{reason.strip() or '该任务更适合专用 Agent 处理。'}",
+            f"交接摘要：{context_summary.strip() or '请保留用户原始目标、关键上下文和期望输出。'}",
+            f"当前简要回复：{current_reply.strip() or '我已识别任务类型，可以按上述上下文继续推进。'}",
+        ]
+        if handoff_prompt.strip():
+            lines.extend(["", "可复制交接提示：", handoff_prompt.strip()])
+        lines.extend(["", "说明：这是入口回复，不代表目标 Agent 已经自动执行。"])
+        return "\n".join(lines)
+
     def list_agent_capabilities(
         include_tools: bool = False,
         agent_ids: list[str] | None = None,
@@ -1304,6 +1338,51 @@ def register_builtin_tools(
             },
             handler=classify_task_intent,
             tags=("agent", "routing", "classification"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_entry_response",
+            description=(
+                "Format an entry agent response after task classification and optional "
+                "delegation suggestion into stable Chinese Markdown."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["intent", "recommended_agent_id", "reason", "current_reply"],
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Task intent from classify_task_intent or equivalent reasoning.",
+                    },
+                    "recommended_agent_id": {
+                        "type": "string",
+                        "description": "Recommended agent id, or main when answering directly.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why this agent should handle the task.",
+                    },
+                    "context_summary": {
+                        "type": "string",
+                        "description": "Short handoff summary for the target agent.",
+                    },
+                    "handoff_prompt": {
+                        "type": "string",
+                        "description": "Optional ready-to-send handoff prompt.",
+                    },
+                    "current_reply": {
+                        "type": "string",
+                        "description": "Short answer or interim response to show to the user.",
+                    },
+                    "can_answer_directly": {
+                        "type": "boolean",
+                        "description": "Whether the current entry agent can answer directly.",
+                    },
+                },
+            },
+            handler=format_entry_response,
+            tags=("agent", "routing", "format"),
         )
     )
     registry.register(

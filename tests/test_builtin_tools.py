@@ -336,6 +336,49 @@ def test_classify_task_intent_keeps_simple_chat_on_main(tmp_path: Path) -> None:
     assert data["can_answer_directly"] is True
 
 
+def test_format_entry_response_formats_delegation_reply(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "format_entry_response",
+        {
+            "intent": "repo-analysis",
+            "recommended_agent_id": "repo-analyzer",
+            "reason": "需要分析仓库结构和可借鉴点。",
+            "context_summary": "用户提供了 GitHub 仓库链接，希望生成中文分析。",
+            "handoff_prompt": "请分析 https://github.com/example/repo 并落盘报告。",
+            "current_reply": "我会先按仓库分析任务处理。",
+        },
+    )
+
+    assert "判断：这属于 repo-analysis。" in result
+    assert "建议交给：`repo-analyzer`。" in result
+    assert "交接摘要：用户提供了 GitHub 仓库链接，希望生成中文分析。" in result
+    assert "请分析 https://github.com/example/repo 并落盘报告。" in result
+    assert "不代表目标 Agent 已经自动执行" in result
+
+
+def test_format_entry_response_formats_direct_reply(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "format_entry_response",
+        {
+            "intent": "chat",
+            "recommended_agent_id": "main",
+            "reason": "普通问答。",
+            "current_reply": "你好，我可以帮你处理日常问答和任务入口判断。",
+            "can_answer_directly": True,
+        },
+    )
+
+    assert result.startswith("你好，我可以帮你处理日常问答")
+    assert "判断：这属于 chat，当前由 `main` 直接处理。" in result
+    assert "建议交给" not in result
+
+
 def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"

@@ -19,6 +19,16 @@
 - 如果推荐了专用 Agent，说明推荐对象和原因，并给出可复制的交接提示。
 - 不要把分类结果当成已经完成的执行结果。
 
+## `format_entry_response`
+
+用于把分类结果和委派建议整理成稳定中文回复。
+
+使用规则：
+
+- 对普通聊天，传入 `recommended_agent_id=main` 和 `can_answer_directly=true`。
+- 对需要专用 Agent 的任务，传入分类得到的 `intent`、`recommended_agent_id`、`reason`、`context_summary` 和可选 `handoff_prompt`。
+- 输出后不要再改写成另一种结构，避免入口回复风格漂移。
+
 ## 其他工具
 
 - `memory_search`：只在需要回忆长期背景时使用。

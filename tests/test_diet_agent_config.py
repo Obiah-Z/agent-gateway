@@ -53,6 +53,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     prompt_dir = ROOT / "workspace" / by_id["main"]["prompt_policy"]["prompt_dir"]
 
     assert "classify_task_intent" in tools
+    assert "format_entry_response" in tools
     assert by_id["main"]["prompt_policy"]["prompt_dir"] == "agents/main"
     assert (prompt_dir / "IDENTITY.md").exists()
     assert (prompt_dir / "SOUL.md").exists()
@@ -63,6 +64,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
         for name in ["IDENTITY.md", "SOUL.md", "TOOLS.md"]
     )
     assert "classify_task_intent" in combined_prompt
+    assert "format_entry_response" in combined_prompt
     assert "不假装已经完成多 Agent 自动交接" in combined_prompt
     assert "personal_todo_add" not in tools
     assert "meal_log_add" not in tools
@@ -80,10 +82,12 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         soul = (prompt_dir / "SOUL.md").read_text(encoding="utf-8")
 
         assert "classify_task_intent" in tools
+        assert "format_entry_response" in tools
         assert "list_agent_capabilities" in tools
         assert "suggest_agent_delegation" in tools
         assert "classify_task_intent" in identity
         assert "classify_task_intent" in soul
+        assert "format_entry_response" in soul
         assert "suggest_agent_delegation" in soul
 
 
