@@ -1284,6 +1284,47 @@ def test_ops_runtime_diagnostics_reads_recent_events_and_failures(tmp_path: Path
     assert "清空失败投递" in data["manual_confirmation_required"]
 
 
+def test_ops_troubleshooting_plan_orders_health_and_runtime_checks(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    health = {
+        "type": "ops_health_summary",
+        "risk_level": "warning",
+        "findings": ["磁盘使用率 86.0%，可用空间 8.0 GiB。"],
+        "safe_recommendations": ["持续观察磁盘趋势，优先确认日志和构建产物增长。"],
+        "manual_confirmation_required": ["删除文件", "清空日志", "重启服务"],
+    }
+    runtime = {
+        "type": "ops_runtime_diagnostics",
+        "risk_level": "critical",
+        "failed_delivery_count": 12,
+        "error_by_component": {"feishu": 2, "delivery": 4},
+        "findings": ["本地失败投递文件 12 个。"],
+        "safe_recommendations": ["先查看失败投递详情。"],
+        "manual_confirmation_required": ["清空失败投递", "修改通道配置"],
+    }
+
+    result = registry.dispatch(
+        "ops_troubleshooting_plan",
+        {
+            "health_summary_json": json.dumps(health, ensure_ascii=False),
+            "runtime_diagnostics_json": json.dumps(runtime, ensure_ascii=False),
+            "focus": "飞书投递失败",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "ops_troubleshooting_plan"
+    assert data["risk_level"] == "critical"
+    assert data["focus"] == "飞书投递失败"
+    assert data["ordered_steps"][0]["area"] == "磁盘与关键路径"
+    assert any(step["area"] == "可靠投递" and step["priority"] == "P0" for step in data["ordered_steps"])
+    assert any(step["area"] == "飞书接入" for step in data["ordered_steps"])
+    assert any("飞书投递失败" in command for command in data["safe_readonly_commands"])
+    assert "清空失败投递" in data["manual_confirmation_required"]
+    assert "不会自动执行清理" in data["note"]
+
+
 def test_assess_risk_decision_scores_findings_and_actions(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

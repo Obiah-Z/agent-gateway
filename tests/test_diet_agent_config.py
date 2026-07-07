@@ -260,6 +260,7 @@ def test_ops_agent_has_readonly_health_tool_and_safety_prompt() -> None:
     assert "ops_readonly_health" in tools["ops"]
     assert "summarize_ops_health" in tools["ops"]
     assert "ops_runtime_diagnostics" in tools["ops"]
+    assert "ops_troubleshooting_plan" in tools["ops"]
     assert "ops_readonly_health" in identity
     assert "ops_readonly_health" in soul
     assert "ops_readonly_health" in tools_md
@@ -269,6 +270,9 @@ def test_ops_agent_has_readonly_health_tool_and_safety_prompt() -> None:
     assert "ops_runtime_diagnostics" in identity
     assert "ops_runtime_diagnostics" in soul
     assert "ops_runtime_diagnostics" in tools_md
+    assert "ops_troubleshooting_plan" in identity
+    assert "ops_troubleshooting_plan" in soul
+    assert "ops_troubleshooting_plan" in tools_md
     assert "禁止执行删除" in tools_md
 
 

@@ -28,7 +28,7 @@
 
 ## 运维 Agent
 
-`ops` 负责只读运维诊断。`ops_readonly_health` 采集基础健康信息，`summarize_ops_health` 生成巡检摘要，`ops_runtime_diagnostics` 汇总运行事件、失败投递和告警线索。ops 不执行删除、清空、重启、改权限或改配置。
+`ops` 负责只读运维诊断。`ops_readonly_health` 采集基础健康信息，`summarize_ops_health` 生成巡检摘要，`ops_runtime_diagnostics` 汇总运行事件、失败投递和告警线索，`ops_troubleshooting_plan` 把健康摘要和运行诊断整理成只读排障行动清单。ops 不执行删除、清空、重启、改权限或改配置。
 
 ## 扩展原则
 

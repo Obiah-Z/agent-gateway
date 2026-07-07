@@ -2318,6 +2318,143 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def ops_troubleshooting_plan(
+        health_summary_json: str = "",
+        runtime_diagnostics_json: str = "",
+        focus: str = "",
+    ) -> str:
+        """把健康摘要和运行诊断整理成只读排障行动清单。"""
+
+        health: dict[str, Any] = {}
+        runtime: dict[str, Any] = {}
+        if health_summary_json.strip():
+            parsed_health = json.loads(health_summary_json)
+            if not isinstance(parsed_health, dict):
+                return "Error: health_summary_json must be a JSON object"
+            health = parsed_health
+        if runtime_diagnostics_json.strip():
+            parsed_runtime = json.loads(runtime_diagnostics_json)
+            if not isinstance(parsed_runtime, dict):
+                return "Error: runtime_diagnostics_json must be a JSON object"
+            runtime = parsed_runtime
+
+        health_risk = str(health.get("risk_level") or "unknown").lower()
+        runtime_risk = str(runtime.get("risk_level") or "unknown").lower()
+        risk_order = {"critical": 3, "warning": 2, "normal": 1, "unknown": 0}
+        overall_risk = max([health_risk, runtime_risk], key=lambda item: risk_order.get(item, 0))
+        if overall_risk == "unknown":
+            overall_risk = "normal"
+
+        findings = []
+        findings.extend(_clean_strings(health.get("findings") if isinstance(health.get("findings"), list) else []))
+        findings.extend(_clean_strings(runtime.get("findings") if isinstance(runtime.get("findings"), list) else []))
+        recommendations = []
+        recommendations.extend(
+            _clean_strings(health.get("safe_recommendations") if isinstance(health.get("safe_recommendations"), list) else [])
+        )
+        recommendations.extend(
+            _clean_strings(runtime.get("safe_recommendations") if isinstance(runtime.get("safe_recommendations"), list) else [])
+        )
+        manual = []
+        manual.extend(
+            _clean_strings(
+                health.get("manual_confirmation_required")
+                if isinstance(health.get("manual_confirmation_required"), list)
+                else []
+            )
+        )
+        manual.extend(
+            _clean_strings(
+                runtime.get("manual_confirmation_required")
+                if isinstance(runtime.get("manual_confirmation_required"), list)
+                else []
+            )
+        )
+        manual = list(dict.fromkeys(manual))
+
+        error_by_component = runtime.get("error_by_component") if isinstance(runtime.get("error_by_component"), dict) else {}
+        failed_delivery_count = int(runtime.get("failed_delivery_count") or 0)
+        steps = []
+        if health_risk in {"critical", "warning"}:
+            steps.append(
+                {
+                    "priority": "P0" if health_risk == "critical" else "P1",
+                    "area": "磁盘与关键路径",
+                    "reason": "健康摘要显示磁盘或关键路径存在风险。",
+                    "safe_check": "先复核 ops_readonly_health 输出中的 disk、paths 和较大目录。",
+                    "do_not_auto": ["删除文件", "清空日志", "修改挂载或权限"],
+                }
+            )
+        if failed_delivery_count:
+            steps.append(
+                {
+                    "priority": "P0" if failed_delivery_count >= 10 else "P1",
+                    "area": "可靠投递",
+                    "reason": f"失败投递文件数量为 {failed_delivery_count}。",
+                    "safe_check": "只读查看失败投递样本，确认通道、receive_id、token、网络或消息格式问题。",
+                    "do_not_auto": ["清空失败投递", "重放消息", "修改通道配置"],
+                }
+            )
+        for component, count in sorted(error_by_component.items(), key=lambda item: str(item[0])):
+            component_name = str(component)
+            if component_name == "feishu":
+                area = "飞书接入"
+                safe_check = "检查回调路径、请求方法、验签、加密 key 和机器人可见范围。"
+            elif component_name == "delivery":
+                area = "出站投递"
+                safe_check = "检查通道 token、receive_id、队列积压和重试状态。"
+            elif component_name in {"agent_loop", "task_worker"}:
+                area = "Agent 执行"
+                safe_check = "检查模型错误、工具调用闭环、session 历史和 worker 日志。"
+            else:
+                area = component_name or "未知模块"
+                safe_check = "按 runtime event 的 type、correlation_id 和 error 字段定位上下游。"
+            steps.append(
+                {
+                    "priority": "P1" if int(count or 0) >= 3 else "P2",
+                    "area": area,
+                    "reason": f"最近错误中 {component_name} 出现 {count} 次。",
+                    "safe_check": safe_check,
+                    "do_not_auto": ["重启服务", "清空事件", "修改配置"],
+                }
+            )
+        if not steps:
+            steps.append(
+                {
+                    "priority": "P3",
+                    "area": "例行观察",
+                    "reason": "当前健康摘要和运行诊断没有明显高风险信号。",
+                    "safe_check": "保持事件流、告警历史、失败投递和磁盘趋势的定期巡检。",
+                    "do_not_auto": ["无用户确认时执行清理或重启"],
+                }
+            )
+
+        safe_commands = [
+            "agent-gateway doctor",
+            "docker compose ps",
+            "docker compose logs --tail=200 gateway",
+            "df -h",
+        ]
+        if focus.strip():
+            safe_commands.insert(0, f"优先围绕「{focus.strip()}」复核相关事件和日志。")
+
+        return json.dumps(
+            {
+                "type": "ops_troubleshooting_plan",
+                "risk_level": overall_risk,
+                "focus": focus.strip(),
+                "findings": findings[:8],
+                "ordered_steps": steps[:8],
+                "safe_recommendations": list(dict.fromkeys(recommendations))[:8],
+                "safe_readonly_commands": safe_commands,
+                "manual_confirmation_required": manual
+                or ["删除文件", "清空日志", "重启服务", "修改配置", "修改权限或提权"],
+                "note": "这是只读排障行动清单，不会自动执行清理、重启、重放、删除或改配置。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def assess_risk_decision(
         review_target: str,
         findings: list[dict[str, str]] | None = None,
@@ -3433,6 +3570,34 @@ def register_builtin_tools(
             },
             handler=ops_runtime_diagnostics,
             tags=("ops", "events", "errors", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="ops_troubleshooting_plan",
+            description=(
+                "Combine ops_health_summary and ops_runtime_diagnostics JSON into "
+                "a read-only ordered troubleshooting plan with safe checks and manual-confirmation actions."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "health_summary_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by summarize_ops_health.",
+                    },
+                    "runtime_diagnostics_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by ops_runtime_diagnostics.",
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional troubleshooting focus, for example feishu, delivery, disk, worker.",
+                    },
+                },
+            },
+            handler=ops_troubleshooting_plan,
+            tags=("ops", "troubleshooting", "plan", "read"),
         )
     )
     registry.register(

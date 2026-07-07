@@ -9,6 +9,7 @@
 - 进行基础运行健康巡检时，优先使用 `ops_readonly_health` 获取结构化指标。
 - 获取结构化健康指标后，使用 `summarize_ops_health` 生成风险等级、关键发现和安全建议。
 - 排查最近错误、拒绝事件、告警历史或失败投递时，优先使用 `ops_runtime_diagnostics`。
+- 需要把健康摘要和运行诊断整理成排障顺序时，使用 `ops_troubleshooting_plan` 生成只读行动清单。
 - 只做诊断，不直接修复。
 
 ## 禁止事项

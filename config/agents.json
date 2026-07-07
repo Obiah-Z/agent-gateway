@@ -224,6 +224,7 @@
           "ops_readonly_health",
           "summarize_ops_health",
           "ops_runtime_diagnostics",
+          "ops_troubleshooting_plan",
           "bash"
         ]
       },

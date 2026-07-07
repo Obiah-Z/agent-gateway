@@ -4,6 +4,7 @@
 - 常规健康巡检、磁盘概览和项目目录体积检查，优先调用 `ops_readonly_health`。
 - 对 `ops_readonly_health` 的 JSON 结果，调用 `summarize_ops_health` 生成标准巡检摘要。
 - 排查 Dashboard 最近错误、运行事件、失败投递、告警历史和通道拒绝时，优先调用 `ops_runtime_diagnostics`。
+- 需要给出排障顺序、先查什么后查什么时，调用 `ops_troubleshooting_plan`，把健康摘要和运行诊断合并成只读行动清单。
 - 当 Cron 触发空间巡检时，必须优先执行 `skills/server-space-advisor/scripts/space_advisor.py`。
 - 输出使用中文，先给结论，再列证据和下一步确认项。
 - 如果工具执行失败，说明失败原因和可复核命令，不要编造结果。
