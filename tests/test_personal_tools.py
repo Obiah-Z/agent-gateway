@@ -218,6 +218,57 @@ def test_personal_daily_workflow_combines_todos_reviews_and_time_blocks(tmp_path
     assert workflow["note"] == "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。"
 
 
+def test_personal_focus_card_selects_one_current_action_without_writing(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理简历", "priority": "normal", "due_at": "2026-07-10"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "准备 RabbitMQ 面试表达", "priority": "urgent", "due_at": "2026-07-08"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "昨天场景题推进慢",
+            "blockers": ["系统设计题容易发散"],
+            "next_step": "先把 RabbitMQ 选型讲顺",
+        },
+        runtime_context=context,
+    )
+
+    card = json.loads(
+        registry.dispatch(
+            "personal_focus_card_generate",
+            {"todo_limit": 6, "review_limit": 2},
+            runtime_context=context,
+        )
+    )
+
+    assert card["type"] == "personal_focus_card"
+    assert card["user_scope"] == "user:alice"
+    assert card["focus"] == "准备 RabbitMQ 面试表达"
+    assert card["focus_todo"]["priority"] == "urgent"
+    assert card["why_now"] == "它是当前最高优先级事项，适合先处理，避免继续积压。"
+    assert card["first_action"] == "先用 25 分钟推进「准备 RabbitMQ 面试表达」。"
+    assert card["blockers"] == ["系统设计题容易发散"]
+    assert card["review_next_steps"] == ["先把 RabbitMQ 选型讲顺"]
+    assert card["defer"] == ["整理简历"]
+    assert card["source"] == {
+        "open_todo_count": 2,
+        "urgent_todo_count": 1,
+        "recent_review_count": 1,
+    }
+    assert [todo["status"] for todo in store.list_todos(user_scope="user:alice")] == ["open", "open"]
+
+
 def test_personal_day_review_plan_generates_draft_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

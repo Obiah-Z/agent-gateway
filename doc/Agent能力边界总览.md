@@ -30,7 +30,7 @@
 
 ## 个人 Agent
 
-`personal-secretary-zhanghaibo` 只服务指定企业微信用户，负责待办、复盘、时间块、每日工作流、个人日复盘草稿和周计划草稿。`personal_day_review_plan_generate` 与 `personal_weekly_plan_generate` 只生成草稿，不自动写入待办、复盘或长期记忆。
+`personal-secretary-zhanghaibo` 只服务指定企业微信用户，负责待办、复盘、时间块、每日工作流、当前聚焦卡片、个人日复盘草稿和周计划草稿。`personal_focus_card_generate` 用于把未完成待办和近期复盘收敛成一个当前最该推进的动作；`personal_day_review_plan_generate` 与 `personal_weekly_plan_generate` 只生成草稿，不自动写入待办、复盘或长期记忆。
 
 `diet-assistant-zhanghaibo` 只服务指定企业微信用户，负责餐食、体重、饮食计划、趋势简报、饮食日总结草稿和周饮食计划草稿。`diet_day_review_plan_generate` 与 `diet_weekly_plan_generate` 只读取已有记录生成建议，不自动补记餐食、写体重或生成新计划。
 

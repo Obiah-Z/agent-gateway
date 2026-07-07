@@ -257,6 +257,72 @@ class PersonalStore:
             "note": "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。",
         }
 
+    def generate_focus_card(
+        self,
+        *,
+        user_scope: str = "",
+        todo_limit: int = 8,
+        review_limit: int = 3,
+    ) -> dict[str, Any]:
+        """生成一个当前最该推进事项的聚焦卡片，不写入数据。"""
+
+        briefing = self.generate_briefing(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        open_todos = sorted(briefing.get("open_todos", []), key=self._todo_sort_key)
+        urgent_todos = sorted(briefing.get("urgent_todos", []), key=self._todo_sort_key)
+        recent_reviews = briefing.get("recent_reviews", [])
+        focus_todo = (urgent_todos or open_todos or [None])[0]
+        blockers = []
+        review_next_steps = []
+        for review in recent_reviews:
+            for blocker in review.get("blockers") or []:
+                text = str(blocker).strip()
+                if text:
+                    blockers.append(text)
+            next_step = str(review.get("next_step", "")).strip()
+            if next_step:
+                review_next_steps.append(next_step)
+
+        if isinstance(focus_todo, dict):
+            focus_title = str(focus_todo.get("title", "")).strip()
+            first_action = f"先用 25 分钟推进「{focus_title}」。"
+            why_now = self._focus_reason(focus_todo, has_blockers=bool(blockers))
+            defer_candidates = [
+                str(todo.get("title", "")).strip()
+                for todo in open_todos
+                if str(todo.get("id", "")) != str(focus_todo.get("id", ""))
+            ][:3]
+        else:
+            focus_title = briefing.get("suggested_focus", "")
+            first_action = "先确认今天最重要的一件事，并写成一个待办。"
+            why_now = "当前没有未完成待办，先明确焦点比继续发散更重要。"
+            defer_candidates = []
+
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "type": "personal_focus_card",
+            "focus": focus_title,
+            "focus_todo": focus_todo or {},
+            "why_now": why_now,
+            "first_action": first_action,
+            "blockers": blockers[:3],
+            "review_next_steps": review_next_steps[:3],
+            "defer": defer_candidates,
+            "needs_confirmation": []
+            if focus_todo
+            else ["今天最重要的一件事是什么？"],
+            "source": {
+                "open_todo_count": len(open_todos),
+                "urgent_todo_count": len(urgent_todos),
+                "recent_review_count": len(recent_reviews),
+            },
+            "note": "这是个人秘书当前聚焦卡片，不会自动完成、修改或新增待办。",
+        }
+
     def generate_day_review_plan(
         self,
         *,
@@ -538,6 +604,20 @@ class PersonalStore:
         due_at = str(todo.get("due_at", "") or "9999-99-99")
         created_at = str(todo.get("created_at", ""))
         return (priority, due_at, created_at)
+
+    @staticmethod
+    def _focus_reason(todo: dict[str, Any], *, has_blockers: bool) -> str:
+        priority = str(todo.get("priority", "")).lower()
+        due_at = str(todo.get("due_at", "")).strip()
+        if priority == "urgent":
+            return "它是当前最高优先级事项，适合先处理，避免继续积压。"
+        if priority == "high":
+            return "它是高优先级事项，先推进可以减少后续压力。"
+        if due_at:
+            return f"它有时间约束（{due_at}），适合先推进。"
+        if has_blockers:
+            return "近期复盘里有卡点，先处理一个明确待办有助于恢复推进。"
+        return "它是当前待办队列里最靠前的事项，适合作为下一步。"
 
     @staticmethod
     def _first_time_block_action(blocks: list[dict[str, Any]]) -> str:
@@ -875,6 +955,20 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(workflow, ensure_ascii=False, indent=2)
 
+    def personal_focus_card_generate(
+        todo_limit: int = 8,
+        review_limit: int = 3,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        card = personal_store.generate_focus_card(
+            user_scope=_scope(__runtime_context, user_scope),
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        return json.dumps(card, ensure_ascii=False, indent=2)
+
     def personal_day_review_plan_generate(
         today_summary: str = "",
         completed: list[str] | None = None,
@@ -1058,6 +1152,24 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_daily_workflow_generate,
             tags=("personal", "workflow", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_focus_card_generate",
+            description=(
+                "Generate a concise current-focus card from open personal todos "
+                "and recent reviews without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "todo_limit": {"type": "integer"},
+                    "review_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_focus_card_generate,
+            tags=("personal", "focus", "planning", "read"),
         )
     )
     registry.register(
