@@ -2,6 +2,7 @@
 
 - 默认简洁回答企业微信中的日常问题。
 - 复杂任务先调用 `classify_task_intent`，再用中文解释建议交给哪个 Agent。
+- 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
 - 如果任务需要 personal、diet、research、repo-analyzer、planner、reviewer、doc-writer 或 ops 多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
 - 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 生成标准交接提示，再调用 `suggest_agent_delegation` 生成结构化委派建议。

@@ -451,6 +451,8 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
         encoding="utf-8"
     )
     assert "repo-adoption" in main_soul
+    assert "requires_collaboration=true" in main_soul
+    assert "requires_collaboration=true" in main_tools
     assert "repo-analyzer、reviewer、planner、doc-writer" in main_soul
     assert "repo-analyzer → reviewer → planner → doc-writer" in main_tools
 
@@ -459,6 +461,7 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
             encoding="utf-8"
         )
         assert "repo-adoption" in soul
+        assert "requires_collaboration=true" in soul
         assert "repo-analyzer、reviewer、planner、doc-writer" in soul
 
 

@@ -2180,6 +2180,31 @@ def register_builtin_tools(
         normalized = text.lower()
         catalog = [
             {
+                "intent": "repo-adoption",
+                "agent": "repo-analyzer",
+                "keywords": (
+                    "github.com/",
+                    "gitlab.com/",
+                    "仓库",
+                    "repo",
+                    "repository",
+                    "采纳",
+                    "引入",
+                    "接入",
+                    "复用",
+                    "风险",
+                    "计划",
+                    "报告",
+                    "是否值得",
+                    "adoption",
+                ),
+                "reason": "用户同时关注仓库分析、风险判断、采纳计划或正式报告，需要多 Agent 协作路线。",
+                "next": "调用 plan_agent_collaboration，task_type 使用 repo-adoption，按 repo-analyzer → reviewer → planner → doc-writer 串联。",
+                "direct": False,
+                "requires_collaboration": True,
+                "collaboration_task_type": "repo-adoption",
+            },
+            {
                 "intent": "repo-analysis",
                 "agent": "repo-analyzer",
                 "keywords": (
@@ -2194,6 +2219,8 @@ def register_builtin_tools(
                 "reason": "用户关注代码仓库、项目结构或可借鉴点，repo-analyzer 更适合处理。",
                 "next": "提取仓库链接、分析目标和输出格式后，建议交给 repo-analyzer。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "planning",
@@ -2210,6 +2237,8 @@ def register_builtin_tools(
                 "reason": "用户需要拆目标、排阶段或明确验收标准，planner 更适合处理。",
                 "next": "先明确目标、边界、约束和完成标准，再建议交给 planner。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "document",
@@ -2226,6 +2255,8 @@ def register_builtin_tools(
                 "reason": "用户需要沉淀正式 Markdown 或结构化文档，doc-writer 更适合处理。",
                 "next": "确认文档类型、读者、材料来源和保存位置，再建议交给 doc-writer。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "review",
@@ -2242,6 +2273,8 @@ def register_builtin_tools(
                 "reason": "用户需要发现风险、缺口或边界问题，reviewer 更适合处理。",
                 "next": "整理审查对象、风险关注点和证据范围后，建议交给 reviewer。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "research",
@@ -2259,6 +2292,8 @@ def register_builtin_tools(
                 "reason": "用户需要联网检索、来源核验或资料对比，research 更适合处理。",
                 "next": "明确检索问题、时间范围和需要的来源粒度，再建议交给 research。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "ops",
@@ -2278,6 +2313,8 @@ def register_builtin_tools(
                 "reason": "用户关注系统运行、容器、中间件或只读排障，ops 更适合处理。",
                 "next": "先确认环境、错误现象和只读排查范围，再建议交给 ops。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "diet",
@@ -2296,6 +2333,8 @@ def register_builtin_tools(
                 "reason": "用户关注个人饮食、体重或减脂记录，饮食助手更适合处理。",
                 "next": "确认用户身份和餐食/体重数据后，建议交给 diet-assistant-zhanghaibo。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
             {
                 "intent": "personal",
@@ -2313,14 +2352,35 @@ def register_builtin_tools(
                 "reason": "用户关注个人计划、待办、提醒或复盘，个人秘书更适合处理。",
                 "next": "确认用户身份、时间范围和需要记录的事项后，建议交给 personal-secretary-zhanghaibo。",
                 "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
             },
         ]
 
-        best = max(
-            catalog,
-            key=lambda row: _keyword_score(normalized, row["keywords"]),
+        repo_triggers = ("github.com/", "gitlab.com/", "仓库", "repo", "repository", "代码库")
+        adoption_triggers = (
+            "采纳",
+            "引入",
+            "接入",
+            "复用",
+            "风险",
+            "计划",
+            "报告",
+            "是否值得",
+            "adoption",
         )
-        score = _keyword_score(normalized, best["keywords"])
+
+        def intent_score(row: dict[str, Any]) -> int:
+            score_value = _keyword_score(normalized, row["keywords"])
+            if row.get("intent") == "repo-adoption":
+                has_repo = _keyword_score(normalized, repo_triggers) > 0
+                has_adoption = _keyword_score(normalized, adoption_triggers) > 0
+                if not (has_repo and has_adoption):
+                    return 0
+            return score_value
+
+        best = max(catalog, key=intent_score)
+        score = intent_score(best)
         if not text:
             intent = "unknown"
             agent = "main"
@@ -2328,6 +2388,8 @@ def register_builtin_tools(
             reason = "用户输入为空，无法判断任务意图。"
             next_step = "请补充要处理的问题或目标。"
             can_answer_directly = False
+            requires_collaboration = False
+            collaboration_task_type = ""
         elif score <= 0:
             intent = "chat"
             agent = "main"
@@ -2335,6 +2397,8 @@ def register_builtin_tools(
             reason = "未命中专用 Agent 的明显触发词，main 可以先直接回答。"
             next_step = "直接回答；如果后续出现复杂目标，再重新分类。"
             can_answer_directly = True
+            requires_collaboration = False
+            collaboration_task_type = ""
         else:
             intent = str(best["intent"])
             agent = str(best["agent"])
@@ -2342,6 +2406,8 @@ def register_builtin_tools(
             reason = str(best["reason"])
             next_step = str(best["next"])
             can_answer_directly = bool(best["direct"])
+            requires_collaboration = bool(best.get("requires_collaboration", False))
+            collaboration_task_type = str(best.get("collaboration_task_type", ""))
 
         return json.dumps(
             {
@@ -2349,6 +2415,8 @@ def register_builtin_tools(
                 "intent": intent,
                 "confidence": round(confidence, 2),
                 "recommended_agent_id": agent,
+                "requires_collaboration": requires_collaboration,
+                "collaboration_task_type": collaboration_task_type,
                 "reason": reason,
                 "can_answer_directly": can_answer_directly,
                 "suggested_next_step": next_step,
@@ -3915,8 +3983,9 @@ def register_builtin_tools(
             name="classify_task_intent",
             description=(
                 "Classify a user request into chat, research, planning, document, "
-                "review, repo-analysis, personal, diet, ops, or unknown, and "
-                "recommend the best configured agent. This does not execute handoff."
+                "review, repo-analysis, repo-adoption, personal, diet, ops, or unknown; "
+                "recommend the best configured agent and indicate whether a multi-agent "
+                "collaboration route is needed. This does not execute handoff."
             ),
             input_schema={
                 "type": "object",

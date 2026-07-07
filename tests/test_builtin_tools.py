@@ -1173,8 +1173,32 @@ def test_classify_task_intent_routes_github_repo_analysis(tmp_path: Path) -> Non
     assert data["type"] == "task_intent_classification"
     assert data["intent"] == "repo-analysis"
     assert data["recommended_agent_id"] == "repo-analyzer"
+    assert data["requires_collaboration"] is False
+    assert data["collaboration_task_type"] == ""
     assert data["can_answer_directly"] is False
     assert data["confidence"] >= 0.67
+
+
+def test_classify_task_intent_routes_repo_adoption_collaboration(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {
+            "user_text": (
+                "分析这个 GitHub 仓库 https://github.com/example/repo，"
+                "评估风险，并给出是否值得采纳的计划和正式报告"
+            )
+        },
+    )
+
+    data = json.loads(result)
+    assert data["intent"] == "repo-adoption"
+    assert data["recommended_agent_id"] == "repo-analyzer"
+    assert data["requires_collaboration"] is True
+    assert data["collaboration_task_type"] == "repo-adoption"
+    assert "plan_agent_collaboration" in data["suggested_next_step"]
 
 
 def test_classify_task_intent_routes_planning_request(tmp_path: Path) -> None:
