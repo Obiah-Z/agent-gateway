@@ -17,6 +17,7 @@
 - 如果输入材料是 `collaboration_progress_gate_review` JSON，先调用 `render_collaboration_progress_gate_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`；如果同时有 `agent_collaboration_progress`，必须作为 `progress_json` 合并进同一份门禁审查报告。
 - 如果输入材料是 `agent_handoff_package_gate_review` JSON，先调用 `render_agent_handoff_package_gate_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`；如果同时有 `agent_handoff_package`，必须作为 `package_json` 合并进同一份门禁审查报告。
 - 如果输入材料是 `agent_collaboration_final_summary` JSON，先调用 `render_agent_collaboration_final_summary_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
+- 如果输入材料是 `collaboration_final_summary_gate_review` JSON，先调用 `render_collaboration_final_summary_gate_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`；如果同时有 `agent_collaboration_final_summary`，必须作为 `summary_json` 合并进同一份门禁审查报告。
 - 用户要求生成正式文档且未指定完全自定义格式时，优先调用 `save_structured_document`。
 - 收到入口 Agent 的 handoff_prompt 时，先确认文档类型、读者和材料范围；缺少事实材料时先说明缺口。
 - 不把委派摘要当成事实来源本身；委派摘要只用于理解任务目标。

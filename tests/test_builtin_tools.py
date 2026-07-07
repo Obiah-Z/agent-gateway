@@ -2155,6 +2155,67 @@ def test_render_agent_collaboration_final_summary_markdown_formats_summary(
     assert "```json" in markdown
 
 
+def test_render_collaboration_final_summary_gate_markdown_formats_review(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    summary = {
+        "type": "agent_collaboration_final_summary",
+        "task_type": "repo-adoption",
+        "status": "completed",
+        "completed_stage_count": 2,
+        "total_stage_count": 2,
+        "final_conclusion": "建议有条件采纳，先复核许可证。",
+        "stage_summaries": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "status": "completed",
+                "output_summary": "仓库适配度较高。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "status": "completed",
+                "output_summary": "conditional-go。",
+            },
+        ],
+    }
+    review = {
+        "type": "collaboration_final_summary_gate_review",
+        "review_target": "repo-adoption",
+        "decision": "conditional-go",
+        "completed_stage_count": 2,
+        "total_stage_count": 2,
+        "unresolved_items": ["许可证仍需人工确认。"],
+        "checklist": [
+            {"item": "最终结论明确", "passed": True, "evidence": "已有明确结论。"},
+            {"item": "后续动作明确", "passed": False, "evidence": "缺少 next_actions。"},
+        ],
+        "risks": ["许可证未确认。"],
+        "next_actions": ["补充许可证复核动作。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_collaboration_final_summary_gate_markdown",
+        {
+            "gate_review_json": json.dumps(review, ensure_ascii=False),
+            "summary_json": json.dumps(summary, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 协作最终摘要门禁审查：repo-adoption")
+    assert "- 门禁结论：conditional-go" in markdown
+    assert "建议有条件采纳，先复核许可证。" in markdown
+    assert "| 2 | reviewer | completed | conditional-go。 |" in markdown
+    assert "| 后续动作明确 | 未通过 | 缺少 next_actions。 |" in markdown
+    assert "- 许可证仍需人工确认。" in markdown
+    assert "- 补充许可证复核动作。" in markdown
+    assert "```json" in markdown
+
+
 def test_plan_agent_collaboration_builds_research_option_validation_route(
     tmp_path: Path,
 ) -> None:

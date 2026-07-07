@@ -3065,6 +3065,94 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_collaboration_final_summary_gate_markdown(
+        gate_review_json: str,
+        summary_json: str = "",
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把协作最终摘要门禁审查 JSON 渲染成正式 Markdown。"""
+
+        if not gate_review_json.strip():
+            return "Error: gate_review_json is required"
+        gate = json.loads(gate_review_json)
+        if not isinstance(gate, dict):
+            return "Error: gate_review_json must be a JSON object"
+        if gate.get("type") != "collaboration_final_summary_gate_review":
+            return "Error: gate_review_json type must be collaboration_final_summary_gate_review"
+
+        summary: dict[str, Any] = {}
+        if summary_json.strip():
+            parsed_summary = json.loads(summary_json)
+            if not isinstance(parsed_summary, dict):
+                return "Error: summary_json must be a JSON object"
+            if parsed_summary.get("type") != "agent_collaboration_final_summary":
+                return "Error: summary_json type must be agent_collaboration_final_summary"
+            summary = parsed_summary
+
+        review_target = str(gate.get("review_target") or summary.get("task_type") or "协作最终摘要").strip()
+        decision = str(gate.get("decision") or "待审查").strip()
+        completed = gate.get("completed_stage_count", summary.get("completed_stage_count", 0))
+        total = gate.get("total_stage_count", summary.get("total_stage_count", 0))
+        document_title = title.strip() or f"协作最终摘要门禁审查：{review_target}"
+        summary_lines = [
+            f"- 审查对象：{review_target}",
+            f"- 门禁结论：{decision}",
+            f"- 完成阶段：{completed} / {total}",
+            f"- 最终结论：{summary.get('final_conclusion') or '待补充'}",
+            "- 执行边界：这是协作最终摘要门禁审查，不代表任何 Agent 已经自动执行。",
+        ]
+
+        checklist_rows = []
+        for item in gate.get("checklist") or []:
+            if not isinstance(item, dict):
+                continue
+            checklist_rows.append(
+                [
+                    item.get("item") or "未命名检查项",
+                    "通过" if item.get("passed") else "未通过",
+                    item.get("evidence") or "待补充",
+                ]
+            )
+
+        stage_rows = []
+        for item in summary.get("stage_summaries") or []:
+            if not isinstance(item, dict):
+                continue
+            stage_rows.append(
+                [
+                    item.get("step") or "待定",
+                    item.get("agent_id") or "unknown",
+                    item.get("status") or "unknown",
+                    item.get("output_summary") or "暂无",
+                ]
+            )
+
+        sections = [
+            f"# {document_title}",
+            _markdown_section("摘要", "\n".join(summary_lines)),
+            _markdown_section("门禁检查", _markdown_table(["检查项", "结果", "依据"], checklist_rows)),
+            _markdown_section("未决事项", _markdown_bullets(gate.get("unresolved_items"))),
+            _markdown_section("风险与限制", _markdown_bullets(gate.get("risks"))),
+            _markdown_section("下一步", _markdown_bullets(gate.get("next_actions"))),
+        ]
+        if stage_rows:
+            sections.insert(
+                2,
+                _markdown_section("关联阶段结果", _markdown_table(["步骤", "Agent", "状态", "摘要"], stage_rows)),
+            )
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n"
+                + json.dumps({"summary": summary, "gate_review": gate}, ensure_ascii=False, indent=2)
+                + "\n```",
+            )
+
+        return "\n\n".join(sections) + metadata
+
     def outline_structured_document(
         title: str,
         document_type: str,
@@ -6578,6 +6666,39 @@ def register_builtin_tools(
             },
             handler=render_agent_collaboration_final_summary_markdown,
             tags=("document", "markdown", "agent", "collaboration", "summary"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_collaboration_final_summary_gate_markdown",
+            description=(
+                "Render a collaboration_final_summary_gate_review JSON object from "
+                "reviewer into a formal Chinese Markdown final-summary gate review report."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["gate_review_json"],
+                "properties": {
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "JSON string returned by review_collaboration_final_summary_gate.",
+                    },
+                    "summary_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by compose_collaboration_final_summary.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append raw final summary and gate review metadata.",
+                    },
+                },
+            },
+            handler=render_collaboration_final_summary_gate_markdown,
+            tags=("document", "markdown", "agent", "collaboration", "summary", "gate", "review"),
         )
     )
     registry.register(

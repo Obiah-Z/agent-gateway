@@ -340,6 +340,7 @@
           "render_collaboration_progress_gate_markdown",
           "render_agent_handoff_package_gate_markdown",
           "render_agent_collaboration_final_summary_markdown",
+          "render_collaboration_final_summary_gate_markdown",
           "save_structured_document",
           "save_markdown_report",
           "get_current_time",
