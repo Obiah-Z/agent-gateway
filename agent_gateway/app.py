@@ -91,6 +91,7 @@ class GatewayApplication:
     tools: ToolRegistry  # 工具注册表，向模型暴露可调用工具及 schema。
     memory_store: MemoryStore  # 长期记忆存储，负责记忆写入、检索和召回。
     diet_store: DietStore  # 个人饮食与体重管理结构化存储。
+    personal_store: PersonalStore  # 个人秘书待办和复盘结构化存储。
     skills_manager: SkillsManager  # Skill 发现与注入管理器。
     prompt_assembler: PromptAssembler  # System prompt 组装器。
     runner: AgentLoopRunner  # Agent Loop 执行器，负责模型调用和工具闭环。
@@ -458,6 +459,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         state_write_repository=state_bundle.config_write,
         task_queue=task_queue,
         task_worker=task_worker,
+        personal_store=personal_store,
     )
 
     return GatewayApplication(
@@ -468,6 +470,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         tools=tools,
         memory_store=memory_store,
         diet_store=diet_store,
+        personal_store=personal_store,
         skills_manager=skills_manager,
         prompt_assembler=prompt_assembler,
         runner=runner,

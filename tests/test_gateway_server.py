@@ -15,6 +15,7 @@ from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
 from agent_gateway.gateways.control.websocket_server import GatewayServer
 from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.ai.context.personal import PersonalStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
@@ -466,6 +467,50 @@ def test_gateway_server_exposes_recent_diet_records(tmp_path) -> None:
     assert result["today_status"]["user_scope"] == "user:wework:test"
     assert result["today_status"]["actual_calories"] == 780
     assert result["today_status"]["latest_weight"]["weight_kg"] == 81.5
+
+
+def test_gateway_server_exposes_recent_personal_records(tmp_path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    personal_store = PersonalStore(settings.workspace_root)
+    personal_store.add_todo("准备项目面试", priority="urgent", user_scope="user:wework:test")
+    personal_store.add_review(
+        "今日复盘",
+        completed=["背诵 RabbitMQ 选型"],
+        next_step="明天练 Redis",
+        user_scope="user:wework:test",
+    )
+    agents = AgentManager()
+    bindings = BindingTable()
+    profiles = ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")])
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=agents,
+        bindings=bindings,
+        profiles=profiles,
+        channels=ChannelManager(),
+        personal_store=personal_store,
+    )
+    server = GatewayServer(
+        host="127.0.0.1",
+        port=8765,
+        dispatcher=type("Dispatcher", (), {"agents": agents, "bindings": bindings})(),
+        sessions=SessionStore(settings.sessions_dir),
+        control_plane=control,
+    )
+
+    result = asyncio.run(
+        server._m_personal_recent({"limit": 10, "user_scope": "user:wework:test"})
+    )
+
+    assert result["configured"] is True
+    assert result["count"] == 2
+    assert result["todos"][0]["title"] == "准备项目面试"
+    assert result["reviews"][0]["next_step"] == "明天练 Redis"
 
 
 def test_gateway_server_collapses_recent_diet_without_user_scope(tmp_path) -> None:

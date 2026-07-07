@@ -19,6 +19,7 @@ from agent_gateway.runtime.execution.alerts_runtime import AlertsRuntime
 from agent_gateway.runtime.state.adapter import LocalStateReadRepository
 from agent_gateway.runtime.execution.resilience import AuthProfile, ProfileManager
 from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.ai.context.personal import PersonalStore
 from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.runtime.infra.redis_client import RedisHealth
 from agent_gateway.runtime.infra.postgres_client import PostgresHealth
@@ -627,6 +628,42 @@ def test_control_plane_uses_state_repository_for_read_views(tmp_path: Path) -> N
     assert memories["configured"] is True
     assert memories["count"] >= 1
     assert tasks["id"] == task.id
+
+
+def test_control_plane_exposes_recent_personal_records(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+    )
+    settings.ensure_directories()
+    personal_store = PersonalStore(settings.workspace_root)
+    personal_store.add_todo("背诵项目难点", priority="high", user_scope="user:wework:test")
+    personal_store.add_review(
+        "今日完成项目复盘",
+        completed=["梳理 Agent 边界"],
+        blockers=["场景题不熟"],
+        next_step="练习秒杀设计",
+        user_scope="user:wework:test",
+    )
+    control = GatewayControlPlane(
+        settings=settings,
+        agents=AgentManager(),
+        bindings=BindingTable(),
+        profiles=ProfileManager([]),
+        channels=ChannelManager(),
+        personal_store=personal_store,
+    )
+
+    scoped = control.recent_personal(limit=10, user_scope="user:wework:test")
+    unscoped = control.recent_personal(limit=10)
+
+    assert scoped["configured"] is True
+    assert scoped["count"] == 2
+    assert scoped["todos"][0]["title"] == "背诵项目难点"
+    assert scoped["reviews"][0]["next_step"] == "练习秒杀设计"
+    assert unscoped["requires_user_scope"] is True
+    assert unscoped["count"] == 0
 
 
 def test_control_plane_exposes_metrics_views(tmp_path: Path) -> None:

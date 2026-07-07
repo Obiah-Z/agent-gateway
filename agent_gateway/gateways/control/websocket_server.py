@@ -130,6 +130,7 @@ class GatewayServer:
             "errors.recent": self._m_errors_recent,
             "memory.recent": self._m_memory_recent,
             "diet.recent": self._m_diet_recent,
+            "personal.recent": self._m_personal_recent,
             "metrics.snapshot": self._m_metrics_snapshot,
             "metrics.tail": self._m_metrics_tail,
             "metrics.summary": self._m_metrics_summary,
@@ -641,6 +642,15 @@ class GatewayServer:
             limit=int(params.get("limit", 20)),
             user_scope=str(params.get("user_scope", "")),
             date=str(params.get("date", "")),
+        )
+
+    async def _m_personal_recent(self, params: dict[str, Any]) -> dict[str, Any]:
+        """处理控制面 最近个人秘书记录 RPC 请求。"""
+        if self.control_plane is None:
+            raise RuntimeError("control plane not configured")
+        return self.control_plane.recent_personal(
+            limit=int(params.get("limit", 20)),
+            user_scope=str(params.get("user_scope", "")),
         )
 
     async def _m_metrics_snapshot(self, params: dict[str, Any]) -> dict[str, Any]:

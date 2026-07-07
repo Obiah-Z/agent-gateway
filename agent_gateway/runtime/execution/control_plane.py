@@ -35,6 +35,7 @@ from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.runtime.state.postgres import PostgresWriteRepository, check_postgres_schema
 from agent_gateway.ai.context.diet import DietStore
 from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.ai.context.personal import PersonalStore
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.observability.alerts import AlertStore
 from agent_gateway.runtime.observability.metrics import MetricsStore
@@ -89,6 +90,7 @@ class GatewayControlPlane:
     state_write_repository: PostgresWriteRepository | None = None
     task_worker: Any = None
     task_queue: LocalTaskQueue | None = None
+    personal_store: PersonalStore | None = None
 
     def _record_config_audit(
         self,
@@ -827,6 +829,32 @@ class GatewayControlPlane:
             "users": [],
             "today_status": today_status,
             "count": len(meals) + len(plans) + len(summaries),
+            "configured": True,
+            "limit": safe_limit,
+            "user_scope": user_scope,
+        }
+
+    def recent_personal(self, *, limit: int = 20, user_scope: str = "") -> dict[str, Any]:
+        """查看个人秘书产生的结构化待办和复盘。"""
+
+        safe_limit = max(1, min(int(limit), 100))
+        if not user_scope.strip():
+            return {
+                "todos": [],
+                "reviews": [],
+                "count": 0,
+                "configured": self.personal_store is not None,
+                "limit": safe_limit,
+                "user_scope": "",
+                "requires_user_scope": True,
+            }
+        store = self.personal_store or PersonalStore(self.settings.workspace_root)
+        todos = store.list_todos(status="all", limit=safe_limit, user_scope=user_scope)
+        reviews = store.recent_reviews(limit=safe_limit, user_scope=user_scope)
+        return {
+            "todos": todos,
+            "reviews": reviews,
+            "count": len(todos) + len(reviews),
             "configured": True,
             "limit": safe_limit,
             "user_scope": user_scope,
