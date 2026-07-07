@@ -1978,6 +1978,25 @@ def test_classify_task_intent_routes_planning_request(tmp_path: Path) -> None:
     assert "planner" in data["suggested_next_step"]
 
 
+def test_classify_task_intent_routes_agent_capability_query(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {"user_text": "当前系统有哪些 Agent？每个 Agent 能做什么？"},
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "task_intent_classification"
+    assert data["intent"] == "agent-capabilities"
+    assert data["recommended_agent_id"] == "main"
+    assert data["can_answer_directly"] is True
+    assert data["requires_collaboration"] is False
+    assert "list_agent_capabilities" in data["suggested_next_step"]
+    assert "format_agent_capability_catalog" in data["suggested_next_step"]
+
+
 def test_classify_task_intent_keeps_simple_chat_on_main(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

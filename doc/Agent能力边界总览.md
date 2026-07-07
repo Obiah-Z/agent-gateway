@@ -12,7 +12,7 @@
 
 复杂技术选型、方案对比或中间件取舍任务如果同时要求验证计划、风险审查、落地计划或正式报告，入口层应使用 `research-option-validation` 协作路线：research 先产出方案对比，reviewer 做方案门禁，planner 生成最小验证计划，reviewer 审查计划门禁，doc-writer 最后成文落盘。
 
-`classify_task_intent` 会把普通仓库理解类请求归为 `repo-analysis`，把包含风险、采纳、引入、复用、计划或报告要求的复杂仓库请求归为 `repo-adoption`，并返回 `requires_collaboration=true` 与 `collaboration_task_type=repo-adoption`；也会把包含技术选型、方案对比或中间件取舍，同时要求验证计划、风险审查、落地计划或正式报告的请求归为 `research-option-validation`，供入口层触发协作路线。
+`classify_task_intent` 会把普通仓库理解类请求归为 `repo-analysis`，把包含风险、采纳、引入、复用、计划或报告要求的复杂仓库请求归为 `repo-adoption`，并返回 `requires_collaboration=true` 与 `collaboration_task_type=repo-adoption`；也会把包含技术选型、方案对比或中间件取舍，同时要求验证计划、风险审查、落地计划或正式报告的请求归为 `research-option-validation`，供入口层触发协作路线。用户询问当前有哪些 Agent、每个 Agent 能做什么或任务该交给谁时，归为 `agent-capabilities`，由入口层调用 `list_agent_capabilities` 和 `format_agent_capability_catalog` 直接回答。
 
 入口层生成 `agent_collaboration_plan` 后，应把该 JSON 作为 `collaboration_plan_json` 传给 `format_entry_response`，向用户展示阶段路线和“尚未自动执行”的边界，而不是只输出单个 Agent 的委派建议。
 
