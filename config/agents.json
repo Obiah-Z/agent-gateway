@@ -333,6 +333,7 @@
           "get_current_time",
           "memory_search",
           "assess_risk_decision",
+          "review_release_gate",
           "save_review_report",
           "save_markdown_report"
         ]

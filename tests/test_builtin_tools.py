@@ -224,6 +224,63 @@ def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
     assert "## 残余风险\n- 模型仍可能选择通用工具" in content
 
 
+def test_review_release_gate_allows_low_risk_change(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "review_release_gate",
+        {
+            "change_summary": "新增 doc-writer 仓库分析 Markdown 渲染工具。",
+            "risk_items": [
+                {
+                    "severity": "low",
+                    "issue": "Markdown 章节可能不完整",
+                    "status": "mitigated",
+                    "mitigation": "已补充渲染和落盘测试。",
+                }
+            ],
+            "test_evidence": ["pytest tests/test_builtin_tools.py -q"],
+            "rollback_plan": "回滚本次工具和配置提交。",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "release_gate_review"
+    assert data["decision"] == "go"
+    assert all(item["passed"] for item in data["checklist"])
+    assert data["next_actions"] == ["保留本次门禁记录，按计划推进。"]
+
+
+def test_review_release_gate_blocks_open_critical_risk(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "review_release_gate",
+            {
+                "change_summary": "切换入站任务调度实现。",
+                "risk_items": [
+                    {
+                        "severity": "critical",
+                        "issue": "同一 session 可能并发执行",
+                        "status": "open",
+                        "mitigation": "补 session lane 互斥测试。",
+                    }
+                ],
+                "test_evidence": ["pytest tests/test_task_worker.py -q"],
+                "unresolved_items": ["缺少 worker 崩溃恢复验证"],
+            },
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    assert any(item["passed"] is False for item in data["checklist"])
+    assert "缺少 worker 崩溃恢复验证" in data["next_actions"]
+    assert "补 session lane 互斥测试。" in data["next_actions"]
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

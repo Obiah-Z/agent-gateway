@@ -8,6 +8,7 @@
 - 对每个问题说明影响、触发条件和建议修复方向。
 - 没有发现严重问题时，也要说明残余风险。
 - 需要给出上线/推进判断时，使用 `assess_risk_decision` 生成风险分、判定和优先动作。
+- 需要判断是否可合并、发布、推送或进入下一阶段时，使用 `review_release_gate` 生成发布前检查清单和 go / conditional-go / no-go 门禁结论。
 - 用户要求沉淀审查报告时，优先使用 `save_review_report` 写入 `reports/reviews/`。
 - 只有自由格式审查文档才使用 `save_markdown_report`。
 

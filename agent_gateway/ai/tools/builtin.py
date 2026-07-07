@@ -475,6 +475,98 @@ def register_builtin_tools(
             file_name=file_name or title,
         )
 
+    def review_release_gate(
+        change_summary: str,
+        risk_items: list[dict[str, str]] | None = None,
+        test_evidence: list[str] | None = None,
+        unresolved_items: list[str] | None = None,
+        rollback_plan: str = "",
+    ) -> str:
+        """生成发布前风险门禁判定和检查清单。"""
+
+        risks = risk_items or []
+        evidence = _clean_strings(test_evidence)
+        unresolved = _clean_strings(unresolved_items)
+        normalized_risks = []
+        critical_or_high = 0
+        blocker_count = 0
+        for item in risks:
+            severity = _normalize_severity(str(item.get("severity", "")))
+            status = str(item.get("status", "") or item.get("state", "")).strip().lower()
+            issue = str(item.get("issue", "")).strip()
+            mitigation = str(item.get("mitigation", "") or item.get("suggestion", "")).strip()
+            if severity in {"critical", "high"}:
+                critical_or_high += 1
+            if severity == "critical" or status in {"open", "unresolved", "blocked", "未解决"}:
+                blocker_count += 1
+            normalized_risks.append(
+                {
+                    "severity": severity,
+                    "issue": issue or "未说明风险项",
+                    "status": status or "unknown",
+                    "mitigation": mitigation or "补充缓解措施。",
+                }
+            )
+
+        checklist = [
+            {
+                "item": "变更范围已说明",
+                "passed": bool(change_summary.strip()),
+                "evidence": change_summary.strip() or "缺少变更摘要。",
+            },
+            {
+                "item": "测试证据已提供",
+                "passed": bool(evidence),
+                "evidence": "; ".join(evidence) if evidence else "缺少测试证据。",
+            },
+            {
+                "item": "无未解决阻塞项",
+                "passed": not unresolved and blocker_count == 0,
+                "evidence": "; ".join(unresolved) if unresolved else "未发现显式未决项。",
+            },
+            {
+                "item": "回滚或恢复方案已说明",
+                "passed": bool(rollback_plan.strip()),
+                "evidence": rollback_plan.strip() or "缺少回滚/恢复方案。",
+            },
+        ]
+
+        if blocker_count > 0 or not change_summary.strip():
+            decision = "no-go"
+        elif not evidence or unresolved or critical_or_high > 0 or not rollback_plan.strip():
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        next_actions = []
+        if not evidence:
+            next_actions.append("补充可复现测试证据。")
+        if unresolved:
+            next_actions.extend(unresolved[:3])
+        if not rollback_plan.strip():
+            next_actions.append("补充回滚或恢复方案。")
+        for risk in normalized_risks:
+            if risk["severity"] in {"critical", "high"} and risk["mitigation"]:
+                next_actions.append(risk["mitigation"])
+        if not next_actions:
+            next_actions.append("保留本次门禁记录，按计划推进。")
+
+        return json.dumps(
+            {
+                "type": "release_gate_review",
+                "change_summary": change_summary.strip(),
+                "decision": decision,
+                "checklist": checklist,
+                "risks": normalized_risks,
+                "test_evidence": evidence,
+                "unresolved_items": unresolved,
+                "rollback_plan": rollback_plan.strip(),
+                "next_actions": next_actions[:6],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -1362,6 +1454,41 @@ def register_builtin_tools(
             },
             handler=save_review_report,
             tags=("filesystem", "write", "report", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_release_gate",
+            description=(
+                "Create a pre-release risk gate review with checklist, go/"
+                "conditional-go/no-go decision, risks, evidence, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["change_summary"],
+                "properties": {
+                    "change_summary": {"type": "string"},
+                    "risk_items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "severity": {"type": "string"},
+                                "issue": {"type": "string"},
+                                "status": {"type": "string"},
+                                "state": {"type": "string"},
+                                "mitigation": {"type": "string"},
+                                "suggestion": {"type": "string"},
+                            },
+                        },
+                    },
+                    "test_evidence": {"type": "array", "items": {"type": "string"}},
+                    "unresolved_items": {"type": "array", "items": {"type": "string"}},
+                    "rollback_plan": {"type": "string"},
+                },
+            },
+            handler=review_release_gate,
+            tags=("review", "release", "gate", "risk"),
         )
     )
     registry.register(
