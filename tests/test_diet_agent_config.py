@@ -186,6 +186,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "list_directory",
         "write_file",
         "outline_structured_document",
+        "render_repo_analysis_markdown",
         "save_structured_document",
         "save_markdown_report",
     }.issubset(tools["doc-writer"])
@@ -253,6 +254,9 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "outline_structured_document" in identity
     assert "outline_structured_document" in soul
     assert "outline_structured_document" in tools_md
+    assert "render_repo_analysis_markdown" in identity
+    assert "render_repo_analysis_markdown" in soul
+    assert "render_repo_analysis_markdown" in tools_md
     assert "材料不足" in tools_md
 
 

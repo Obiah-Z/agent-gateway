@@ -268,6 +268,7 @@
           "list_directory",
           "write_file",
           "outline_structured_document",
+          "render_repo_analysis_markdown",
           "save_structured_document",
           "save_markdown_report",
           "get_current_time",

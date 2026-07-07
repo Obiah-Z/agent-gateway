@@ -99,6 +99,15 @@ def _markdown_section(title: str, content: str) -> str:
     return f"## {title}\n{body}"
 
 
+def _markdown_bullets(items: list[object] | None) -> str:
+    """把任意列表渲染为 Markdown bullet list。"""
+
+    cleaned = [str(item).strip() for item in items or [] if str(item).strip()]
+    if not cleaned:
+        return "- 暂无"
+    return "\n".join(f"- {item}" for item in cleaned)
+
+
 def _normalize_document_type(value: str) -> str:
     """归一化文档类型。"""
 
@@ -483,6 +492,79 @@ def register_builtin_tools(
             category=category,
             file_name=file_name or title,
         )
+
+    def render_repo_analysis_markdown(
+        analysis_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 repo-analyzer 的结构化 JSON 渲染成正式 Markdown 文档。"""
+
+        if not analysis_json.strip():
+            return "Error: analysis_json is required"
+        analysis = json.loads(analysis_json)
+        if not isinstance(analysis, dict):
+            return "Error: analysis_json must be a JSON object"
+        if analysis.get("type") != "github_repo_analysis":
+            return "Error: analysis_json type must be github_repo_analysis"
+
+        repository = str(analysis.get("repository") or "unknown/repository")
+        document_title = title.strip() or f"仓库分析：{repository}"
+        positioning = analysis.get("project_positioning") or {}
+        if not isinstance(positioning, dict):
+            positioning = {}
+        gateway_fit = analysis.get("gateway_fit") or {}
+        if not isinstance(gateway_fit, dict):
+            gateway_fit = {}
+
+        project_rows = [
+            f"- 仓库：{repository}",
+            f"- 地址：{analysis.get('url') or '未提供'}",
+            f"- 主要语言：{positioning.get('language') or 'unknown'}",
+            f"- 许可证：{positioning.get('license') or 'unknown'}",
+            f"- 生命周期：{positioning.get('lifecycle') or 'unknown'}",
+        ]
+        topics = positioning.get("topics") or []
+        if topics:
+            project_rows.append(f"- Topics：{', '.join(str(item) for item in topics)}")
+
+        fit_lines = [
+            f"- 评分：{gateway_fit.get('score', 0)}",
+            f"- 优先级：{gateway_fit.get('priority', 'unknown')}",
+            "- 信号：",
+            *[f"  - {item}" for item in gateway_fit.get("signals") or ["暂无"]],
+        ]
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(analysis, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("仓库结论", str(analysis.get("analysis_goal") or "")),
+                _markdown_section(
+                    "项目定位",
+                    "\n".join(
+                        [
+                            str(positioning.get("description") or "待补充"),
+                            "",
+                            *project_rows,
+                        ]
+                    ),
+                ),
+                _markdown_section("Gateway 适配评估", "\n".join(fit_lines)),
+                _markdown_section("关键发现", _markdown_bullets(analysis.get("key_findings"))),
+                _markdown_section(
+                    "对 Gateway 的借鉴点",
+                    _markdown_bullets(analysis.get("gateway_reuse_ideas")),
+                ),
+                _markdown_section("风险与不确定点", _markdown_bullets(analysis.get("risks"))),
+                _markdown_section("建议下一步", _markdown_bullets(analysis.get("recommendations"))),
+            ]
+        ) + metadata
 
     def outline_structured_document(
         title: str,
@@ -1234,6 +1316,35 @@ def register_builtin_tools(
             },
             handler=save_structured_document,
             tags=("filesystem", "write", "report", "document"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_repo_analysis_markdown",
+            description=(
+                "Render a github_repo_analysis JSON object from repo-analyzer into "
+                "a formal Chinese Markdown repository analysis document."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["analysis_json"],
+                "properties": {
+                    "analysis_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_github_repo_analysis.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw JSON analysis metadata.",
+                    },
+                },
+            },
+            handler=render_repo_analysis_markdown,
+            tags=("document", "markdown", "github", "report"),
         )
     )
     registry.register(

@@ -257,6 +257,87 @@ def test_save_structured_document_writes_retrospective(tmp_path: Path) -> None:
     assert "## 后续行动\n- 继续补协作编排" in content
 
 
+def test_render_repo_analysis_markdown_formats_structured_analysis(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    analysis = {
+        "type": "github_repo_analysis",
+        "repository": "demo/repo",
+        "url": "https://github.com/demo/repo",
+        "analysis_goal": "判断是否值得 Gateway 借鉴。",
+        "project_positioning": {
+            "description": "Agent workflow templates",
+            "language": "Markdown",
+            "topics": ["agent", "workflow"],
+            "license": "MIT",
+            "lifecycle": "active-or-recent",
+        },
+        "gateway_fit": {
+            "score": 85,
+            "priority": "high",
+            "signals": ["包含 Agent / Skill 信号。"],
+        },
+        "key_findings": ["README 提供工作流模板。"],
+        "gateway_reuse_ideas": ["参考工作流组织方式。"],
+        "risks": ["需要确认许可证复用边界。"],
+        "recommendations": ["优先抽取模板并做小规模验证。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_repo_analysis_markdown",
+        {
+            "analysis_json": json.dumps(analysis, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 仓库分析：demo/repo")
+    assert "## 项目定位" in markdown
+    assert "- 仓库：demo/repo" in markdown
+    assert "- 评分：85" in markdown
+    assert "## 对 Gateway 的借鉴点" in markdown
+    assert "- 参考工作流组织方式。" in markdown
+    assert "```json" in markdown
+
+
+def test_render_repo_analysis_markdown_can_be_saved_as_report(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    analysis = {
+        "type": "github_repo_analysis",
+        "repository": "demo/repo",
+        "url": "https://github.com/demo/repo",
+        "analysis_goal": "生成仓库分析报告。",
+        "project_positioning": {"description": "demo", "language": "Python"},
+        "gateway_fit": {"score": 60, "priority": "medium", "signals": []},
+        "key_findings": [],
+        "gateway_reuse_ideas": [],
+        "risks": [],
+        "recommendations": [],
+    }
+
+    markdown = registry.dispatch(
+        "render_repo_analysis_markdown",
+        {"analysis_json": json.dumps(analysis, ensure_ascii=False)},
+    )
+    result = registry.dispatch(
+        "save_markdown_report",
+        {
+            "title": "仓库分析 demo/repo",
+            "category": "github-repos",
+            "file_name": "仓库分析-demo-repo",
+            "content": markdown,
+        },
+    )
+
+    assert result == "报告路径：workspace/reports/github-repos/仓库分析-demo-repo.md"
+    content = (
+        tmp_path / "reports" / "github-repos" / "仓库分析-demo-repo.md"
+    ).read_text(encoding="utf-8")
+    assert content.startswith("# 仓库分析：demo/repo")
+    assert "## 建议下一步" in content
+
+
 def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
