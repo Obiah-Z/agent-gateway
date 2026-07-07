@@ -4010,6 +4010,56 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_agent_capability_match(
+        match_json: str,
+        include_alternatives: bool = True,
+    ) -> str:
+        """把 Agent 能力匹配结果格式化成用户可读推荐说明。"""
+
+        if not match_json.strip():
+            return "Error: match_json is required"
+        result = json.loads(match_json)
+        if not isinstance(result, dict):
+            return "Error: match_json must be a JSON object"
+        if result.get("type") != "agent_capability_match":
+            return "Error: match_json type must be agent_capability_match"
+
+        recommended = str(result.get("recommended_agent_id") or "main").strip()
+        confidence = result.get("confidence", 0)
+        matches = [item for item in result.get("matches") or [] if isinstance(item, dict)]
+        best = next((item for item in matches if item.get("agent_id") == recommended), matches[0] if matches else {})
+        lines = [
+            "# Agent 推荐",
+            "",
+            f"- 用户目标：{result.get('user_goal') or '待明确'}",
+            f"- 推荐 Agent：`{recommended}`",
+            f"- 置信度：{confidence}",
+            f"- 推荐理由：{best.get('reason') or '基于当前 Agent 能力目录匹配。'}",
+            f"- 边界：{result.get('boundary') or '这是推荐说明，不代表目标 Agent 已经自动执行。'}",
+        ]
+
+        handoff_inputs = _clean_strings(
+            best.get("handoff_inputs") if isinstance(best.get("handoff_inputs"), list) else []
+        )
+        if handoff_inputs:
+            lines.extend(["", "## 建议补充给目标 Agent 的信息", _markdown_bullets(handoff_inputs)])
+
+        if include_alternatives and len(matches) > 1:
+            rows = []
+            for item in matches[1:4]:
+                rows.append(
+                    [
+                        item.get("agent_id") or "unknown",
+                        item.get("score") or 0,
+                        ", ".join(_clean_strings(item.get("matched_terms") if isinstance(item.get("matched_terms"), list) else []))
+                        or "暂无",
+                    ]
+                )
+            lines.extend(["", "## 备选 Agent", _markdown_table(["Agent", "分数", "命中词"], rows)])
+
+        lines.extend(["", "## 下一步", _markdown_bullets(result.get("next_actions"))])
+        return "\n".join(lines).strip()
+
     def explain_agent_route(
         user_goal: str,
         intent: str,
@@ -6264,6 +6314,31 @@ def register_builtin_tools(
             },
             handler=match_agent_capability,
             tags=("agent", "catalog", "match", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_agent_capability_match",
+            description=(
+                "Format an agent_capability_match JSON object into a Chinese "
+                "user-facing agent recommendation."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["match_json"],
+                "properties": {
+                    "match_json": {
+                        "type": "string",
+                        "description": "JSON string returned by match_agent_capability.",
+                    },
+                    "include_alternatives": {
+                        "type": "boolean",
+                        "description": "Whether to include alternative agents.",
+                    },
+                },
+            },
+            handler=format_agent_capability_match,
+            tags=("agent", "catalog", "match", "format", "routing"),
         )
     )
     registry.register(

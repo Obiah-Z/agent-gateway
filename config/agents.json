@@ -29,7 +29,8 @@
           "web_search",
           "fetch_url",
           "format_agent_capability_catalog",
-          "match_agent_capability"
+          "match_agent_capability",
+          "format_agent_capability_match"
         ]
       },
       "memory_policy": {
@@ -102,7 +103,8 @@
           "explain_agent_route",
           "prepare_entry_route_response",
           "format_agent_capability_catalog",
-          "match_agent_capability"
+          "match_agent_capability",
+          "format_agent_capability_match"
         ]
       },
       "memory_policy": {
@@ -143,7 +145,8 @@
           "explain_agent_route",
           "prepare_entry_route_response",
           "format_agent_capability_catalog",
-          "match_agent_capability"
+          "match_agent_capability",
+          "format_agent_capability_match"
         ]
       },
       "memory_policy": {

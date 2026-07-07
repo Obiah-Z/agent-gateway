@@ -2368,6 +2368,50 @@ def test_match_agent_capability_recommends_agent_from_catalog(tmp_path: Path) ->
     assert "不代表目标 Agent 已经自动执行" in data["boundary"]
 
 
+def test_format_agent_capability_match_outputs_recommendation(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    match = {
+        "type": "agent_capability_match",
+        "user_goal": "把已有材料整理成 Markdown 报告",
+        "recommended_agent_id": "doc-writer",
+        "confidence": 0.71,
+        "matches": [
+            {
+                "agent_id": "doc-writer",
+                "name": "DocWriter",
+                "score": 4,
+                "matched_terms": ["文档", "报告"],
+                "reason": "目标与该 Agent 的职责或工具命中：文档, 报告。",
+                "handoff_inputs": ["`source_material`：已有分析、计划或审查结论。"],
+            },
+            {
+                "agent_id": "planner",
+                "name": "TaskPlanner",
+                "score": 1,
+                "matched_terms": ["计划"],
+                "reason": "低置信备选。",
+                "handoff_inputs": [],
+            },
+        ],
+        "next_actions": ["调用 build_agent_handoff_prompt 生成交接提示。"],
+        "boundary": "这是基于当前 Agent 能力目录的推荐，不代表目标 Agent 已经自动执行。",
+    }
+
+    result = registry.dispatch(
+        "format_agent_capability_match",
+        {"match_json": json.dumps(match, ensure_ascii=False)},
+    )
+
+    assert result.startswith("# Agent 推荐")
+    assert "推荐 Agent：`doc-writer`" in result
+    assert "置信度：0.71" in result
+    assert "`source_material`：已有分析、计划或审查结论。" in result
+    assert "| planner | 1 | 计划 |" in result
+    assert "build_agent_handoff_prompt" in result
+    assert "不代表目标 Agent 已经自动执行" in result
+
+
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)
