@@ -1315,6 +1315,51 @@ def test_format_entry_response_formats_direct_reply(tmp_path: Path) -> None:
     assert "建议交给" not in result
 
 
+def test_explain_agent_route_describes_collaboration_stages(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库并输出风险扫描。",
+                "expected_output": "github_repo_analysis JSON。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "purpose": "审查风险门禁。",
+                "expected_output": "github_repo_risk_gate_review JSON。",
+            },
+        ],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "explain_agent_route",
+            {
+                "user_goal": "分析仓库并给出采纳计划。",
+                "intent": "repo-adoption",
+                "recommended_agent_id": "repo-analyzer",
+                "reason": "需要分析和审查串联。",
+                "requires_collaboration": True,
+                "collaboration_task_type": "repo-adoption",
+                "collaboration_plan_json": json.dumps(plan, ensure_ascii=False),
+            },
+        )
+    )
+
+    assert data["type"] == "agent_route_explanation"
+    assert data["route_type"] == "collaboration"
+    assert data["readiness"] == "ready"
+    assert [stage["agent_id"] for stage in data["stages"]] == ["repo-analyzer", "reviewer"]
+    assert data["stages"][1]["expected_output"] == "github_repo_risk_gate_review JSON。"
+    assert "不代表任何目标 Agent 已经自动执行" in data["boundary"]
+
+
 def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"

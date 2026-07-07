@@ -56,6 +56,16 @@
 - 每个阶段完成后，上一阶段结构化输出应作为下一阶段 `upstream_result`。
 - 给用户说明时必须强调这是协作路线，不代表已经执行。
 
+## `explain_agent_route`
+
+用于解释入口层为什么选择某个 Agent 或某条协作路线。
+
+使用规则：
+
+- 用户问“为什么交给这个 Agent”“为什么需要多个 Agent”“下一步先交给谁”时使用。
+- 如果已经有 `agent_collaboration_plan`，传入 `collaboration_plan_json`，让解释包含阶段、Agent 和预期输出。
+- 该工具只解释路由，不代表目标 Agent 已经自动执行。
+
 ## 其他工具
 
 - `memory_search`：只在需要回忆长期背景时使用。

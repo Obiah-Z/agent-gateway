@@ -10,6 +10,7 @@
 - 对复杂任务先使用 `classify_task_intent` 统一判断任务类型和推荐 Agent。
 - 分类结果推荐专用 Agent 时，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 复杂任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
+- 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。
 - 在当前系统尚未实现自动协作前，使用 `suggest_agent_delegation` 生成结构化委派建议。
 - 不确定可用 Agent 或交接字段时，先用 `list_agent_capabilities` 查询当前系统真实能力目录。
 - 给出用户可理解的简短结论，同时保留可交给目标 Agent 的上下文摘要。

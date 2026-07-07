@@ -2554,6 +2554,87 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def explain_agent_route(
+        user_goal: str,
+        intent: str,
+        recommended_agent_id: str = "",
+        reason: str = "",
+        requires_collaboration: bool = False,
+        collaboration_task_type: str = "",
+        collaboration_plan_json: str = "",
+        next_step: str = "",
+    ) -> str:
+        """解释入口 Agent 为什么选择单 Agent 委派或多 Agent 协作路线。"""
+
+        goal = user_goal.strip()
+        normalized_intent = intent.strip() or "unknown"
+        collaboration_plan: dict[str, Any] = {}
+        if collaboration_plan_json.strip():
+            parsed_plan = json.loads(collaboration_plan_json)
+            if not isinstance(parsed_plan, dict):
+                return "Error: collaboration_plan_json must be a JSON object"
+            if parsed_plan.get("type") != "agent_collaboration_plan":
+                return "Error: collaboration_plan_json type must be agent_collaboration_plan"
+            collaboration_plan = parsed_plan
+
+        route_type = "collaboration" if requires_collaboration or collaboration_plan else "single-agent"
+        stages = []
+        for stage in collaboration_plan.get("handoff_sequence") or []:
+            if not isinstance(stage, dict):
+                continue
+            stages.append(
+                {
+                    "step": int(stage.get("step") or len(stages) + 1),
+                    "agent_id": str(stage.get("agent_id") or "unknown"),
+                    "purpose": str(stage.get("purpose") or "按职责处理"),
+                    "expected_output": str(stage.get("expected_output") or "结构化结果"),
+                }
+            )
+        if route_type == "single-agent":
+            agent_id = recommended_agent_id.strip() or "main"
+            stages = [
+                {
+                    "step": 1,
+                    "agent_id": agent_id,
+                    "purpose": reason.strip() or "该任务可由单个 Agent 处理。",
+                    "expected_output": "直接回复或目标 Agent 的结构化结果。",
+                }
+            ]
+
+        if not goal:
+            readiness = "needs_context"
+            route_reason = "缺少用户原始目标，无法稳定解释路由。"
+        elif route_type == "collaboration" and not stages:
+            readiness = "needs_collaboration_plan"
+            route_reason = "任务需要协作，但缺少 agent_collaboration_plan。"
+        else:
+            readiness = "ready"
+            route_reason = reason.strip() or "已根据任务意图和 Agent 能力边界选择路线。"
+
+        return json.dumps(
+            {
+                "type": "agent_route_explanation",
+                "user_goal": goal,
+                "intent": normalized_intent,
+                "route_type": route_type,
+                "collaboration_task_type": collaboration_task_type.strip()
+                or str(collaboration_plan.get("task_type") or ""),
+                "recommended_agent_id": recommended_agent_id.strip() or (stages[0]["agent_id"] if stages else "main"),
+                "reason": route_reason,
+                "readiness": readiness,
+                "stages": stages,
+                "next_step": next_step.strip()
+                or (
+                    "先调用 plan_agent_collaboration 生成协作路线。"
+                    if readiness == "needs_collaboration_plan"
+                    else "按第一阶段交接提示继续推进。"
+                ),
+                "boundary": "这是路由解释，不代表任何目标 Agent 已经自动执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def ops_readonly_health(include_sizes: bool = True) -> str:
         """生成只读运维健康简报，不执行 shell 命令。"""
 
@@ -4131,6 +4212,35 @@ def register_builtin_tools(
             },
             handler=list_agent_capabilities,
             tags=("agent", "catalog", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="explain_agent_route",
+            description=(
+                "Explain why an entry agent selected a single-agent delegation or "
+                "multi-agent collaboration route. Returns route type, stages, next step, "
+                "readiness, and non-execution boundary."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_goal", "intent"],
+                "properties": {
+                    "user_goal": {"type": "string"},
+                    "intent": {"type": "string"},
+                    "recommended_agent_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "requires_collaboration": {"type": "boolean"},
+                    "collaboration_task_type": {"type": "string"},
+                    "collaboration_plan_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by plan_agent_collaboration.",
+                    },
+                    "next_step": {"type": "string"},
+                },
+            },
+            handler=explain_agent_route,
+            tags=("agent", "routing", "explanation"),
         )
     )
     registry.register(

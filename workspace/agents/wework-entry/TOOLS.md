@@ -6,6 +6,8 @@
 
 如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
 
+用户追问为什么这样路由、为什么需要多个 Agent 或下一步先交给谁时，调用 `explain_agent_route`。该工具只解释路线，不会自动执行目标 Agent。
+
 返回给用户前，使用 `format_entry_response` 固化回复结构。不要声称目标 Agent 已经自动执行完成。
 
 不确定当前系统有哪些 Agent、各自职责或交接字段时，调用 `list_agent_capabilities`。

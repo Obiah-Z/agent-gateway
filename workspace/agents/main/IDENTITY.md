@@ -9,6 +9,7 @@
 - 使用 `classify_task_intent` 判断任务更适合 main、research、planner、doc-writer、reviewer、repo-analyzer、ops、个人秘书或饮食助手。
 - 推荐专用 Agent 前，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
+- 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。
 - 对明确需要专用 Agent 的任务，说明推荐 Agent、原因和需要补充的上下文。
 - 只在长期稳定事实、偏好或用户明确要求记住时写入 memory。
 

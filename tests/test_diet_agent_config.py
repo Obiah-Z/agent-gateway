@@ -59,6 +59,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_entry_response" in tools
     assert "build_agent_handoff_prompt" in tools
     assert "plan_agent_collaboration" in tools
+    assert "explain_agent_route" in tools
     assert by_id["main"]["prompt_policy"]["prompt_dir"] == "agents/main"
     assert (prompt_dir / "IDENTITY.md").exists()
     assert (prompt_dir / "SOUL.md").exists()
@@ -72,6 +73,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_entry_response" in combined_prompt
     assert "build_agent_handoff_prompt" in combined_prompt
     assert "plan_agent_collaboration" in combined_prompt
+    assert "explain_agent_route" in combined_prompt
     assert "不假装已经完成多 Agent 自动交接" in combined_prompt
     assert "personal_todo_add" not in tools
     assert "meal_log_add" not in tools
@@ -95,17 +97,21 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "suggest_agent_delegation" in tools
         assert "build_agent_handoff_prompt" in tools
         assert "plan_agent_collaboration" in tools
+        assert "explain_agent_route" in tools
         assert "classify_task_intent" in identity
         assert "classify_task_intent" in soul
         assert "build_agent_handoff_prompt" in identity
         assert "build_agent_handoff_prompt" in soul
         assert "plan_agent_collaboration" in identity
         assert "plan_agent_collaboration" in soul
+        assert "explain_agent_route" in identity
+        assert "explain_agent_route" in soul
         assert "format_entry_response" in soul
         assert "suggest_agent_delegation" in soul
         assert "classify_task_intent" in tools_md
         assert "build_agent_handoff_prompt" in tools_md
         assert "plan_agent_collaboration" in tools_md
+        assert "explain_agent_route" in tools_md
         assert "suggest_agent_delegation" in tools_md
         assert "format_entry_response" in tools_md
 
@@ -455,6 +461,8 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
     assert "requires_collaboration=true" in main_tools
     assert "collaboration_plan_json" in main_soul
     assert "collaboration_plan_json" in main_tools
+    assert "explain_agent_route" in main_soul
+    assert "explain_agent_route" in main_tools
     assert "repo-analyzer、reviewer、planner、doc-writer" in main_soul
     assert "repo-analyzer → reviewer → planner → doc-writer" in main_tools
 
@@ -465,6 +473,7 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
         assert "repo-adoption" in soul
         assert "requires_collaboration=true" in soul
         assert "collaboration_plan_json" in soul
+        assert "explain_agent_route" in soul
         assert "repo-analyzer、reviewer、planner、doc-writer" in soul
 
 
@@ -480,6 +489,8 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "build_agent_handoff_prompt" in tools["wework-entry"]
     assert "plan_agent_collaboration" in tools["feishu-entry"]
     assert "plan_agent_collaboration" in tools["wework-entry"]
+    assert "explain_agent_route" in tools["feishu-entry"]
+    assert "explain_agent_route" in tools["wework-entry"]
     for agent_id in {
         "repo-analyzer",
         "doc-writer",
@@ -492,6 +503,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "list_agent_capabilities" not in tools[agent_id]
         assert "build_agent_handoff_prompt" not in tools[agent_id]
         assert "plan_agent_collaboration" not in tools[agent_id]
+        assert "explain_agent_route" not in tools[agent_id]
 
 
 def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
@@ -513,6 +525,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "diet_day_review_plan_generate",
         "build_agent_handoff_prompt",
         "plan_agent_collaboration",
+        "explain_agent_route",
     ]:
         assert term in content
     for agent_id in [
