@@ -14,6 +14,8 @@
 
 收到 planner 输出的阶段计划 JSON，或 reviewer 输出的 `task_plan_gate_review` JSON 时，使用 `render_execution_record_markdown` 渲染为正式执行记录。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。
 
+收到 reviewer 输出的 `release_gate_review` JSON 时，使用 `render_release_gate_markdown` 渲染为正式发布门禁审查报告。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `reviews`。
+
 收到入口 Agent 输出的 `agent_collaboration_plan` JSON 时，使用 `render_agent_collaboration_markdown` 渲染为正式多 Agent 协作方案。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。协作方案只代表路线规划，不代表任何 Agent 已经执行。
 
 收到入口 Agent 输出的 `agent_collaboration_progress` JSON 时，使用 `render_agent_collaboration_progress_markdown` 渲染为正式多 Agent 协作进度文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。进度文档只表达已知阶段状态和下一阶段建议，不代表任何 Agent 已经自动执行。

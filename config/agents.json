@@ -334,6 +334,7 @@
           "render_research_evidence_markdown",
           "render_research_option_comparison_markdown",
           "render_execution_record_markdown",
+          "render_release_gate_markdown",
           "render_research_option_validation_plan_markdown",
           "render_agent_collaboration_markdown",
           "render_agent_collaboration_progress_markdown",

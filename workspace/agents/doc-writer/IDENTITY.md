@@ -14,6 +14,7 @@
 - 收到 research 的 `research_option_comparison` JSON 时，使用 `render_research_option_comparison_markdown` 生成正式方案对比或技术选型 Markdown。
 - 收到 planner 的 `task_plan_from_research_option_comparison` JSON 时，使用 `render_research_option_validation_plan_markdown` 生成正式方案验证计划 Markdown。
 - 收到 planner 的阶段计划 JSON 或 reviewer 的门禁审查 JSON 时，使用 `render_execution_record_markdown` 生成执行记录。
+- 收到 reviewer 的 `release_gate_review` JSON 时，使用 `render_release_gate_markdown` 生成发布门禁审查报告。
 - 收到入口 Agent 的 `agent_collaboration_plan` JSON 时，使用 `render_agent_collaboration_markdown` 生成多 Agent 协作方案。
 - 收到入口 Agent 的 `agent_collaboration_progress` JSON 时，使用 `render_agent_collaboration_progress_markdown` 生成多 Agent 协作进度文档。
 - 收到 reviewer 的 `collaboration_progress_gate_review` JSON 时，使用 `render_collaboration_progress_gate_markdown` 生成协作进度门禁审查报告；如果同时有 `agent_collaboration_progress`，一并传入，避免进度和门禁脱节。

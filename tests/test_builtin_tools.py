@@ -1508,6 +1508,49 @@ def test_render_execution_record_markdown_formats_plan_and_gate_review(tmp_path:
     assert "```json" in markdown
 
 
+def test_render_release_gate_markdown_formats_review(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    review = {
+        "type": "release_gate_review",
+        "change_summary": "新增 doc-writer 发布门禁 Markdown 渲染工具。",
+        "decision": "conditional-go",
+        "checklist": [
+            {"item": "测试证据已提供", "passed": True, "evidence": "pytest 已通过。"},
+            {"item": "回滚或恢复方案已说明", "passed": False, "evidence": "缺少回滚方案。"},
+        ],
+        "risks": [
+            {
+                "severity": "medium",
+                "issue": "发布门禁报告格式可能不完整",
+                "status": "mitigated",
+                "mitigation": "补充渲染测试。",
+            }
+        ],
+        "test_evidence": ["pytest tests/test_builtin_tools.py -q"],
+        "unresolved_items": ["补充回滚方案"],
+        "rollback_plan": "",
+        "next_actions": ["补充回滚或恢复方案。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_release_gate_markdown",
+        {
+            "gate_review_json": json.dumps(review, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 发布门禁审查报告")
+    assert "- 门禁结论：conditional-go" in markdown
+    assert "新增 doc-writer 发布门禁 Markdown 渲染工具。" in markdown
+    assert "| 回滚或恢复方案已说明 | 未通过 | 缺少回滚方案。 |" in markdown
+    assert "| medium | 发布门禁报告格式可能不完整 | mitigated | 补充渲染测试。 |" in markdown
+    assert "- pytest tests/test_builtin_tools.py -q" in markdown
+    assert "- 补充回滚方案" in markdown
+    assert "```json" in markdown
+
+
 def test_render_agent_collaboration_markdown_formats_handoff_route(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

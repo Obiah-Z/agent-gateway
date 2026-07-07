@@ -2606,6 +2606,75 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_release_gate_markdown(
+        gate_review_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把发布门禁审查 JSON 渲染成正式 Markdown。"""
+
+        if not gate_review_json.strip():
+            return "Error: gate_review_json is required"
+        review = json.loads(gate_review_json)
+        if not isinstance(review, dict):
+            return "Error: gate_review_json must be a JSON object"
+        if review.get("type") != "release_gate_review":
+            return "Error: gate_review_json type must be release_gate_review"
+
+        decision = str(review.get("decision") or "待审查").strip()
+        document_title = title.strip() or "发布门禁审查报告"
+        summary = "\n".join(
+            [
+                f"- 门禁结论：{decision}",
+                f"- 变更摘要：{review.get('change_summary') or '待补充'}",
+                f"- 回滚方案：{review.get('rollback_plan') or '待补充'}",
+            ]
+        )
+
+        checklist_rows = []
+        for item in review.get("checklist") or []:
+            if not isinstance(item, dict):
+                continue
+            checklist_rows.append(
+                [
+                    item.get("item") or "未命名检查项",
+                    "通过" if item.get("passed") else "未通过",
+                    item.get("evidence") or "待补充",
+                ]
+            )
+
+        risk_rows = []
+        for item in review.get("risks") or []:
+            if not isinstance(item, dict):
+                continue
+            risk_rows.append(
+                [
+                    item.get("severity") or "unknown",
+                    item.get("issue") or "未说明风险项",
+                    item.get("status") or "unknown",
+                    item.get("mitigation") or "待补充",
+                ]
+            )
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(review, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section("检查清单", _markdown_table(["检查项", "结果", "依据"], checklist_rows)),
+                _markdown_section("风险项", _markdown_table(["级别", "问题", "状态", "缓解措施"], risk_rows)),
+                _markdown_section("测试证据", _markdown_bullets(review.get("test_evidence"))),
+                _markdown_section("未决事项", _markdown_bullets(review.get("unresolved_items"))),
+                _markdown_section("下一步", _markdown_bullets(review.get("next_actions"))),
+            ]
+        ) + metadata
+
     def render_research_option_validation_plan_markdown(
         task_plan_json: str,
         title: str = "",
@@ -6484,6 +6553,35 @@ def register_builtin_tools(
             },
             handler=render_execution_record_markdown,
             tags=("document", "markdown", "plan", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_release_gate_markdown",
+            description=(
+                "Render a release_gate_review JSON object from reviewer into a formal "
+                "Chinese Markdown release gate report."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["gate_review_json"],
+                "properties": {
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "JSON string returned by review_release_gate.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append raw release gate metadata.",
+                    },
+                },
+            },
+            handler=render_release_gate_markdown,
+            tags=("document", "markdown", "release", "gate", "review"),
         )
     )
     registry.register(

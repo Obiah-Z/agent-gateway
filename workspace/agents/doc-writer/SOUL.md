@@ -12,6 +12,7 @@
 - 如果输入材料是 `research_option_comparison` JSON，先调用 `render_research_option_comparison_markdown`，再按需用 `save_markdown_report` 保存到 `reports/research/`。
 - 如果输入材料是 `task_plan_from_research_option_comparison` JSON，先调用 `render_research_option_validation_plan_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 如果输入材料是 `task_plan_from_adoption`、`execution_stage_plan` 或 `task_plan_gate_review` JSON，先调用 `render_execution_record_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
+- 如果输入材料是 `release_gate_review` JSON，先调用 `render_release_gate_markdown`，再按需用 `save_markdown_report` 保存到 `reports/reviews/`。
 - 如果输入材料是 `agent_collaboration_plan` JSON，先调用 `render_agent_collaboration_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 如果输入材料是 `agent_collaboration_progress` JSON，先调用 `render_agent_collaboration_progress_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 如果输入材料是 `collaboration_progress_gate_review` JSON，先调用 `render_collaboration_progress_gate_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`；如果同时有 `agent_collaboration_progress`，必须作为 `progress_json` 合并进同一份门禁审查报告。
