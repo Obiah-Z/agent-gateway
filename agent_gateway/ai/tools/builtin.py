@@ -108,6 +108,28 @@ def _markdown_bullets(items: list[object] | None) -> str:
     return "\n".join(f"- {item}" for item in cleaned)
 
 
+def _markdown_table_cell(value: object) -> str:
+    """转义 Markdown 表格单元格内容。"""
+
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.replace("|", "\\|") or "待补充"
+
+
+def _markdown_table(headers: list[str], rows: list[list[object]]) -> str:
+    """渲染简单 Markdown 表格。"""
+
+    if not rows:
+        rows = [["暂无"] * len(headers)]
+    header = "| " + " | ".join(_markdown_table_cell(item) for item in headers) + " |"
+    divider = "| " + " | ".join("---" for _ in headers) + " |"
+    body = [
+        "| " + " | ".join(_markdown_table_cell(item) for item in row) + " |"
+        for row in rows
+    ]
+    return "\n".join([header, divider, *body])
+
+
 def _normalize_document_type(value: str) -> str:
     """归一化文档类型。"""
 
@@ -882,6 +904,108 @@ def register_builtin_tools(
                 ),
                 _markdown_section("风险与不确定点", _markdown_bullets(analysis.get("risks"))),
                 _markdown_section("建议下一步", _markdown_bullets(analysis.get("recommendations"))),
+            ]
+        ) + metadata
+
+    def render_execution_record_markdown(
+        task_plan_json: str,
+        gate_review_json: str = "",
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 planner/reviewer 的结构化结果渲染成正式执行记录。"""
+
+        if not task_plan_json.strip():
+            return "Error: task_plan_json is required"
+        plan = json.loads(task_plan_json)
+        if not isinstance(plan, dict):
+            return "Error: task_plan_json must be a JSON object"
+        review: dict[str, object] = {}
+        if gate_review_json.strip():
+            parsed_review = json.loads(gate_review_json)
+            if not isinstance(parsed_review, dict):
+                return "Error: gate_review_json must be a JSON object"
+            review = parsed_review
+
+        plan_title = str(plan.get("title") or plan.get("objective") or plan.get("goal") or "执行记录")
+        document_title = title.strip() or f"执行记录：{plan_title}"
+        goal = str(plan.get("goal") or plan.get("objective") or "待明确").strip()
+        scope = str(plan.get("scope") or "待明确").strip()
+        readiness = str(plan.get("readiness") or "").strip()
+        decision_data = plan.get("decision") if isinstance(plan.get("decision"), dict) else {}
+        decision = str(review.get("decision") or decision_data.get("action") or readiness or "待审查")
+        repository = str(plan.get("repository") or "").strip()
+
+        summary_lines = [
+            f"- 目标：{goal}",
+            f"- 范围：{scope}",
+            f"- 门禁结论：{decision}",
+        ]
+        if repository:
+            summary_lines.append(f"- 来源仓库：{repository}")
+        if readiness:
+            summary_lines.append(f"- 计划状态：{readiness}")
+
+        phase_rows = []
+        for index, phase in enumerate(plan.get("phases") or [], start=1):
+            if not isinstance(phase, dict):
+                continue
+            phase_rows.append(
+                [
+                    phase.get("name") or phase.get("title") or f"阶段 {index}",
+                    phase.get("task") or phase.get("objective") or "待明确",
+                    phase.get("output") or phase.get("deliverable") or "待明确",
+                    phase.get("done") or phase.get("acceptance") or "待补充",
+                ]
+            )
+
+        checklist_rows = []
+        for item in review.get("checklist") or []:
+            if not isinstance(item, dict):
+                continue
+            checklist_rows.append(
+                [
+                    item.get("item") or "未命名检查项",
+                    "通过" if item.get("passed") else "未通过",
+                    item.get("evidence") or "待补充",
+                ]
+            )
+        if checklist_rows:
+            gate_content = "\n".join(
+                [
+                    f"- 审查对象：{review.get('review_target') or plan_title}",
+                    f"- 结论：{decision}",
+                    "",
+                    _markdown_table(["检查项", "结果", "依据"], checklist_rows),
+                ]
+            )
+        else:
+            gate_content = f"- 结论：{decision}\n- 检查项：暂无门禁审查记录"
+
+        risk_items = []
+        risk_items.extend(_clean_strings(plan.get("risks") if isinstance(plan.get("risks"), list) else []))
+        risk_items.extend(_clean_strings(review.get("risks") if isinstance(review.get("risks"), list) else []))
+        next_actions = []
+        next_actions.extend(_clean_strings(plan.get("next_steps") if isinstance(plan.get("next_steps"), list) else []))
+        next_actions.extend(_clean_strings(review.get("next_actions") if isinstance(review.get("next_actions"), list) else []))
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n"
+                + json.dumps({"task_plan": plan, "gate_review": review}, ensure_ascii=False, indent=2)
+                + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", "\n".join(summary_lines)),
+                _markdown_section("阶段计划", _markdown_table(["阶段", "任务", "输出", "完成标准"], phase_rows)),
+                _markdown_section("门禁审查", gate_content),
+                _markdown_section("风险与限制", _markdown_bullets(risk_items)),
+                _markdown_section("下一步", _markdown_bullets(next_actions)),
             ]
         ) + metadata
 
@@ -1964,6 +2088,39 @@ def register_builtin_tools(
             },
             handler=render_repo_analysis_markdown,
             tags=("document", "markdown", "github", "report"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_execution_record_markdown",
+            description=(
+                "Render planner task-plan JSON and optional reviewer gate-review JSON "
+                "into a formal Chinese Markdown execution record."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["task_plan_json"],
+                "properties": {
+                    "task_plan_json": {
+                        "type": "string",
+                        "description": "JSON string from adapt_adoption_plan_to_task_plan, structure_task_breakdown, or a compatible task plan.",
+                    },
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by review_task_plan_gate.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append raw plan and review JSON metadata.",
+                    },
+                },
+            },
+            handler=render_execution_record_markdown,
+            tags=("document", "markdown", "plan", "review"),
         )
     )
     registry.register(

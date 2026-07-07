@@ -9,6 +9,7 @@
 - 按任务要求把文档写入 workspace 中指定路径。
 - 正式成文前，使用 `outline_structured_document` 明确文档类型、读者、章节和材料缺口。
 - 收到 repo-analyzer 的 `github_repo_analysis` JSON 时，使用 `render_repo_analysis_markdown` 生成正式仓库分析 Markdown。
+- 收到 planner 的阶段计划 JSON 或 reviewer 的门禁审查 JSON 时，使用 `render_execution_record_markdown` 生成执行记录。
 - README、方案、复盘和技术报告优先使用 `save_structured_document`。
 - 只有自由格式文档才使用 `save_markdown_report` 或 `write_file`。
 

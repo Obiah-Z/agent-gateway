@@ -543,6 +543,57 @@ def test_render_repo_analysis_markdown_can_be_saved_as_report(tmp_path: Path) ->
     assert "## 建议下一步" in content
 
 
+def test_render_execution_record_markdown_formats_plan_and_gate_review(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "task_plan_from_adoption",
+        "title": "workflow 采纳计划",
+        "goal": "采纳 workflow 模板优化 Gateway 主动任务。",
+        "scope": "只做最小原型，不修改生产配置。",
+        "repository": "demo/workflow",
+        "decision": {"action": "pilot", "reason": "先小规模验证。"},
+        "phases": [
+            {
+                "name": "证据复核",
+                "task": "复核 README 和许可证",
+                "output": "证据摘要",
+                "done": "证据摘要已落盘",
+            }
+        ],
+        "risks": ["许可证需要人工确认。"],
+        "next_steps": ["pytest tests/test_builtin_tools.py -q"],
+    }
+    review = {
+        "type": "task_plan_gate_review",
+        "review_target": "workflow 采纳计划",
+        "decision": "conditional-go",
+        "checklist": [
+            {"item": "目标已明确", "passed": True, "evidence": "目标已给出。"},
+            {"item": "风险和门槛已列出", "passed": False, "evidence": "风险不足。"},
+        ],
+        "risks": ["需要补充回滚验证。"],
+        "next_actions": ["补充风险门槛。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_execution_record_markdown",
+        {
+            "task_plan_json": json.dumps(plan, ensure_ascii=False),
+            "gate_review_json": json.dumps(review, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 执行记录：workflow 采纳计划")
+    assert "- 门禁结论：conditional-go" in markdown
+    assert "| 证据复核 | 复核 README 和许可证 | 证据摘要 | 证据摘要已落盘 |" in markdown
+    assert "| 风险和门槛已列出 | 未通过 | 风险不足。 |" in markdown
+    assert "- 许可证需要人工确认。" in markdown
+    assert "- 补充风险门槛。" in markdown
+    assert "```json" in markdown
+
+
 def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

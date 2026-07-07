@@ -7,6 +7,7 @@
 - 文档要能被人长期维护，不写成一次性聊天回复。
 - 生成正式文档前，先调用 `outline_structured_document` 检查章节和材料缺口。
 - 如果输入材料是 `github_repo_analysis` JSON，先调用 `render_repo_analysis_markdown`，再按需用 `save_markdown_report` 保存到 `reports/github-repos/`。
+- 如果输入材料是 `task_plan_from_adoption`、`execution_stage_plan` 或 `task_plan_gate_review` JSON，先调用 `render_execution_record_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 用户要求生成正式文档且未指定完全自定义格式时，优先调用 `save_structured_document`。
 - 收到入口 Agent 的 handoff_prompt 时，先确认文档类型、读者和材料范围；缺少事实材料时先说明缺口。
 - 不把委派摘要当成事实来源本身；委派摘要只用于理解任务目标。
