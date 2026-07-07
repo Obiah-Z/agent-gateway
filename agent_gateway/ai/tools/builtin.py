@@ -1776,6 +1776,93 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def compose_research_evidence_pack(
+        topic: str,
+        research_question: str,
+        conclusion: str,
+        sources: list[dict[str, str]] | None = None,
+        key_facts: list[str] | None = None,
+        source_conflicts: list[str] | None = None,
+        uncertainty: list[str] | None = None,
+        freshness: str = "",
+        downstream_use: str = "",
+    ) -> str:
+        """把核验后的来源整理成可交给下游 Agent 的证据包。"""
+
+        normalized_sources = []
+        primary_count = 0
+        for source in sources or []:
+            title = str(source.get("title", "")).strip()
+            url = str(source.get("url", "")).strip()
+            source_type = str(source.get("source_type", "") or source.get("type", "")).strip().lower()
+            fact = str(source.get("fact", "") or source.get("evidence", "")).strip()
+            if source_type in {"official", "docs", "paper", "primary", "官方", "论文"}:
+                primary_count += 1
+            if title or url or fact:
+                normalized_sources.append(
+                    {
+                        "title": title,
+                        "url": url,
+                        "source_type": source_type or "unknown",
+                        "fact": fact,
+                    }
+                )
+
+        facts = _clean_strings(key_facts)
+        conflicts = _clean_strings(source_conflicts)
+        gaps = _clean_strings(uncertainty)
+        if not normalized_sources:
+            gaps.append("缺少可核验来源 URL。")
+        if not conclusion.strip():
+            gaps.append("缺少明确结论。")
+
+        evidence_quality = "strong"
+        if not normalized_sources or not conclusion.strip():
+            evidence_quality = "missing"
+        elif conflicts or gaps:
+            evidence_quality = "limited"
+        elif len(normalized_sources) < 2 or primary_count == 0:
+            evidence_quality = "medium"
+
+        reusable_payload = {
+            "topic": topic.strip(),
+            "question": research_question.strip(),
+            "conclusion": conclusion.strip(),
+            "key_facts": facts,
+            "sources": normalized_sources,
+            "freshness": freshness.strip(),
+        }
+        next_actions = []
+        if evidence_quality in {"missing", "limited"}:
+            next_actions.append("补充一手来源或交叉来源后再沉淀为长期结论。")
+        if conflicts:
+            next_actions.append("对冲突来源做逐条比对，并标注采用依据。")
+        if not next_actions:
+            next_actions.append("可把 reusable_payload 交给 repo-analyzer、planner 或 doc-writer 复用。")
+
+        return json.dumps(
+            {
+                "type": "research_evidence_pack",
+                "topic": topic.strip(),
+                "research_question": research_question.strip(),
+                "conclusion": conclusion.strip(),
+                "evidence_quality": evidence_quality,
+                "source_count": len(normalized_sources),
+                "primary_source_count": primary_count,
+                "sources": normalized_sources,
+                "key_facts": facts,
+                "source_conflicts": conflicts,
+                "uncertainty": gaps,
+                "freshness": freshness.strip(),
+                "downstream_use": downstream_use.strip()
+                or "供 repo-analyzer、planner、reviewer 或 doc-writer 复用。",
+                "reusable_payload": reusable_payload,
+                "next_actions": next_actions,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -2533,6 +2620,45 @@ def register_builtin_tools(
             },
             handler=assess_research_confidence,
             tags=("research", "confidence", "evidence"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_research_evidence_pack",
+            description=(
+                "Compose verified sources into a reusable evidence pack for "
+                "downstream agents such as repo-analyzer, planner, reviewer, or doc-writer."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["topic", "research_question", "conclusion"],
+                "properties": {
+                    "topic": {"type": "string"},
+                    "research_question": {"type": "string"},
+                    "conclusion": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "url": {"type": "string"},
+                                "source_type": {"type": "string"},
+                                "type": {"type": "string"},
+                                "fact": {"type": "string"},
+                                "evidence": {"type": "string"},
+                            },
+                        },
+                    },
+                    "key_facts": {"type": "array", "items": {"type": "string"}},
+                    "source_conflicts": {"type": "array", "items": {"type": "string"}},
+                    "uncertainty": {"type": "array", "items": {"type": "string"}},
+                    "freshness": {"type": "string"},
+                    "downstream_use": {"type": "string"},
+                },
+            },
+            handler=compose_research_evidence_pack,
+            tags=("research", "evidence", "handoff"),
         )
     )
     registry.register(

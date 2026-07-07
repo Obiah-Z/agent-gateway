@@ -1015,6 +1015,48 @@ def test_assess_research_confidence_marks_missing_time_sensitive_sources(tmp_pat
     assert "确认来源发布时间或最后更新时间。" in data["recommended_next_actions"]
 
 
+def test_compose_research_evidence_pack_prepares_downstream_payload(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "compose_research_evidence_pack",
+        {
+            "topic": "RabbitMQ 入站队列选型",
+            "research_question": "RabbitMQ 是否适合 Gateway 的企业级入站削峰？",
+            "conclusion": "RabbitMQ 适合可靠削峰，但会话串行需要 Redis 或数据库协调。",
+            "sources": [
+                {
+                    "title": "RabbitMQ docs",
+                    "url": "https://www.rabbitmq.com/docs",
+                    "source_type": "official",
+                    "fact": "RabbitMQ supports acknowledgements and durable queues.",
+                },
+                {
+                    "title": "Redis docs",
+                    "url": "https://redis.io/docs/latest/develop/use/patterns/distributed-locks/",
+                    "source_type": "docs",
+                    "fact": "Redis can provide distributed coordination primitives.",
+                },
+            ],
+            "key_facts": ["RabbitMQ 负责削峰和可靠投递。", "会话串行需要额外协调层。"],
+            "freshness": "2026-07-07 检索",
+            "downstream_use": "供 planner 输出实施阶段，供 doc-writer 写技术选型文档。",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "research_evidence_pack"
+    assert data["evidence_quality"] == "strong"
+    assert data["source_count"] == 2
+    assert data["primary_source_count"] == 2
+    assert data["reusable_payload"]["question"] == "RabbitMQ 是否适合 Gateway 的企业级入站削峰？"
+    assert data["reusable_payload"]["sources"][0]["url"] == "https://www.rabbitmq.com/docs"
+    assert data["next_actions"] == [
+        "可把 reusable_payload 交给 repo-analyzer、planner 或 doc-writer 复用。"
+    ]
+
+
 def test_compose_research_brief_marks_missing_sources(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
