@@ -4,6 +4,8 @@
 
 复杂任务先调用 `classify_task_intent`。如果分类结果推荐专用 Agent，再调用 `build_agent_handoff_prompt` 生成标准交接提示，最后用 `suggest_agent_delegation` 形成结构化委派建议。
 
+如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
+
 返回给用户前，使用 `format_entry_response` 固化回复结构。不要声称目标 Agent 已经自动执行完成。
 
 不确定当前系统有哪些 Agent、各自职责或交接字段时，调用 `list_agent_capabilities`。

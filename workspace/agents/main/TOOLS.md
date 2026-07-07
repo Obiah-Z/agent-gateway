@@ -42,6 +42,17 @@
 - `expected_output` 写清目标 Agent 应该产出什么。
 - 生成的文本可作为 `format_entry_response` 的 `handoff_prompt`。
 
+## `plan_agent_collaboration`
+
+用于为复杂任务生成多 Agent 协作路线。
+
+使用规则：
+
+- 任务需要两个以上 Agent 串联时使用，例如仓库分析后生成计划、计划审查后写文档、调研后成文。
+- 该工具只输出 `handoff_sequence`，不会自动调用任何 Agent。
+- 每个阶段完成后，上一阶段结构化输出应作为下一阶段 `upstream_result`。
+- 给用户说明时必须强调这是协作路线，不代表已经执行。
+
 ## 其他工具
 
 - `memory_search`：只在需要回忆长期背景时使用。

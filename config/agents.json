@@ -16,6 +16,7 @@
           "classify_task_intent",
           "format_entry_response",
           "build_agent_handoff_prompt",
+          "plan_agent_collaboration",
           "memory_write",
           "memory_search",
           "web_search",
@@ -82,7 +83,8 @@
           "format_entry_response",
           "list_agent_capabilities",
           "suggest_agent_delegation",
-          "build_agent_handoff_prompt"
+          "build_agent_handoff_prompt",
+          "plan_agent_collaboration"
         ]
       },
       "memory_policy": {
@@ -114,7 +116,8 @@
           "format_entry_response",
           "list_agent_capabilities",
           "suggest_agent_delegation",
-          "build_agent_handoff_prompt"
+          "build_agent_handoff_prompt",
+          "plan_agent_collaboration"
         ]
       },
       "memory_policy": {

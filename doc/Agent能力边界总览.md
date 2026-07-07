@@ -6,7 +6,7 @@
 
 `main`、`feishu-entry` 和 `wework-entry` 是入口层。入口层负责普通问答、意图分类、标准交接提示和委派建议，不负责深度执行。
 
-关键工具包括 `classify_task_intent`、`build_agent_handoff_prompt`、`format_entry_response`、`suggest_agent_delegation` 和 `list_agent_capabilities`。其中 `suggest_agent_delegation` 只表示建议，不代表目标 Agent 已经自动执行。
+关键工具包括 `classify_task_intent`、`build_agent_handoff_prompt`、`plan_agent_collaboration`、`format_entry_response`、`suggest_agent_delegation` 和 `list_agent_capabilities`。其中 `suggest_agent_delegation` 只表示建议，不代表目标 Agent 已经自动执行；`plan_agent_collaboration` 只生成多 Agent 协作路线，不自动调用任何 Agent。
 
 ## 共享能力 Agent
 

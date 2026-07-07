@@ -655,6 +655,38 @@ def test_build_agent_handoff_prompt_formats_required_context(tmp_path: Path) -> 
     assert "- 是否需要附带采纳计划？" in result
 
 
+def test_plan_agent_collaboration_builds_repo_adoption_route(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "plan_agent_collaboration",
+        {
+            "user_goal": "分析 https://github.com/example/repo，并形成 Gateway 采纳计划和执行记录。",
+            "task_type": "repo-adoption",
+            "constraints": ["只做分析和计划，不直接改代码"],
+            "expected_output": "Markdown 执行记录",
+            "should_persist": True,
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "agent_collaboration_plan"
+    assert data["task_type"] == "repo-adoption"
+    assert data["should_persist"] is True
+    assert [stage["agent_id"] for stage in data["handoff_sequence"]] == [
+        "repo-analyzer",
+        "planner",
+        "reviewer",
+        "doc-writer",
+    ]
+    assert data["handoff_sequence"][0]["input_contract"]["constraints"] == [
+        "只做分析和计划，不直接改代码"
+    ]
+    assert "不会自动调用任何 Agent" in data["next_actions"][2]
+    assert "不代表任何 Agent 已经执行" in data["note"]
+
+
 def test_classify_task_intent_routes_github_repo_analysis(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

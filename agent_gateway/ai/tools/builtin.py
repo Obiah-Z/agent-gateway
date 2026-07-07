@@ -1156,6 +1156,145 @@ def register_builtin_tools(
         ]
         return "\n".join(sections).strip()
 
+    def plan_agent_collaboration(
+        user_goal: str,
+        task_type: str = "",
+        preferred_agents: list[str] | None = None,
+        constraints: list[str] | None = None,
+        expected_output: str = "",
+        should_persist: bool = False,
+    ) -> str:
+        """为复杂任务生成多 Agent 协作路线，不执行任何 Agent。"""
+
+        goal = user_goal.strip()
+        if not goal:
+            return "Error: user_goal is required"
+        normalized_type = task_type.strip().lower().replace("_", "-")
+        requested = [agent.strip() for agent in preferred_agents or [] if agent.strip()]
+        constraints_clean = _clean_strings(constraints)
+
+        templates: dict[str, list[dict[str, str]]] = {
+            "repo-adoption": [
+                {
+                    "agent_id": "repo-analyzer",
+                    "purpose": "分析仓库用途、结构、质量、风险和 Gateway 可借鉴点。",
+                    "expected_output": "github_repo_analysis 或 github_repo_adoption_plan JSON。",
+                },
+                {
+                    "agent_id": "planner",
+                    "purpose": "把采纳路线图转换为阶段计划、验收标准和提交策略。",
+                    "expected_output": "task_plan_from_adoption 或 execution_stage_plan JSON。",
+                },
+                {
+                    "agent_id": "reviewer",
+                    "purpose": "审查计划是否具备执行条件，列出风险、缺口和 go/no-go 结论。",
+                    "expected_output": "task_plan_gate_review JSON。",
+                },
+                {
+                    "agent_id": "doc-writer",
+                    "purpose": "把分析、计划和审查结果整理成正式 Markdown 执行记录。",
+                    "expected_output": "正式 Markdown 报告或报告路径。",
+                },
+            ],
+            "research-document": [
+                {
+                    "agent_id": "research",
+                    "purpose": "联网检索、核验来源、整理可复用证据包。",
+                    "expected_output": "research_evidence_pack JSON。",
+                },
+                {
+                    "agent_id": "doc-writer",
+                    "purpose": "把证据包整理成正式报告、方案或说明文档。",
+                    "expected_output": "正式 Markdown 文档。",
+                },
+            ],
+            "plan-review-document": [
+                {
+                    "agent_id": "planner",
+                    "purpose": "拆解目标、阶段、依赖、风险和验收标准。",
+                    "expected_output": "结构化任务计划 JSON。",
+                },
+                {
+                    "agent_id": "reviewer",
+                    "purpose": "对任务计划做门禁审查。",
+                    "expected_output": "task_plan_gate_review JSON。",
+                },
+                {
+                    "agent_id": "doc-writer",
+                    "purpose": "渲染执行记录或计划文档。",
+                    "expected_output": "正式 Markdown 文档。",
+                },
+            ],
+            "ops-diagnosis": [
+                {
+                    "agent_id": "ops",
+                    "purpose": "只读采集运行事件、失败投递、告警和健康状态。",
+                    "expected_output": "ops_runtime_diagnostics 或 ops_health_summary JSON。",
+                },
+                {
+                    "agent_id": "doc-writer",
+                    "purpose": "必要时把诊断结论整理成排障记录。",
+                    "expected_output": "排障 Markdown 记录。",
+                },
+            ],
+        }
+        aliases = {
+            "repo-analysis": "repo-adoption",
+            "github": "repo-adoption",
+            "document": "research-document",
+            "research": "research-document",
+            "planning": "plan-review-document",
+            "review": "plan-review-document",
+            "ops": "ops-diagnosis",
+        }
+        selected_type = aliases.get(normalized_type, normalized_type) or "plan-review-document"
+        stages = templates.get(selected_type, templates["plan-review-document"])
+        if requested:
+            stages = [stage for stage in stages if stage["agent_id"] in requested] or [
+                {
+                    "agent_id": agent_id,
+                    "purpose": "按用户指定参与协作。",
+                    "expected_output": "按该 Agent 职责输出结构化结果。",
+                }
+                for agent_id in requested
+            ]
+
+        handoff_sequence = []
+        for index, stage in enumerate(stages, start=1):
+            handoff_sequence.append(
+                {
+                    "step": index,
+                    "agent_id": stage["agent_id"],
+                    "purpose": stage["purpose"],
+                    "input_contract": {
+                        "user_goal": goal,
+                        "constraints": constraints_clean,
+                        "upstream_result": "上一阶段结构化输出；第一阶段为空。",
+                    },
+                    "expected_output": stage["expected_output"],
+                }
+            )
+
+        return json.dumps(
+            {
+                "type": "agent_collaboration_plan",
+                "task_type": selected_type,
+                "user_goal": goal,
+                "expected_output": expected_output.strip() or handoff_sequence[-1]["expected_output"],
+                "should_persist": bool(should_persist),
+                "constraints": constraints_clean,
+                "handoff_sequence": handoff_sequence,
+                "next_actions": [
+                    "先把第一阶段 handoff_prompt 交给对应 Agent。",
+                    "每个阶段完成后，把结构化输出作为下一阶段 upstream_result。",
+                    "当前工具只生成协作路线，不会自动调用任何 Agent。",
+                ],
+                "note": "这是多 Agent 协作路线规划，不代表任何 Agent 已经执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def classify_task_intent(user_text: str, context_hint: str = "") -> str:
         """把用户输入归类到主入口可处理或更适合交给的专用 Agent。"""
 
@@ -2503,6 +2642,32 @@ def register_builtin_tools(
             },
             handler=build_agent_handoff_prompt,
             tags=("agent", "delegation", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="plan_agent_collaboration",
+            description=(
+                "Plan a structured multi-agent collaboration route for complex tasks. "
+                "This only returns the handoff sequence and does not execute agents."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_goal"],
+                "properties": {
+                    "user_goal": {"type": "string"},
+                    "task_type": {
+                        "type": "string",
+                        "description": "repo-adoption/research-document/plan-review-document/ops-diagnosis or common aliases.",
+                    },
+                    "preferred_agents": {"type": "array", "items": {"type": "string"}},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "expected_output": {"type": "string"},
+                    "should_persist": {"type": "boolean"},
+                },
+            },
+            handler=plan_agent_collaboration,
+            tags=("agent", "collaboration", "routing"),
         )
     )
     registry.register(
