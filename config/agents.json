@@ -422,6 +422,7 @@
           "review_collaboration_progress_gate",
           "format_collaboration_progress_gate_review",
           "review_collaboration_final_summary_gate",
+          "format_collaboration_final_summary_gate_review",
           "review_research_evidence_gate",
           "review_research_option_comparison_gate",
           "review_github_repo_risk_gate",

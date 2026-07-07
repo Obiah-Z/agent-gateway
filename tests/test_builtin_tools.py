@@ -1120,6 +1120,42 @@ def test_review_collaboration_final_summary_gate_blocks_incomplete_summary(
     assert "未自动执行声明明确" in failed_items
 
 
+def test_format_collaboration_final_summary_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    summary = {
+        "type": "agent_collaboration_final_summary",
+        "task_type": "repo-adoption",
+        "status": "in-progress",
+        "completed_stage_count": 1,
+        "total_stage_count": 2,
+        "final_conclusion": "缺少可直接展示给用户的最终结论。",
+        "stage_summaries": [
+            {"step": 1, "agent_id": "repo-analyzer", "status": "completed"}
+        ],
+        "next_actions": [],
+        "boundary": "",
+    }
+    review = registry.dispatch(
+        "review_collaboration_final_summary_gate",
+        {"summary_json": json.dumps(summary, ensure_ascii=False)},
+    )
+
+    formatted = registry.dispatch(
+        "format_collaboration_final_summary_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## 协作最终摘要门禁审查" in formatted
+    assert "- 结论：不建议继续" in formatted
+    assert "- 阶段覆盖：1/2" in formatted
+    assert "| 最终结论明确 | 未通过 | 缺少可直接展示给用户的最终结论。 |" in formatted
+    assert "## 下一步" in formatted
+    assert "- 补充可直接给用户看的 final_conclusion，不要只写占位说明。" in formatted
+
+
 def test_review_research_evidence_gate_allows_verified_pack(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

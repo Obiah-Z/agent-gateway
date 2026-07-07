@@ -26,6 +26,8 @@
 
 审查入口 Agent 输出的 `agent_collaboration_final_summary` 是否可以直接回复用户时，使用 `review_collaboration_final_summary_gate`。它检查最终结论、阶段覆盖、阶段输出、完成状态、下一步和“未重新执行”边界，输出 go / conditional-go / no-go。
 
+直接回复协作最终摘要门禁结果时，使用 `format_collaboration_final_summary_gate_review`，不要把 `review_collaboration_final_summary_gate` 的原始 JSON 直接贴给用户。
+
 发布前、合并前、推送前或阶段完成前，使用 `review_release_gate`。它必须包含变更摘要、风险项、测试证据、未决项和回滚方案，并输出 go / conditional-go / no-go 门禁结论。
 
 用户要求生成或沉淀正式报告时，使用 `save_review_report`。如果只是自由格式说明或需要兼容旧报告格式，再使用 `save_markdown_report`。
