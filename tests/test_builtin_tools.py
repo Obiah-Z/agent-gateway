@@ -594,6 +594,58 @@ def test_render_execution_record_markdown_formats_plan_and_gate_review(tmp_path:
     assert "```json" in markdown
 
 
+def test_render_agent_collaboration_markdown_formats_handoff_route(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "user_goal": "评估一个 GitHub 仓库是否值得接入 Gateway。",
+        "expected_output": "协作路线和最终 Markdown 报告。",
+        "should_persist": True,
+        "constraints": ["不自动调用任何 Agent。"],
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库价值和接入风险。",
+                "input_contract": {
+                    "user_goal": "评估仓库。",
+                    "upstream_result": "第一阶段为空。",
+                },
+                "expected_output": "结构化仓库分析 JSON。",
+            },
+            {
+                "step": 2,
+                "agent_id": "doc-writer",
+                "purpose": "把结构化分析整理成正式文档。",
+                "input_contract": {
+                    "upstream_result": "repo-analyzer 输出的 github_repo_analysis。",
+                },
+                "expected_output": "Markdown 报告。",
+            },
+        ],
+        "next_actions": ["先把第一阶段 handoff_prompt 交给 repo-analyzer。"],
+        "note": "这是多 Agent 协作路线规划，不代表任何 Agent 已经执行。",
+    }
+
+    markdown = registry.dispatch(
+        "render_agent_collaboration_markdown",
+        {
+            "collaboration_json": json.dumps(plan, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# Agent 协作方案：repo-adoption")
+    assert "- 用户目标：评估一个 GitHub 仓库是否值得接入 Gateway。" in markdown
+    assert "| 1 | repo-analyzer | 分析仓库价值和接入风险。 | 评估仓库。 | 结构化仓库分析 JSON。 |" in markdown
+    assert "| 2 | doc-writer | 把结构化分析整理成正式文档。 | repo-analyzer 输出的 github_repo_analysis。 | Markdown 报告。 |" in markdown
+    assert "- 不自动调用任何 Agent。" in markdown
+    assert "不代表任何 Agent 已经执行" in markdown
+    assert "```json" in markdown
+
+
 def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

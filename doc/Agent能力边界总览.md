@@ -18,7 +18,7 @@
 
 `reviewer` 负责风险审查、发布门禁和计划门禁，不直接修改系统或执行高风险动作。
 
-`doc-writer` 负责正式 Markdown 成文。新增的 `render_execution_record_markdown` 用于把 planner/reviewer 的结构化结果渲染为执行记录。
+`doc-writer` 负责正式 Markdown 成文。`render_execution_record_markdown` 用于把 planner/reviewer 的结构化结果渲染为执行记录，`render_agent_collaboration_markdown` 用于把入口 Agent 生成的多 Agent 协作路线渲染为正式方案。它只表达路线和交接契约，不代表任何 Agent 已经自动执行。
 
 ## 个人 Agent
 

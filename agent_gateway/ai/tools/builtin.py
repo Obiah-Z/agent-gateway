@@ -1028,6 +1028,83 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_agent_collaboration_markdown(
+        collaboration_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把入口 Agent 的协作路线 JSON 渲染成正式 Markdown。"""
+
+        if not collaboration_json.strip():
+            return "Error: collaboration_json is required"
+        plan = json.loads(collaboration_json)
+        if not isinstance(plan, dict):
+            return "Error: collaboration_json must be a JSON object"
+        if plan.get("type") != "agent_collaboration_plan":
+            return "Error: collaboration_json type must be agent_collaboration_plan"
+
+        task_type = str(plan.get("task_type") or "未分类任务").strip()
+        user_goal = str(plan.get("user_goal") or "待明确").strip()
+        expected_output = str(plan.get("expected_output") or "待明确").strip()
+        should_persist = "是" if plan.get("should_persist") else "否"
+        document_title = title.strip() or f"Agent 协作方案：{task_type}"
+
+        summary = "\n".join(
+            [
+                f"- 用户目标：{user_goal}",
+                f"- 任务类型：{task_type}",
+                f"- 预期产物：{expected_output}",
+                f"- 是否建议落盘：{should_persist}",
+                f"- 执行状态：仅生成协作路线，尚未自动调用任何 Agent。",
+            ]
+        )
+
+        route_rows = []
+        for index, stage in enumerate(plan.get("handoff_sequence") or [], start=1):
+            if not isinstance(stage, dict):
+                continue
+            input_contract = stage.get("input_contract")
+            if isinstance(input_contract, dict):
+                input_summary = input_contract.get("user_goal") or input_contract.get("upstream_result") or "按上游结果交接"
+            else:
+                input_summary = input_contract or "按上游结果交接"
+            route_rows.append(
+                [
+                    stage.get("step") or index,
+                    stage.get("agent_id") or "待指定",
+                    stage.get("purpose") or "待明确",
+                    input_summary,
+                    stage.get("expected_output") or "待明确",
+                ]
+            )
+
+        note = str(plan.get("note") or "这是多 Agent 协作路线规划，不代表任何 Agent 已经执行。").strip()
+        constraints = _clean_strings(plan.get("constraints") if isinstance(plan.get("constraints"), list) else [])
+        next_actions = _clean_strings(plan.get("next_actions") if isinstance(plan.get("next_actions"), list) else [])
+        execution_notes = [
+            "按协作路线逐阶段交接，每个阶段的结构化结果作为下一阶段输入。",
+            "入口 Agent 负责判断路线和交接，不直接替代专业 Agent 执行。",
+            note,
+        ]
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(plan, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section("协作路线", _markdown_table(["步骤", "Agent", "目的", "输入", "输出"], route_rows)),
+                _markdown_section("约束", _markdown_bullets(constraints)),
+                _markdown_section("执行说明", _markdown_bullets(execution_notes)),
+                _markdown_section("下一步", _markdown_bullets(next_actions)),
+            ]
+        ) + metadata
+
     def outline_structured_document(
         title: str,
         document_type: str,
@@ -2529,6 +2606,35 @@ def register_builtin_tools(
             },
             handler=render_execution_record_markdown,
             tags=("document", "markdown", "plan", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_agent_collaboration_markdown",
+            description=(
+                "Render an agent_collaboration_plan JSON object from an entry agent "
+                "into a formal Chinese Markdown collaboration plan."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["collaboration_json"],
+                "properties": {
+                    "collaboration_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_agent_collaboration.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw collaboration plan metadata.",
+                    },
+                },
+            },
+            handler=render_agent_collaboration_markdown,
+            tags=("document", "markdown", "agent", "collaboration"),
         )
     )
     registry.register(

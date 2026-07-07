@@ -217,6 +217,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "outline_structured_document",
         "render_repo_analysis_markdown",
         "render_execution_record_markdown",
+        "render_agent_collaboration_markdown",
         "save_structured_document",
         "save_markdown_report",
     }.issubset(tools["doc-writer"])
@@ -308,6 +309,10 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_execution_record_markdown" in identity
     assert "render_execution_record_markdown" in soul
     assert "render_execution_record_markdown" in tools_md
+    assert "render_agent_collaboration_markdown" in identity
+    assert "render_agent_collaboration_markdown" in soul
+    assert "render_agent_collaboration_markdown" in tools_md
+    assert "不代表任何 Agent 已经执行" in soul
     assert "材料不足" in tools_md
 
 
@@ -423,6 +428,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
     for term in [
         "compose_research_evidence_pack",
         "render_execution_record_markdown",
+        "render_agent_collaboration_markdown",
         "ops_runtime_diagnostics",
         "personal_day_review_plan_generate",
         "diet_day_review_plan_generate",
