@@ -637,6 +637,67 @@ def test_review_research_evidence_gate_blocks_weak_pack(tmp_path: Path) -> None:
     assert "补充检索日期、发布时间或最后更新时间。" in data["next_actions"]
 
 
+def test_review_research_option_comparison_gate_allows_complete_comparison(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    comparison = {
+        "type": "research_option_comparison",
+        "topic": "入站队列中间件选型",
+        "decision_question": "Gateway 分布式入站削峰优先选择 RabbitMQ 还是 Redis？",
+        "criteria": ["可靠投递", "削峰能力", "会话串行协同"],
+        "recommended_option": "RabbitMQ",
+        "evidence_quality": "strong",
+        "options": [
+            {
+                "name": "RabbitMQ",
+                "score": 86,
+                "strengths": ["确认机制成熟"],
+                "weaknesses": ["会话串行仍需协调层"],
+                "evidence": ["官方文档覆盖 ack 和 durable queues。"],
+            },
+            {
+                "name": "Redis",
+                "score": 72,
+                "strengths": ["轻量协调"],
+                "weaknesses": ["消息队列语义不足"],
+                "evidence": ["官方文档覆盖分布式锁模式。"],
+            },
+        ],
+        "sources": [
+            {
+                "title": "RabbitMQ docs",
+                "url": "https://www.rabbitmq.com/docs",
+                "source_type": "official",
+                "fact": "RabbitMQ documents acknowledgements and durable queues.",
+            },
+            {
+                "title": "Redis distributed locks",
+                "url": "https://redis.io/docs/latest/develop/use/patterns/distributed-locks/",
+                "source_type": "docs",
+                "fact": "Redis documents distributed lock patterns.",
+            },
+        ],
+        "uncertainty": [],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_research_option_comparison_gate",
+            {"comparison_json": json.dumps(comparison, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "research_option_comparison_gate_review"
+    assert data["decision"] == "go"
+    assert data["recommended_option"] == "RabbitMQ"
+    assert data["option_count"] == 2
+    assert data["source_count"] == 2
+    assert data["primary_source_count"] == 2
+    assert all(item["passed"] for item in data["checklist"])
+
+
 def test_review_github_repo_risk_gate_blocks_unclear_license(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

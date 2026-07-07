@@ -262,6 +262,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "review_task_plan_gate" in tools["reviewer"]
     assert "review_agent_collaboration_gate" in tools["reviewer"]
     assert "review_research_evidence_gate" in tools["reviewer"]
+    assert "review_research_option_comparison_gate" in tools["reviewer"]
     assert "review_github_repo_risk_gate" in tools["reviewer"]
     assert "save_markdown_report" in tools["repo-analyzer"]
     assert "write_file" not in tools["reviewer"]
@@ -424,6 +425,10 @@ def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
     assert "review_research_evidence_gate" in soul
     assert "review_research_evidence_gate" in tools_md
     assert "证据复用门禁" in soul
+    assert "review_research_option_comparison_gate" in identity
+    assert "review_research_option_comparison_gate" in soul
+    assert "review_research_option_comparison_gate" in tools_md
+    assert "方案对比门禁" in soul
     assert "review_github_repo_risk_gate" in identity
     assert "review_github_repo_risk_gate" in soul
     assert "review_github_repo_risk_gate" in tools_md
@@ -540,6 +545,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_research_evidence_markdown",
         "render_research_option_comparison_markdown",
         "review_research_evidence_gate",
+        "review_research_option_comparison_gate",
         "render_execution_record_markdown",
         "render_agent_collaboration_markdown",
         "review_agent_collaboration_gate",

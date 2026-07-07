@@ -1256,6 +1256,152 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_research_option_comparison_gate(
+        comparison_json: str = "",
+        review_target: str = "",
+        min_options: int = 2,
+        min_sources: int = 2,
+        require_primary_source: bool = True,
+        require_recommendation: bool = True,
+    ) -> str:
+        """审查 research 方案对比是否足够支撑技术选型或实施计划。"""
+
+        comparison: dict[str, Any] = {}
+        if comparison_json.strip():
+            parsed = json.loads(comparison_json)
+            if not isinstance(parsed, dict):
+                return "Error: comparison_json must be a JSON object"
+            if parsed.get("type") != "research_option_comparison":
+                return "Error: comparison_json type must be research_option_comparison"
+            comparison = parsed
+        target = review_target.strip() or str(
+            comparison.get("topic") or comparison.get("decision_question") or ""
+        ).strip()
+        options = [item for item in comparison.get("options") or [] if isinstance(item, dict)]
+        criteria = _clean_strings(comparison.get("criteria") if isinstance(comparison.get("criteria"), list) else [])
+        sources = [item for item in comparison.get("sources") or [] if isinstance(item, dict)]
+        urls = [str(source.get("url") or "").strip() for source in sources if str(source.get("url") or "").strip()]
+        primary_count = int(comparison.get("primary_source_count") or 0)
+        if primary_count <= 0:
+            primary_count = sum(
+                1
+                for source in sources
+                if str(source.get("source_type") or "").lower()
+                in {"official", "docs", "paper", "primary", "官方", "论文"}
+            )
+        recommendation = str(comparison.get("recommended_option") or "").strip()
+        uncertainty = _clean_strings(
+            comparison.get("uncertainty") if isinstance(comparison.get("uncertainty"), list) else []
+        )
+        quality = str(comparison.get("evidence_quality") or "").strip().lower()
+        option_evidence_gaps = []
+        for option in options:
+            evidence = _clean_strings(option.get("evidence") if isinstance(option.get("evidence"), list) else [])
+            strengths = _clean_strings(option.get("strengths") if isinstance(option.get("strengths"), list) else [])
+            weaknesses = _clean_strings(option.get("weaknesses") if isinstance(option.get("weaknesses"), list) else [])
+            if not evidence and not (strengths and weaknesses):
+                option_evidence_gaps.append(str(option.get("name") or "未命名方案"))
+
+        checklist = [
+            {
+                "item": "决策问题已明确",
+                "passed": bool(target) and bool(str(comparison.get("decision_question") or "").strip()),
+                "evidence": str(comparison.get("decision_question") or "缺少 decision_question。").strip(),
+            },
+            {
+                "item": "候选方案数量达到门槛",
+                "passed": len(options) >= max(1, min_options),
+                "evidence": f"候选方案数量：{len(options)}，要求至少：{max(1, min_options)}。",
+            },
+            {
+                "item": "评价维度已列出",
+                "passed": bool(criteria),
+                "evidence": "；".join(criteria[:5]) if criteria else "缺少 criteria。",
+            },
+            {
+                "item": "来源数量达到门槛",
+                "passed": len(sources) >= max(1, min_sources),
+                "evidence": f"来源数量：{len(sources)}，要求至少：{max(1, min_sources)}。",
+            },
+            {
+                "item": "来源 URL 可核验",
+                "passed": len(urls) == len(sources) and len(sources) > 0,
+                "evidence": f"可核验 URL 数量：{len(urls)}。",
+            },
+            {
+                "item": "一手来源满足要求",
+                "passed": (not require_primary_source) or primary_count > 0,
+                "evidence": f"一手来源数量：{primary_count}。",
+            },
+            {
+                "item": "推荐方案已说明",
+                "passed": (not require_recommendation) or bool(recommendation),
+                "evidence": recommendation or "缺少 recommended_option。",
+            },
+            {
+                "item": "候选方案证据足够",
+                "passed": not option_evidence_gaps,
+                "evidence": "证据不足方案：" + "、".join(option_evidence_gaps)
+                if option_evidence_gaps
+                else "每个候选方案都有证据或优劣势说明。",
+            },
+            {
+                "item": "不确定点已标注",
+                "passed": quality not in {"missing", ""} and (quality != "limited" or bool(uncertainty)),
+                "evidence": "；".join(uncertainty[:4]) or f"evidence_quality={quality or 'missing'}。",
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed or quality in {"limited", "medium"}:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        next_actions = []
+        for item in failed:
+            if item["item"] == "决策问题已明确":
+                next_actions.append("补充明确的 decision_question。")
+            elif item["item"] == "候选方案数量达到门槛":
+                next_actions.append(f"补充至少 {max(1, min_options)} 个候选方案。")
+            elif item["item"] == "评价维度已列出":
+                next_actions.append("补充评价维度，例如可靠性、成本、复杂度、性能和可运维性。")
+            elif item["item"] == "来源数量达到门槛":
+                next_actions.append(f"补充至少 {max(1, min_sources)} 个可交叉验证来源。")
+            elif item["item"] == "来源 URL 可核验":
+                next_actions.append("为每个来源补充可访问 URL。")
+            elif item["item"] == "一手来源满足要求":
+                next_actions.append("补充官方文档、论文或一手资料来源。")
+            elif item["item"] == "推荐方案已说明":
+                next_actions.append("补充推荐方案和推荐理由。")
+            elif item["item"] == "候选方案证据足够":
+                next_actions.append("为每个候选方案补充证据、优势和短板。")
+            elif item["item"] == "不确定点已标注":
+                next_actions.append("标注证据限制、不确定点或需要压测验证的部分。")
+        if not next_actions:
+            next_actions.append("方案对比可交给 planner 拆验证计划，或交给 doc-writer 成文。")
+
+        return json.dumps(
+            {
+                "type": "research_option_comparison_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "recommended_option": recommendation,
+                "evidence_quality": quality or "missing",
+                "option_count": len(options),
+                "source_count": len(sources),
+                "primary_source_count": primary_count,
+                "risks": [*uncertainty[:6], *option_evidence_gaps[:4]],
+                "next_actions": list(dict.fromkeys(next_actions))[:8],
+                "note": "这是 research 方案对比进入计划或成文前的门禁审查，不代表已经完成实施验证。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def review_github_repo_risk_gate(
         risk_scan_json: str = "",
         review_target: str = "",
@@ -4021,6 +4167,33 @@ def register_builtin_tools(
             },
             handler=review_research_evidence_gate,
             tags=("review", "research", "evidence", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_research_option_comparison_gate",
+            description=(
+                "Review whether a research_option_comparison is complete enough for "
+                "planning or documentation: decision question, options, criteria, "
+                "sources, primary sources, recommendation, uncertainty, and "
+                "go/conditional-go/no-go decision."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "comparison_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_option_comparison.",
+                    },
+                    "review_target": {"type": "string"},
+                    "min_options": {"type": "integer"},
+                    "min_sources": {"type": "integer"},
+                    "require_primary_source": {"type": "boolean"},
+                    "require_recommendation": {"type": "boolean"},
+                },
+            },
+            handler=review_research_option_comparison_gate,
+            tags=("review", "research", "comparison", "gate", "risk"),
         )
     )
     registry.register(
