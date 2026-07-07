@@ -1718,6 +1718,49 @@ def test_prepare_entry_route_response_builds_repo_adoption_reply(tmp_path: Path)
     assert data["handoff_prompt"] == ""
 
 
+def test_prepare_entry_route_response_builds_research_option_validation_reply(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {
+                "user_text": (
+                    "帮我做 RabbitMQ、Redis、Kafka 的技术选型和方案对比，"
+                    "输出验证计划、风险审查和正式报告"
+                ),
+                "context_hint": "来自飞书私聊。",
+                "source_platform": "feishu",
+                "should_persist": True,
+                "constraints": ["只做验证计划，不直接改生产配置"],
+                "expected_output": "协作路线和最终 Markdown 方案验证计划",
+            },
+        )
+    )
+
+    assert data["type"] == "entry_route_preparation"
+    assert data["classification"]["intent"] == "research-option-validation"
+    assert data["classification"]["requires_collaboration"] is True
+    assert data["collaboration_plan"]["task_type"] == "research-option-validation"
+    assert [stage["agent_id"] for stage in data["collaboration_plan"]["handoff_sequence"]] == [
+        "research",
+        "reviewer",
+        "planner",
+        "reviewer",
+        "doc-writer",
+    ]
+    assert data["route_explanation"]["route_type"] == "collaboration"
+    assert data["route_explanation"]["collaboration_task_type"] == "research-option-validation"
+    assert "协作类型：`research-option-validation`。" in data["formatted_response"]
+    assert "1. `research`" in data["formatted_response"]
+    assert "5. `doc-writer`" in data["formatted_response"]
+    assert "不代表这些 Agent 已经自动执行" in data["formatted_response"]
+    assert data["handoff_prompt"] == ""
+
+
 def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"
