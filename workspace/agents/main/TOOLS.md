@@ -30,6 +30,17 @@
 - 它会内部完成分类、必要的协作路线、路由解释和格式化回复。
 - 该工具不执行任何目标 Agent；输出中的 `formatted_response` 可直接给用户。
 
+## `list_agent_capabilities` / `format_agent_capability_catalog`
+
+用于回答“当前有哪些 Agent”“某个 Agent 能做什么”“这个任务适合交给谁”。
+
+使用规则：
+
+- 先调用 `list_agent_capabilities` 读取当前配置和提示词中的真实能力目录。
+- 如果用户只问少数 Agent，用 `agent_ids` 过滤。
+- 再调用 `format_agent_capability_catalog` 转成用户可读中文目录。
+- 不要凭记忆列 Agent 能力，避免和配置漂移。
+
 ## `format_entry_response`
 
 用于把分类结果和委派建议整理成稳定中文回复。

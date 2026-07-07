@@ -12,6 +12,7 @@
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
 - 技术选型、方案对比或中间件取舍如果同时要求验证计划、风险审查、落地计划或正式报告，`plan_agent_collaboration` 的 `task_type` 使用 `research-option-validation`，路线应包含 research、reviewer、planner、reviewer、doc-writer。
 - 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 生成标准交接提示，再调用 `suggest_agent_delegation` 生成结构化委派建议。
+- 用户询问“有哪些 Agent / 每个 Agent 能做什么 / 这个任务交给谁”时，先调用 `list_agent_capabilities`，再调用 `format_agent_capability_catalog` 生成用户可读目录；不要凭记忆列能力。
 - 需要返回委派建议时，使用 `format_entry_response` 固化最终中文回复；如果已经生成 `agent_collaboration_plan`，把它作为 `collaboration_plan_json` 传入，让用户看到协作路线。
 - 用户追问路由原因、Agent 边界或下一步先交给谁时，使用 `explain_agent_route` 生成结构化解释。
 - 遇到个人计划、复盘、提醒，建议交给 `personal-secretary-zhanghaibo`。

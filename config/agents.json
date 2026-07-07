@@ -19,6 +19,7 @@
           "build_collaboration_stage_handoff",
           "summarize_collaboration_progress",
           "compose_collaboration_final_summary",
+          "list_agent_capabilities",
           "list_agent_collaboration_routes",
           "plan_agent_collaboration",
           "explain_agent_route",
@@ -26,7 +27,8 @@
           "memory_write",
           "memory_search",
           "web_search",
-          "fetch_url"
+          "fetch_url",
+          "format_agent_capability_catalog"
         ]
       },
       "memory_policy": {
@@ -97,7 +99,8 @@
           "compose_collaboration_final_summary",
           "plan_agent_collaboration",
           "explain_agent_route",
-          "prepare_entry_route_response"
+          "prepare_entry_route_response",
+          "format_agent_capability_catalog"
         ]
       },
       "memory_policy": {
@@ -136,7 +139,8 @@
           "compose_collaboration_final_summary",
           "plan_agent_collaboration",
           "explain_agent_route",
-          "prepare_entry_route_response"
+          "prepare_entry_route_response",
+          "format_agent_capability_catalog"
         ]
       },
       "memory_policy": {

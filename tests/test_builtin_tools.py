@@ -2257,6 +2257,53 @@ def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) 
     assert data["agents"][0]["tools"] == ["save_task_plan"]
 
 
+def test_format_agent_capability_catalog_outputs_user_facing_directory(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    catalog = {
+        "type": "agent_capability_catalog",
+        "count": 2,
+        "agents": [
+            {
+                "id": "planner",
+                "name": "TaskPlanner",
+                "personality": "清晰、务实",
+                "duties": ["拆解阶段任务。", "明确验收标准。"],
+                "handoff_inputs": ["`goal`：用户目标。"],
+                "tools": ["save_task_plan", "compose_repo_review_task_plan"],
+            },
+            {
+                "id": "reviewer",
+                "name": "RiskReviewer",
+                "personality": "谨慎",
+                "duties": ["审查风险门禁。"],
+                "handoff_inputs": ["`plan_json`：计划 JSON。"],
+                "tools": ["review_task_plan_gate"],
+            },
+        ],
+    }
+
+    result = registry.dispatch(
+        "format_agent_capability_catalog",
+        {
+            "catalog_json": json.dumps(catalog, ensure_ascii=False),
+            "focus_agent_id": "planner",
+            "include_tools": True,
+        },
+    )
+
+    assert result.startswith("# Agent 能力目录")
+    assert "当前可展示 1 个 Agent" in result
+    assert "## `planner` - TaskPlanner" in result
+    assert "- 拆解阶段任务。" in result
+    assert "- `goal`：用户目标。" in result
+    assert "save_task_plan, compose_repo_review_task_plan" in result
+    assert "reviewer" not in result
+    assert "不代表目标 Agent 已经自动执行" in result
+
+
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)

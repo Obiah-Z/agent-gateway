@@ -24,6 +24,8 @@
 
 不确定当前系统有哪些 Agent、各自职责或交接字段时，调用 `list_agent_capabilities`。
 
+用户询问当前有哪些 Agent、每个 Agent 能做什么，或某个任务该交给谁时，先调用 `list_agent_capabilities`，再调用 `format_agent_capability_catalog` 输出中文能力目录。不要凭记忆列 Agent 能力。
+
 个人计划、复盘和提醒建议交给 `personal-secretary-zhanghaibo`；饮食、体重和热量建议交给 `diet-assistant-zhanghaibo`。
 
 `web_search` 和 `fetch_url` 只用于轻量事实确认；深度调研应建议交给 `research`。

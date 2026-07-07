@@ -3809,6 +3809,67 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_agent_capability_catalog(
+        catalog_json: str,
+        focus_agent_id: str = "",
+        include_tools: bool = False,
+    ) -> str:
+        """把 Agent 能力目录 JSON 格式化成入口层可直接回复用户的中文说明。"""
+
+        if not catalog_json.strip():
+            return "Error: catalog_json is required"
+        catalog = json.loads(catalog_json)
+        if not isinstance(catalog, dict):
+            return "Error: catalog_json must be a JSON object"
+        if catalog.get("type") != "agent_capability_catalog":
+            return "Error: catalog_json type must be agent_capability_catalog"
+
+        focus = focus_agent_id.strip()
+        agents = []
+        for item in catalog.get("agents") or []:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("id") or "").strip()
+            if focus and agent_id != focus:
+                continue
+            agents.append(item)
+
+        if not agents:
+            return f"没有找到匹配的 Agent：`{focus}`。" if focus else "当前没有可展示的 Agent 能力。"
+
+        lines = [
+            "# Agent 能力目录",
+            "",
+            f"当前可展示 {len(agents)} 个 Agent。入口 Agent 只负责识别、解释和交接，不代表目标 Agent 已经自动执行。",
+        ]
+        for item in agents:
+            agent_id = str(item.get("id") or "unknown").strip()
+            name = str(item.get("name") or agent_id).strip()
+            personality = str(item.get("personality") or "未配置").strip()
+            duties = _clean_strings(item.get("duties") if isinstance(item.get("duties"), list) else [])
+            handoff_inputs = _clean_strings(
+                item.get("handoff_inputs") if isinstance(item.get("handoff_inputs"), list) else []
+            )
+            lines.extend(["", f"## `{agent_id}` - {name}", f"- 定位：{personality}"])
+            lines.append("- 主要职责：")
+            lines.append(_markdown_bullets(duties[:6]))
+            if handoff_inputs:
+                lines.append("- 适合交接的信息：")
+                lines.append(_markdown_bullets(handoff_inputs[:6]))
+            tools = item.get("tools") if isinstance(item.get("tools"), list) else []
+            if include_tools and tools:
+                shown_tools = ", ".join(str(tool) for tool in tools[:12])
+                suffix = " ..." if len(tools) > 12 else ""
+                lines.append(f"- 可用工具：{shown_tools}{suffix}")
+
+        lines.extend(
+            [
+                "",
+                "使用建议：普通问题由入口 Agent 直接处理；需要专业执行时，由入口 Agent 生成交接提示或协作路线。",
+            ]
+        )
+        return "\n".join(lines).strip()
+
     def explain_agent_route(
         user_goal: str,
         intent: str,
@@ -6004,6 +6065,35 @@ def register_builtin_tools(
             },
             handler=list_agent_capabilities,
             tags=("agent", "catalog", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_agent_capability_catalog",
+            description=(
+                "Format an agent_capability_catalog JSON object into a Chinese "
+                "user-facing capability directory."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["catalog_json"],
+                "properties": {
+                    "catalog_json": {
+                        "type": "string",
+                        "description": "JSON string returned by list_agent_capabilities.",
+                    },
+                    "focus_agent_id": {
+                        "type": "string",
+                        "description": "Optional single agent id to highlight.",
+                    },
+                    "include_tools": {
+                        "type": "boolean",
+                        "description": "Whether to include tool names when present in the catalog.",
+                    },
+                },
+            },
+            handler=format_agent_capability_catalog,
+            tags=("agent", "catalog", "format", "routing"),
         )
     )
     registry.register(

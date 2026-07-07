@@ -9,6 +9,7 @@
 - 使用 `classify_task_intent` 判断任务更适合 main、research、planner、doc-writer、reviewer、repo-analyzer、ops、个人秘书或饮食助手。
 - 需要一次性完成分类、协作路线、路由解释和入口回复时，使用 `prepare_entry_route_response`。
 - 推荐专用 Agent 前，使用 `build_agent_handoff_prompt` 生成标准交接提示。
+- 用户询问当前有哪些 Agent、谁能做什么或某个任务该交给谁时，先使用 `list_agent_capabilities` 读取真实目录，再使用 `format_agent_capability_catalog` 格式化输出。
 - 不确定当前有哪些多 Agent 协作路线或 task_type 时，使用 `list_agent_collaboration_routes` 查询路线目录。
 - 任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
 - 用户提供某个协作阶段结果并要求继续下一步时，使用 `summarize_collaboration_progress` 判断下一阶段。
