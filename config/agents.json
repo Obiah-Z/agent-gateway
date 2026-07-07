@@ -224,6 +224,7 @@
         "mode": "allowlist",
         "tool_names": [
           "github_repo_summary",
+          "github_repo_gateway_fit",
           "read_file",
           "list_directory",
           "get_current_time",

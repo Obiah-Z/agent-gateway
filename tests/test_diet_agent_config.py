@@ -113,6 +113,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert {"github_repo_summary", "read_file", "list_directory", "web_search", "fetch_url"}.issubset(
         tools["repo-analyzer"]
     )
+    assert "github_repo_gateway_fit" in tools["repo-analyzer"]
     assert {
         "read_file",
         "list_directory",
@@ -186,6 +187,23 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "outline_structured_document" in soul
     assert "outline_structured_document" in tools_md
     assert "材料不足" in tools_md
+
+
+def test_repo_analyzer_has_gateway_fit_tool_and_prompt() -> None:
+    identity = (ROOT / "workspace" / "agents" / "repo-analyzer" / "IDENTITY.md").read_text(
+        encoding="utf-8"
+    )
+    soul = (ROOT / "workspace" / "agents" / "repo-analyzer" / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    tools_md = (ROOT / "workspace" / "agents" / "repo-analyzer" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "github_repo_gateway_fit" in identity
+    assert "github_repo_gateway_fit" in soul
+    assert "github_repo_gateway_fit" in tools_md
+    assert "github_repo_summary" in tools_md
 
 
 def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:

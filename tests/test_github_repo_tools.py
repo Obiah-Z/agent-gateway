@@ -3,6 +3,7 @@ import json
 
 from agent_gateway.ai.tools.github_repo import (
     GitHubRepoClient,
+    assess_gateway_repo_fit,
     normalize_github_repo_summary,
     parse_github_repo,
     register_github_repo_tools,
@@ -109,3 +110,73 @@ def test_register_github_repo_summary_tool_outputs_json() -> None:
     assert payload["repository"] == "demo/repo"
     assert payload["readme"]["excerpt"] == "hello"
     assert payload["tree_count"] == 1
+
+
+def test_assess_gateway_repo_fit_scores_reusable_agent_assets() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="skills",
+        repo_data={
+            "html_url": "https://github.com/demo/skills",
+            "description": "Agent skills and workflow templates for tool calling",
+            "language": "Markdown",
+            "topics": ["agent", "skills", "workflow"],
+            "stargazers_count": 1500,
+            "open_issues_count": 4,
+            "license": {"spdx_id": "MIT"},
+            "archived": False,
+        },
+        readme={
+            "name": "README.md",
+            "path": "README.md",
+            "content": "This repo contains Agent Skill definitions and workflow examples.",
+            "error": "",
+        },
+        tree=[
+            {"path": "skills/writer/SKILL.md", "type": "blob", "size": 100},
+            {"path": "AGENTS.md", "type": "blob", "size": 50},
+        ],
+    )
+
+    fit = assess_gateway_repo_fit(summary, focus=["skills"])
+
+    assert fit["repository"] == "demo/skills"
+    assert fit["priority"] == "high"
+    assert fit["fit_score"] >= 70
+    assert any("Skill" in item for item in fit["gateway_reuse_ideas"])
+    assert any("关注度较高" in signal for signal in fit["signals"])
+
+
+def test_github_repo_gateway_fit_tool_uses_summary_json() -> None:
+    class FakeClient:
+        def summarize(self, repo_url: str, *, max_tree_items: int):
+            return normalize_github_repo_summary(
+                owner="demo",
+                repo="repo",
+                repo_data={
+                    "html_url": repo_url,
+                    "description": "demo agent gateway",
+                    "language": "Python",
+                    "topics": ["agent", "gateway"],
+                    "license": {"spdx_id": "Apache-2.0"},
+                },
+                readme={"name": "README.md", "path": "README.md", "content": "agent gateway", "error": ""},
+                tree=[{"path": "skills/example/SKILL.md", "type": "blob", "size": 5}],
+            )
+
+    registry = ToolRegistry()
+    register_github_repo_tools(registry, client=FakeClient())
+    summary_json = registry.dispatch(
+        "github_repo_summary",
+        {"repo_url": "https://github.com/demo/repo", "max_tree_items": 5},
+    )
+    fit = json.loads(
+        registry.dispatch(
+            "github_repo_gateway_fit",
+            {"repo_summary_json": summary_json, "focus": ["agent"]},
+        )
+    )
+
+    assert fit["repository"] == "demo/repo"
+    assert fit["priority"] in {"medium", "high"}
+    assert "next_steps" in fit
