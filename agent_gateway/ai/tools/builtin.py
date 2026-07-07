@@ -2795,6 +2795,80 @@ def register_builtin_tools(
 
         return "\n\n".join(sections) + metadata
 
+    def render_agent_handoff_package_gate_markdown(
+        gate_review_json: str,
+        package_json: str = "",
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 Agent 交接包门禁审查 JSON 渲染成正式 Markdown。"""
+
+        if not gate_review_json.strip():
+            return "Error: gate_review_json is required"
+        gate = json.loads(gate_review_json)
+        if not isinstance(gate, dict):
+            return "Error: gate_review_json must be a JSON object"
+        if gate.get("type") != "agent_handoff_package_gate_review":
+            return "Error: gate_review_json type must be agent_handoff_package_gate_review"
+
+        package: dict[str, Any] = {}
+        if package_json.strip():
+            parsed_package = json.loads(package_json)
+            if not isinstance(parsed_package, dict):
+                return "Error: package_json must be a JSON object"
+            if parsed_package.get("type") != "agent_handoff_package":
+                return "Error: package_json type must be agent_handoff_package"
+            package = parsed_package
+
+        review_target = str(gate.get("review_target") or package.get("target_agent_id") or "交接包").strip()
+        decision = str(gate.get("decision") or "待审查").strip()
+        document_title = title.strip() or f"Agent 交接包门禁审查：{review_target}"
+        summary_lines = [
+            f"- 审查对象：{review_target}",
+            f"- 门禁结论：{decision}",
+            f"- 用户目标：{package.get('user_goal') or '待补充'}",
+            "- 执行边界：这是 Agent 交接包门禁审查，不代表目标 Agent 已经自动执行。",
+        ]
+
+        checklist_rows = []
+        for item in gate.get("checklist") or []:
+            if not isinstance(item, dict):
+                continue
+            checklist_rows.append(
+                [
+                    item.get("item") or "未命名检查项",
+                    "通过" if item.get("passed") else "未通过",
+                    item.get("evidence") or "待补充",
+                ]
+            )
+
+        handoff_prompt = str(package.get("handoff_prompt") or "").strip()
+        handoff_section = (
+            "```text\n" + handoff_prompt + "\n```"
+            if handoff_prompt
+            else "未提供 handoff_prompt。"
+        )
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n"
+                + json.dumps({"package": package, "gate_review": gate}, ensure_ascii=False, indent=2)
+                + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", "\n".join(summary_lines)),
+                _markdown_section("门禁检查", _markdown_table(["检查项", "结果", "依据"], checklist_rows)),
+                _markdown_section("交接提示", handoff_section),
+                _markdown_section("风险与限制", _markdown_bullets(gate.get("risks"))),
+                _markdown_section("下一步", _markdown_bullets(gate.get("next_actions"))),
+            ]
+        ) + metadata
+
     def render_agent_collaboration_final_summary_markdown(
         summary_json: str,
         title: str = "",
@@ -6163,6 +6237,39 @@ def register_builtin_tools(
             },
             handler=render_collaboration_progress_gate_markdown,
             tags=("document", "markdown", "agent", "collaboration", "progress", "gate", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_agent_handoff_package_gate_markdown",
+            description=(
+                "Render an agent_handoff_package_gate_review JSON object from reviewer "
+                "into a formal Chinese Markdown handoff gate review report."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["gate_review_json"],
+                "properties": {
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "JSON string returned by review_agent_handoff_package_gate.",
+                    },
+                    "package_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by compose_agent_handoff_package.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append raw package and gate review metadata.",
+                    },
+                },
+            },
+            handler=render_agent_handoff_package_gate_markdown,
+            tags=("document", "markdown", "agent", "handoff", "gate", "review"),
         )
     )
     registry.register(

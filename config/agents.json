@@ -332,6 +332,7 @@
           "render_agent_collaboration_markdown",
           "render_agent_collaboration_progress_markdown",
           "render_collaboration_progress_gate_markdown",
+          "render_agent_handoff_package_gate_markdown",
           "render_agent_collaboration_final_summary_markdown",
           "save_structured_document",
           "save_markdown_report",

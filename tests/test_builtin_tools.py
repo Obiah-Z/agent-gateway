@@ -1606,6 +1606,47 @@ def test_render_collaboration_progress_gate_markdown_formats_review(
     assert "```json" in markdown
 
 
+def test_render_agent_handoff_package_gate_markdown_formats_review(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    package = {
+        "type": "agent_handoff_package",
+        "user_goal": "把已有材料整理成 Markdown 报告。",
+        "target_agent_id": "doc-writer",
+        "handoff_prompt": "目标 Agent：doc-writer\n\n请把材料整理成正式报告。",
+    }
+    review = {
+        "type": "agent_handoff_package_gate_review",
+        "review_target": "doc-writer",
+        "decision": "conditional-go",
+        "checklist": [
+            {"item": "目标 Agent 明确", "passed": True, "evidence": "目标为 doc-writer。"},
+            {"item": "约束边界完整", "passed": False, "evidence": "缺少保存路径约束。"},
+        ],
+        "risks": ["保存路径需要补充。"],
+        "next_actions": ["补充 reports/plans 保存路径。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_agent_handoff_package_gate_markdown",
+        {
+            "gate_review_json": json.dumps(review, ensure_ascii=False),
+            "package_json": json.dumps(package, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# Agent 交接包门禁审查：doc-writer")
+    assert "- 门禁结论：conditional-go" in markdown
+    assert "| 约束边界完整 | 未通过 | 缺少保存路径约束。 |" in markdown
+    assert "```text\n目标 Agent：doc-writer" in markdown
+    assert "- 保存路径需要补充。" in markdown
+    assert "- 补充 reports/plans 保存路径。" in markdown
+    assert "```json" in markdown
+
+
 def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

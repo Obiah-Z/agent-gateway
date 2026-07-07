@@ -301,6 +301,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "render_agent_collaboration_markdown",
         "render_agent_collaboration_progress_markdown",
         "render_collaboration_progress_gate_markdown",
+        "render_agent_handoff_package_gate_markdown",
         "render_agent_collaboration_final_summary_markdown",
         "save_structured_document",
         "save_markdown_report",
@@ -447,6 +448,10 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_collaboration_progress_gate_markdown" in soul
     assert "render_collaboration_progress_gate_markdown" in tools_md
     assert "collaboration_progress_gate_review" in tools_md
+    assert "render_agent_handoff_package_gate_markdown" in identity
+    assert "render_agent_handoff_package_gate_markdown" in soul
+    assert "render_agent_handoff_package_gate_markdown" in tools_md
+    assert "agent_handoff_package_gate_review" in tools_md
     assert "render_agent_collaboration_final_summary_markdown" in identity
     assert "render_agent_collaboration_final_summary_markdown" in soul
     assert "render_agent_collaboration_final_summary_markdown" in tools_md
@@ -681,6 +686,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_agent_collaboration_markdown",
         "render_agent_collaboration_progress_markdown",
         "render_collaboration_progress_gate_markdown",
+        "render_agent_handoff_package_gate_markdown",
         "render_agent_collaboration_final_summary_markdown",
         "review_agent_collaboration_gate",
         "review_agent_handoff_package_gate",
