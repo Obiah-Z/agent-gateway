@@ -323,6 +323,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "review_release_gate" in tools["reviewer"]
     assert "review_task_plan_gate" in tools["reviewer"]
     assert "review_agent_collaboration_gate" in tools["reviewer"]
+    assert "review_agent_handoff_package_gate" in tools["reviewer"]
     assert "review_collaboration_progress_gate" in tools["reviewer"]
     assert "review_research_evidence_gate" in tools["reviewer"]
     assert "review_research_option_comparison_gate" in tools["reviewer"]
@@ -506,6 +507,10 @@ def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
     assert "review_agent_collaboration_gate" in soul
     assert "review_agent_collaboration_gate" in tools_md
     assert "路线门禁" in soul
+    assert "review_agent_handoff_package_gate" in identity
+    assert "review_agent_handoff_package_gate" in soul
+    assert "review_agent_handoff_package_gate" in tools_md
+    assert "交接包门禁" in soul
     assert "review_collaboration_progress_gate" in identity
     assert "review_collaboration_progress_gate" in soul
     assert "review_collaboration_progress_gate" in tools_md
@@ -678,6 +683,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_collaboration_progress_gate_markdown",
         "render_agent_collaboration_final_summary_markdown",
         "review_agent_collaboration_gate",
+        "review_agent_handoff_package_gate",
         "review_collaboration_progress_gate",
         "adapt_collaboration_plan_to_task_plan",
         "ops_runtime_diagnostics",

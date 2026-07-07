@@ -1317,6 +1317,118 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_agent_handoff_package_gate(
+        package_json: str = "",
+        review_target: str = "",
+        known_risks: list[str] | None = None,
+    ) -> str:
+        """审查入口 Agent 交接包是否具备安全交接条件。"""
+
+        package: dict[str, Any] = {}
+        if package_json.strip():
+            parsed = json.loads(package_json)
+            if not isinstance(parsed, dict):
+                return "Error: package_json must be a JSON object"
+            if parsed.get("type") != "agent_handoff_package":
+                return "Error: package_json type must be agent_handoff_package"
+            package = parsed
+
+        target = review_target.strip() or str(package.get("target_agent_id") or "").strip()
+        user_goal = str(package.get("user_goal") or "").strip()
+        handoff_prompt = str(package.get("handoff_prompt") or "").strip()
+        delegation = package.get("delegation_suggestion") if isinstance(package.get("delegation_suggestion"), dict) else {}
+        match = package.get("match") if isinstance(package.get("match"), dict) else {}
+        risks = _clean_strings(known_risks)
+        if str(package.get("boundary") or "").strip():
+            risks.append(str(package.get("boundary")).strip())
+
+        target_matches = bool(target) and target == str(delegation.get("target_agent_id") or target).strip()
+        has_required_sections = all(
+            marker in handoff_prompt
+            for marker in ("## 用户原始目标", "## 关键上下文", "## 期望输出")
+        )
+        has_constraints = "## 已知约束" in handoff_prompt
+        no_auto_execution_declared = (
+            "不代表目标 Agent 已经自动执行" in str(package.get("boundary") or "")
+            or "不要声称目标 Agent 已经自动执行" in " ".join(
+                _clean_strings(package.get("next_actions") if isinstance(package.get("next_actions"), list) else [])
+            )
+        )
+        confidence = float(package.get("confidence") or delegation.get("confidence") or 0.0)
+        has_match_trace = match.get("type") == "agent_capability_match"
+
+        checklist = [
+            {
+                "item": "交接目标明确",
+                "passed": bool(target) and target_matches,
+                "evidence": f"target={target or 'missing'}；delegation_target={delegation.get('target_agent_id') or 'missing'}",
+            },
+            {
+                "item": "用户目标明确",
+                "passed": bool(user_goal),
+                "evidence": user_goal or "缺少 user_goal。",
+            },
+            {
+                "item": "交接提示结构完整",
+                "passed": bool(handoff_prompt) and has_required_sections,
+                "evidence": "包含用户目标、关键上下文和期望输出。" if has_required_sections else "缺少 handoff_prompt 必要章节。",
+            },
+            {
+                "item": "约束边界已说明",
+                "passed": has_constraints and bool(risks),
+                "evidence": "；".join(risks[:4]) if risks else "缺少约束或边界说明。",
+            },
+            {
+                "item": "推荐依据可追溯",
+                "passed": has_match_trace and confidence > 0,
+                "evidence": f"match_type={match.get('type') or 'missing'}；confidence={confidence}",
+            },
+            {
+                "item": "未自动执行声明明确",
+                "passed": no_auto_execution_declared,
+                "evidence": str(package.get("boundary") or "缺少未自动执行声明。"),
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        next_actions = []
+        for item in failed:
+            if item["item"] == "交接目标明确":
+                next_actions.append("补充 target_agent_id，并确保 delegation_suggestion.target_agent_id 与之一致。")
+            elif item["item"] == "用户目标明确":
+                next_actions.append("补充用户原始目标，避免目标 Agent 缺少任务背景。")
+            elif item["item"] == "交接提示结构完整":
+                next_actions.append("补齐 handoff_prompt 的用户目标、关键上下文和期望输出章节。")
+            elif item["item"] == "约束边界已说明":
+                next_actions.append("补充已知约束、不可做事项和边界说明。")
+            elif item["item"] == "推荐依据可追溯":
+                next_actions.append("补充 agent_capability_match 和 confidence，说明为什么推荐该 Agent。")
+            elif item["item"] == "未自动执行声明明确":
+                next_actions.append("明确说明交接包不代表目标 Agent 已经自动执行。")
+        if not next_actions:
+            next_actions.append("交接包具备交给目标 Agent 的条件，执行前仍需保留原始用户目标。")
+
+        return json.dumps(
+            {
+                "type": "agent_handoff_package_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "risks": risks[:8],
+                "next_actions": next_actions[:6],
+                "note": "这是入口 Agent 交接包门禁审查，不会自动执行目标 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def review_collaboration_progress_gate(
         progress_json: str = "",
         review_target: str = "",
@@ -5621,6 +5733,29 @@ def register_builtin_tools(
             },
             handler=review_agent_collaboration_gate,
             tags=("review", "agent", "collaboration", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_agent_handoff_package_gate",
+            description=(
+                "Review whether an agent_handoff_package is safe and complete enough "
+                "for handoff: target, user goal, prompt structure, constraints, match "
+                "traceability, and explicit non-execution boundary."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "package_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_agent_handoff_package.",
+                    },
+                    "review_target": {"type": "string"},
+                    "known_risks": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=review_agent_handoff_package_gate,
+            tags=("review", "agent", "handoff", "gate", "risk"),
         )
     )
     registry.register(

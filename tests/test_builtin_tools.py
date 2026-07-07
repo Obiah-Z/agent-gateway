@@ -694,6 +694,81 @@ def test_review_agent_collaboration_gate_blocks_missing_contracts(tmp_path: Path
     assert "明确说明该结果只生成协作路线，不代表任何 Agent 已经执行。" in data["next_actions"]
 
 
+def test_review_agent_handoff_package_gate_allows_complete_package(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    package = {
+        "type": "agent_handoff_package",
+        "user_goal": "把已有材料整理成 Markdown 报告",
+        "target_agent_id": "doc-writer",
+        "confidence": 0.71,
+        "match": {"type": "agent_capability_match"},
+        "handoff_prompt": "\n".join(
+            [
+                "目标 Agent：doc-writer",
+                "",
+                "## 用户原始目标",
+                "把已有材料整理成 Markdown 报告",
+                "",
+                "## 关键上下文",
+                "目标与该 Agent 的职责命中。",
+                "",
+                "## 已知约束",
+                "- 只整理已有材料",
+                "",
+                "## 期望输出",
+                "Markdown 报告",
+            ]
+        ),
+        "delegation_suggestion": {
+            "type": "agent_delegation_suggestion",
+            "target_agent_id": "doc-writer",
+            "confidence": 0.71,
+        },
+        "next_actions": ["不要声称目标 Agent 已经自动执行。"],
+        "boundary": "这是入口层交接包，不代表目标 Agent 已经自动执行。",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_agent_handoff_package_gate",
+            {"package_json": json.dumps(package, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "agent_handoff_package_gate_review"
+    assert data["decision"] == "go"
+    assert all(item["passed"] for item in data["checklist"])
+    assert data["review_target"] == "doc-writer"
+    assert data["next_actions"] == ["交接包具备交给目标 Agent 的条件，执行前仍需保留原始用户目标。"]
+
+
+def test_review_agent_handoff_package_gate_blocks_incomplete_package(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    package = {
+        "type": "agent_handoff_package",
+        "target_agent_id": "doc-writer",
+        "handoff_prompt": "目标 Agent：doc-writer",
+        "delegation_suggestion": {"target_agent_id": "planner"},
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_agent_handoff_package_gate",
+            {"package_json": json.dumps(package, ensure_ascii=False)},
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    failed = {item["item"] for item in data["checklist"] if not item["passed"]}
+    assert "交接目标明确" in failed
+    assert "用户目标明确" in failed
+    assert "交接提示结构完整" in failed
+    assert "推荐依据可追溯" in failed
+    assert "补充 target_agent_id" in data["next_actions"][0]
+
+
 def test_review_collaboration_progress_gate_allows_next_stage(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
