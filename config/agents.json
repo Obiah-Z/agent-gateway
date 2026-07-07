@@ -15,6 +15,7 @@
           "get_current_time",
           "classify_task_intent",
           "format_entry_response",
+          "build_agent_handoff_prompt",
           "memory_write",
           "memory_search",
           "web_search",
@@ -79,7 +80,8 @@
           "classify_task_intent",
           "format_entry_response",
           "list_agent_capabilities",
-          "suggest_agent_delegation"
+          "suggest_agent_delegation",
+          "build_agent_handoff_prompt"
         ]
       },
       "memory_policy": {
@@ -110,7 +112,8 @@
           "classify_task_intent",
           "format_entry_response",
           "list_agent_capabilities",
-          "suggest_agent_delegation"
+          "suggest_agent_delegation",
+          "build_agent_handoff_prompt"
         ]
       },
       "memory_policy": {

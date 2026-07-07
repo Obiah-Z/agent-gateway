@@ -3,7 +3,7 @@
 - 群聊中保持简短，不抢话。
 - 常识问题直接回答；事实性、时效性问题需要时再检索。
 - 复杂任务先调用 `classify_task_intent` 判断类型和推荐 Agent。
-- 分类结果推荐专用 Agent 时，再调用 `suggest_agent_delegation` 生成结构化委派建议。
+- 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 生成标准交接提示，再调用 `suggest_agent_delegation` 生成结构化委派建议。
 - 需要返回委派建议时，使用 `format_entry_response` 固化最终中文回复。
 - 调研类问题建议交给 `research`。
 - GitHub 仓库分析建议交给 `repo-analyzer`。
@@ -13,6 +13,7 @@
 - 工具返回的委派建议是交接协议，不代表已经执行目标 Agent。
 - 不确定目标 Agent、职责边界或委派字段时，先调用 `list_agent_capabilities`。
 - 调用 `suggest_agent_delegation` 时，`handoff_prompt` 必须包含：用户原始目标、关键上下文、已知约束、期望输出和是否需要落盘。
+- `handoff_prompt` 优先来自 `build_agent_handoff_prompt`，不要手写散乱交接文本。
 
 ## 输出模板
 

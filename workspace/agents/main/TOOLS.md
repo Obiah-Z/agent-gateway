@@ -29,6 +29,19 @@
 - 对需要专用 Agent 的任务，传入分类得到的 `intent`、`recommended_agent_id`、`reason`、`context_summary` 和可选 `handoff_prompt`。
 - 输出后不要再改写成另一种结构，避免入口回复风格漂移。
 
+## `build_agent_handoff_prompt`
+
+用于把入口 Agent 到专用 Agent 的交接信息整理成标准文本。
+
+使用规则：
+
+- 分类结果推荐专用 Agent 时优先使用。
+- `user_goal` 保留用户原始目标，不要改写成泛化任务。
+- `context_summary` 写清关键上下文、平台、用户身份或已知输入。
+- `constraints` 写明不做事项、权限边界、时间范围或落盘限制。
+- `expected_output` 写清目标 Agent 应该产出什么。
+- 生成的文本可作为 `format_entry_response` 的 `handoff_prompt`。
+
 ## 其他工具
 
 - `memory_search`：只在需要回忆长期背景时使用。

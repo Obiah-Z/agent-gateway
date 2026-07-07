@@ -626,6 +626,35 @@ def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> Non
     }
 
 
+def test_build_agent_handoff_prompt_formats_required_context(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "build_agent_handoff_prompt",
+        {
+            "user_goal": "分析 https://github.com/example/repo 并生成中文报告",
+            "target_agent_id": "repo-analyzer",
+            "context_summary": "用户从企业微信发起，希望了解项目用途和可借鉴点。",
+            "constraints": ["只做分析，不修改代码"],
+            "expected_output": "输出仓库用途、核心模块、风险和 Gateway 借鉴点。",
+            "source_platform": "wework",
+            "should_persist": True,
+            "known_inputs": ["仓库链接：https://github.com/example/repo"],
+            "open_questions": ["是否需要附带采纳计划？"],
+        },
+    )
+
+    assert "目标 Agent：repo-analyzer" in result
+    assert "## 用户原始目标\n分析 https://github.com/example/repo 并生成中文报告" in result
+    assert "- 仓库链接：https://github.com/example/repo" in result
+    assert "- 只做分析，不修改代码" in result
+    assert "输出仓库用途、核心模块、风险和 Gateway 借鉴点。" in result
+    assert "需要落盘" in result
+    assert "## 来源平台\nwework" in result
+    assert "- 是否需要附带采纳计划？" in result
+
+
 def test_classify_task_intent_routes_github_repo_analysis(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

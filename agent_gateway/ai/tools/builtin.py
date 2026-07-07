@@ -1088,6 +1088,55 @@ def register_builtin_tools(
         }
         return json.dumps(suggestion, ensure_ascii=False, indent=2)
 
+    def build_agent_handoff_prompt(
+        user_goal: str,
+        target_agent_id: str,
+        context_summary: str,
+        constraints: list[str] | None = None,
+        expected_output: str = "",
+        source_platform: str = "",
+        should_persist: bool = False,
+        known_inputs: list[str] | None = None,
+        open_questions: list[str] | None = None,
+    ) -> str:
+        """构造入口 Agent 交给专用 Agent 的标准 handoff_prompt。"""
+
+        goal = user_goal.strip()
+        target = target_agent_id.strip() or "unknown-agent"
+        context = context_summary.strip()
+        if not goal:
+            return "Error: user_goal is required"
+        if not context:
+            return "Error: context_summary is required"
+        sections = [
+            f"目标 Agent：{target}",
+            "",
+            "## 用户原始目标",
+            goal,
+            "",
+            "## 关键上下文",
+            context,
+            "",
+            "## 已知输入",
+            _markdown_bullets(known_inputs),
+            "",
+            "## 已知约束",
+            _markdown_bullets(constraints),
+            "",
+            "## 期望输出",
+            expected_output.strip() or "给出清晰、可执行的中文结果；如需落盘，请说明文件路径。",
+            "",
+            "## 落盘要求",
+            "需要落盘" if should_persist else "未明确要求落盘；如生成正式报告或计划，先询问或说明默认保存位置。",
+            "",
+            "## 来源平台",
+            source_platform.strip() or "unknown",
+            "",
+            "## 待确认问题",
+            _markdown_bullets(open_questions),
+        ]
+        return "\n".join(sections).strip()
+
     def classify_task_intent(user_text: str, context_hint: str = "") -> str:
         """把用户输入归类到主入口可处理或更适合交给的专用 Agent。"""
 
@@ -2199,6 +2248,41 @@ def register_builtin_tools(
             },
             handler=suggest_agent_delegation,
             tags=("agent", "delegation", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="build_agent_handoff_prompt",
+            description=(
+                "Build a standardized handoff prompt from an entry agent to a "
+                "specialized capability or personal agent."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_goal", "target_agent_id", "context_summary"],
+                "properties": {
+                    "user_goal": {
+                        "type": "string",
+                        "description": "Original user goal or request.",
+                    },
+                    "target_agent_id": {
+                        "type": "string",
+                        "description": "Target agent id that should receive the handoff.",
+                    },
+                    "context_summary": {
+                        "type": "string",
+                        "description": "Relevant context already known to the entry agent.",
+                    },
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "expected_output": {"type": "string"},
+                    "source_platform": {"type": "string"},
+                    "should_persist": {"type": "boolean"},
+                    "known_inputs": {"type": "array", "items": {"type": "string"}},
+                    "open_questions": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=build_agent_handoff_prompt,
+            tags=("agent", "delegation", "handoff"),
         )
     )
     registry.register(
