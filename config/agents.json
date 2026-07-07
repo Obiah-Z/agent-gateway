@@ -122,6 +122,11 @@
       "tool_policy": {
         "mode": "allowlist",
         "tool_names": [
+          "personal_todo_add",
+          "personal_todo_list",
+          "personal_todo_complete",
+          "personal_review_add",
+          "personal_review_recent",
           "get_current_time",
           "memory_write",
           "memory_search",

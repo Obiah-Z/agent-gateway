@@ -20,6 +20,7 @@ from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.ai.context.prompt import PromptAssembler
 from agent_gateway.ai.context.memory import MemoryStore, register_memory_tools
 from agent_gateway.ai.context.diet import DietStore, register_diet_tools
+from agent_gateway.ai.context.personal import PersonalStore, register_personal_tools
 from agent_gateway.ai.context.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
 from agent_gateway.runtime.observability.events import RuntimeEventStore
@@ -205,6 +206,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     sessions = SessionStore(settings.sessions_dir)
     memory_store = MemoryStore(settings.workspace_root)
     diet_store = DietStore(settings.workspace_root)
+    personal_store = PersonalStore(settings.workspace_root)
     event_store = RuntimeEventStore(
         settings.events_dir,
         retention_days=settings.events_retention_days,
@@ -295,6 +297,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     register_memory_tools(tools, memory_store)
     register_diet_tools(tools, diet_store)
+    register_personal_tools(tools, personal_store)
     register_github_repo_tools(
         tools,
         max_output_chars=settings.max_tool_output_chars,

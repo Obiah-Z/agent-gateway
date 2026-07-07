@@ -125,3 +125,16 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "save_markdown_report" in tools["repo-analyzer"]
     assert "write_file" not in tools["reviewer"]
     assert "bash" not in tools["reviewer"]
+
+
+def test_personal_secretary_has_structured_personal_tools() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
+
+    assert {
+        "personal_todo_add",
+        "personal_todo_list",
+        "personal_todo_complete",
+        "personal_review_add",
+        "personal_review_recent",
+    }.issubset(tools[SECRETARY_AGENT_ID])
