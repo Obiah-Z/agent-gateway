@@ -433,6 +433,84 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def adapt_adoption_plan_to_task_plan(
+        adoption_plan_json: str,
+        title: str = "",
+        scope: str = "",
+    ) -> str:
+        """把 repo-analyzer 的采纳路线图转换成 planner 阶段计划。"""
+
+        if not adoption_plan_json.strip():
+            return "Error: adoption_plan_json is required"
+        data = json.loads(adoption_plan_json)
+        if not isinstance(data, dict):
+            return "Error: adoption_plan_json must be a JSON object"
+        if data.get("type") != "github_repo_adoption_plan":
+            return "Error: adoption_plan_json type must be github_repo_adoption_plan"
+
+        repository = str(data.get("repository", "")).strip() or "unknown repository"
+        decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+        risk_gates = _clean_strings(data.get("risk_gates") if isinstance(data.get("risk_gates"), list) else [])
+        acceptance_checks = _clean_strings(
+            data.get("acceptance_checks") if isinstance(data.get("acceptance_checks"), list) else []
+        )
+        phases = []
+        for index, stage in enumerate(data.get("stages") or [], start=1):
+            if not isinstance(stage, dict):
+                continue
+            tasks = _clean_strings(stage.get("tasks") if isinstance(stage.get("tasks"), list) else [])
+            objective = str(stage.get("objective", "")).strip()
+            phase_title = str(stage.get("title", "") or f"阶段 {index}").strip()
+            phases.append(
+                {
+                    "name": phase_title,
+                    "task": "；".join(tasks) if tasks else objective or "待明确",
+                    "output": objective or "阶段输出待明确",
+                    "done": "；".join(acceptance_checks[:2]) if acceptance_checks else "补充可执行验收标准",
+                }
+            )
+        if not phases:
+            phases.append(
+                {
+                    "name": "阶段一",
+                    "task": "复核采纳路线图并补齐阶段任务",
+                    "output": "可执行阶段计划",
+                    "done": "阶段、输出和验收标准均已明确",
+                }
+            )
+
+        next_steps = _clean_strings(data.get("acceptance_checks") if isinstance(data.get("acceptance_checks"), list) else [])
+        if risk_gates:
+            next_steps.insert(0, f"先通过风险门槛：{risk_gates[0]}")
+        next_steps.insert(0, "将该计划写入 PROJECT_PLAN 或 reports/plans 后，再进入实现。")
+
+        return json.dumps(
+            {
+                "type": "task_plan_from_adoption",
+                "title": title.strip() or f"{repository} 采纳计划",
+                "goal": data.get("adoption_goal") or f"评估并分阶段采纳 {repository} 的可借鉴设计。",
+                "scope": scope.strip()
+                or "只规划采纳路线和最小验证阶段，不直接引入依赖或修改生产配置。",
+                "repository": repository,
+                "decision": decision,
+                "phases": phases[:6],
+                "risks": risk_gates,
+                "next_steps": next_steps[:6],
+                "save_task_plan_args": {
+                    "title": title.strip() or f"{repository} 采纳计划",
+                    "goal": data.get("adoption_goal") or f"评估并分阶段采纳 {repository} 的可借鉴设计。",
+                    "scope": scope.strip()
+                    or "只规划采纳路线和最小验证阶段，不直接引入依赖或修改生产配置。",
+                    "phases": phases[:6],
+                    "risks": risk_gates,
+                    "next_steps": next_steps[:6],
+                },
+                "note": "这是从 repo-analyzer 采纳路线图转换出的 planner 阶段计划草案，可直接传给 save_task_plan。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_review_report(
         title: str,
         conclusion: str,
@@ -1616,6 +1694,29 @@ def register_builtin_tools(
             },
             handler=plan_execution_stage,
             tags=("plan", "execution", "engineering"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="adapt_adoption_plan_to_task_plan",
+            description=(
+                "Convert a github_repo_adoption_plan JSON from repo-analyzer into "
+                "a planner task plan draft with phases, risks, next steps, and save_task_plan args."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["adoption_plan_json"],
+                "properties": {
+                    "adoption_plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_github_repo_adoption.",
+                    },
+                    "title": {"type": "string"},
+                    "scope": {"type": "string"},
+                },
+            },
+            handler=adapt_adoption_plan_to_task_plan,
+            tags=("plan", "repository", "adoption"),
         )
     )
     registry.register(

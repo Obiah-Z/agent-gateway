@@ -194,6 +194,56 @@ def test_plan_execution_stage_reports_missing_acceptance_checks(tmp_path: Path) 
     assert data["acceptance_checks"] == ["补充可执行测试或人工验收标准。"]
 
 
+def test_adapt_adoption_plan_to_task_plan_outputs_save_args(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    adoption_plan = {
+        "type": "github_repo_adoption_plan",
+        "repository": "demo/workflow",
+        "url": "https://github.com/demo/workflow",
+        "adoption_goal": "采纳 workflow 模板优化 Gateway 主动任务。",
+        "decision": {"action": "pilot", "reason": "先做轻量原型。"},
+        "stages": [
+            {
+                "id": "stage-1",
+                "title": "证据复核",
+                "objective": "确认 README、许可证和关键目录。",
+                "tasks": ["复核 README", "确认许可证"],
+            },
+            {
+                "id": "stage-2",
+                "title": "落地验证",
+                "objective": "实现最小 Cron workflow 原型。",
+                "tasks": ["拆一个最小实验", "补充测试"],
+            },
+        ],
+        "risk_gates": ["确认许可证允许学习、引用或复用。"],
+        "acceptance_checks": ["形成一份可追溯的证据摘要。"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "adapt_adoption_plan_to_task_plan",
+            {
+                "adoption_plan_json": json.dumps(adoption_plan, ensure_ascii=False),
+                "title": "workflow 采纳计划",
+            },
+        )
+    )
+
+    assert data["type"] == "task_plan_from_adoption"
+    assert data["repository"] == "demo/workflow"
+    assert data["decision"]["action"] == "pilot"
+    assert data["phases"][0]["name"] == "证据复核"
+    assert data["phases"][1]["task"] == "拆一个最小实验；补充测试"
+    assert data["risks"] == ["确认许可证允许学习、引用或复用。"]
+    assert data["save_task_plan_args"]["title"] == "workflow 采纳计划"
+
+    saved = registry.dispatch("save_task_plan", data["save_task_plan_args"])
+    assert saved == "报告路径：workspace/reports/plans/workflow-采纳计划.md"
+    assert (tmp_path / "reports" / "plans" / "workflow-采纳计划.md").exists()
+
+
 def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

@@ -4,6 +4,8 @@
 
 规划工程实现小阶段时，使用 `plan_execution_stage`。它必须写清目标、当前状态、范围、依赖、风险、验收检查、提交策略和下一步动作，适合“每完成一阶段提交一次”的工作流。
 
+收到 repo-analyzer 的 `github_repo_adoption_plan` 时，使用 `adapt_adoption_plan_to_task_plan` 转成标准计划草案。这个工具会输出 `save_task_plan_args`，需要落盘时再传给 `save_task_plan`。
+
 用户要求落盘计划、方案或执行手册时，再使用 `save_task_plan` 写入 `reports/plans/`。
 
 `planner` 只做计划，不直接执行配置修改、删除文件、重启服务、迁移数据或其他高风险动作。

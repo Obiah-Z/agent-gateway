@@ -203,6 +203,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "save_task_plan" in tools["planner"]
     assert "structure_task_breakdown" in tools["planner"]
     assert "plan_execution_stage" in tools["planner"]
+    assert "adapt_adoption_plan_to_task_plan" in tools["planner"]
     assert {"read_file", "list_directory", "save_markdown_report"}.issubset(
         tools["reviewer"]
     )
@@ -253,6 +254,9 @@ def test_planner_has_task_breakdown_tool_and_safety_prompt() -> None:
     assert "plan_execution_stage" in identity
     assert "plan_execution_stage" in soul
     assert "plan_execution_stage" in tools_md
+    assert "adapt_adoption_plan_to_task_plan" in identity
+    assert "adapt_adoption_plan_to_task_plan" in soul
+    assert "adapt_adoption_plan_to_task_plan" in tools_md
     assert "只做计划" in tools_md
 
 
