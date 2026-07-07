@@ -5,6 +5,7 @@
 - 只读审查，不直接修改文件。
 - 不负责润色文档，表达问题交给 `doc-writer`。
 - 需要判断“能否上线 / 是否通过 / 是否继续推进”时，先调用 `assess_risk_decision`。
+- 对用户回复风险评分和推进判断时，调用 `format_risk_decision_assessment` 转成可读摘要，保留风险分、结论、主要发现、测试缺口和优先动作。
 - 需要判断 `research_evidence_pack` 是否足够复用时，调用 `review_research_evidence_gate`。这是证据复用门禁，不替代 research 的重新检索。
 - 对用户回复 research 证据门禁结论时，调用 `format_research_evidence_gate_review` 转成可读摘要，保留证据质量、来源数量、未通过项和下一步。
 - 需要判断 `research_option_comparison` 是否足够支撑选型、计划或正式文档时，调用 `review_research_option_comparison_gate`。这是方案对比门禁，重点检查决策问题、候选方案、评价维度、来源、一手来源、推荐项和不确定点，不替代实施验证。

@@ -6175,6 +6175,66 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_risk_decision_assessment(
+        assessment_json: str,
+        include_low_findings: bool = False,
+    ) -> str:
+        """把 risk_decision_assessment JSON 转成可直接回复的中文摘要。"""
+
+        if not assessment_json.strip():
+            return "Error: assessment_json is required"
+        data = json.loads(assessment_json)
+        if not isinstance(data, dict):
+            return "Error: assessment_json must be a JSON object"
+        if data.get("type") != "risk_decision_assessment":
+            return "Error: assessment_json type must be risk_decision_assessment"
+
+        severity_labels = {
+            "critical": "严重",
+            "high": "高",
+            "medium": "中",
+            "low": "低",
+            "info": "提示",
+        }
+        finding_rows: list[list[object]] = []
+        findings = data.get("findings") if isinstance(data.get("findings"), list) else []
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            severity = str(finding.get("severity") or "").strip().lower()
+            if severity == "low" and not include_low_findings:
+                continue
+            finding_rows.append(
+                [
+                    severity_labels.get(severity, severity or "未知"),
+                    finding.get("issue") or "未说明问题",
+                    finding.get("impact") or "待评估",
+                    finding.get("suggestion") or "补充修复建议。",
+                ]
+            )
+
+        score = data.get("risk_score", 0)
+        sections = [
+            "## 风险决策评估",
+            f"- 结论：{data.get('decision') or '待判断'}",
+            f"- 审查对象：{data.get('review_target') or '未命名对象'}",
+            f"- 风险分：{score}/100",
+            f"- 证据等级：{data.get('evidence_level') or 'medium'}",
+            "",
+            "## 主要发现",
+            _markdown_table(["级别", "问题", "影响", "建议"], finding_rows),
+            "",
+            "## 测试缺口",
+            _markdown_bullets(data.get("test_gaps") if isinstance(data.get("test_gaps"), list) else []),
+            "",
+            "## 残余风险",
+            _markdown_bullets(data.get("residual_risks") if isinstance(data.get("residual_risks"), list) else []),
+            "",
+            "## 优先动作",
+            _markdown_bullets(data.get("priority_actions") if isinstance(data.get("priority_actions"), list) else []),
+        ]
+        return "\n".join(sections).strip()
+
     def compose_research_brief(
         topic: str,
         conclusion: str,
@@ -8519,6 +8579,31 @@ def register_builtin_tools(
             },
             handler=assess_risk_decision,
             tags=("review", "risk", "decision"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_risk_decision_assessment",
+            description=(
+                "Format a risk_decision_assessment JSON object into a concise Chinese "
+                "reviewer response with score, decision, key findings, test gaps, and priority actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["assessment_json"],
+                "properties": {
+                    "assessment_json": {
+                        "type": "string",
+                        "description": "JSON string returned by assess_risk_decision.",
+                    },
+                    "include_low_findings": {
+                        "type": "boolean",
+                        "description": "Whether to include low-severity findings in the summary.",
+                    },
+                },
+            },
+            handler=format_risk_decision_assessment,
+            tags=("review", "risk", "decision", "format", "user-facing"),
         )
     )
     registry.register(

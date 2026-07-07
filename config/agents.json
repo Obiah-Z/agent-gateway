@@ -412,6 +412,7 @@
           "get_current_time",
           "memory_search",
           "assess_risk_decision",
+          "format_risk_decision_assessment",
           "review_release_gate",
           "format_release_gate_review",
           "review_task_plan_gate",

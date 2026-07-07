@@ -3630,6 +3630,51 @@ def test_assess_risk_decision_scores_findings_and_actions(tmp_path: Path) -> Non
     ]
 
 
+def test_format_risk_decision_assessment_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    assessment = registry.dispatch(
+        "assess_risk_decision",
+        {
+            "review_target": "分布式入站队列方案",
+            "findings": [
+                {
+                    "severity": "高",
+                    "issue": "锁可能过期",
+                    "impact": "同一会话可能并发执行",
+                    "suggestion": "增加锁续期和任务接管。",
+                },
+                {
+                    "severity": "low",
+                    "issue": "文档缺少压测说明",
+                    "impact": "容量边界不清晰",
+                    "suggestion": "补充压测基线。",
+                },
+            ],
+            "test_gaps": ["缺少 worker 崩溃恢复测试"],
+            "residual_risks": ["模型调用耗时仍可能拖慢队列"],
+            "evidence_level": "low",
+        },
+    )
+
+    formatted = registry.dispatch(
+        "format_risk_decision_assessment",
+        {"assessment_json": assessment},
+    )
+
+    assert "## 风险决策评估" in formatted
+    assert "- 结论：有条件通过" in formatted
+    assert "- 审查对象：分布式入站队列方案" in formatted
+    assert "- 风险分：58/100" in formatted
+    assert "| 高 | 锁可能过期 | 同一会话可能并发执行 | 增加锁续期和任务接管。 |" in formatted
+    assert "文档缺少压测说明" not in formatted
+    assert "- 缺少 worker 崩溃恢复测试" in formatted
+    assert "- 模型调用耗时仍可能拖慢队列" in formatted
+    assert "- 增加锁续期和任务接管。" in formatted
+
+
 def test_compose_research_brief_structures_sources_and_uncertainty(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

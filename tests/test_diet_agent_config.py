@@ -335,6 +335,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     )
     assert "save_review_report" in tools["reviewer"]
     assert "assess_risk_decision" in tools["reviewer"]
+    assert "format_risk_decision_assessment" in tools["reviewer"]
     assert "review_release_gate" in tools["reviewer"]
     assert "format_release_gate_review" in tools["reviewer"]
     assert "review_task_plan_gate" in tools["reviewer"]
@@ -539,6 +540,9 @@ def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
     assert "assess_risk_decision" in identity
     assert "assess_risk_decision" in soul
     assert "assess_risk_decision" in tools_md
+    assert "format_risk_decision_assessment" in identity
+    assert "format_risk_decision_assessment" in soul
+    assert "format_risk_decision_assessment" in tools_md
     assert "review_release_gate" in identity
     assert "review_release_gate" in soul
     assert "review_release_gate" in tools_md
@@ -763,6 +767,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_research_option_comparison_gate_review",
         "render_execution_record_markdown",
         "render_release_gate_markdown",
+        "format_risk_decision_assessment",
         "format_release_gate_review",
         "format_task_breakdown",
         "format_execution_stage_plan",

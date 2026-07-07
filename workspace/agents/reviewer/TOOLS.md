@@ -2,6 +2,8 @@
 
 审查时先整理问题清单，再在需要给出“通过 / 有条件通过 / 不建议继续”的判断时调用 `assess_risk_decision`。
 
+直接回复风险评分和推进判断时，使用 `format_risk_decision_assessment`，不要把 `assess_risk_decision` 的原始 JSON 直接贴给用户。
+
 审查 research 输出的 `research_evidence_pack` 是否可以交给下游 Agent 复用时，使用 `review_research_evidence_gate`。它检查问题、结论、来源数量、URL、一手来源、关键事实、不确定点和时效信息，输出 go / conditional-go / no-go。
 
 直接回复 research 证据门禁结果时，使用 `format_research_evidence_gate_review`，不要把 `review_research_evidence_gate` 的原始 JSON 直接贴给用户。
