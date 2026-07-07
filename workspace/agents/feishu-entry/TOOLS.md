@@ -6,6 +6,8 @@
 
 如果用户只需要入口层判断、协作路线和下一步说明，优先调用 `prepare_entry_route_response`。该工具会输出可直接回复用户的 `formatted_response`，但不会自动执行目标 Agent。
 
+不确定当前有哪些协作路线、别名或阶段顺序时，先调用 `list_agent_collaboration_routes` 查询路线目录。
+
 如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
 
 复杂技术选型、方案对比或中间件取舍任务如果还要求验证计划、风险审查、落地计划或正式报告，`task_type` 使用 `research-option-validation`。

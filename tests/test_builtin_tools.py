@@ -1420,6 +1420,34 @@ def test_plan_agent_collaboration_builds_repo_adoption_route(tmp_path: Path) -> 
     assert "不代表任何 Agent 已经执行" in data["note"]
 
 
+def test_list_agent_collaboration_routes_filters_by_alias(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "list_agent_collaboration_routes",
+            {"task_types": ["tech-selection"], "include_stages": True},
+        )
+    )
+
+    assert data["type"] == "agent_collaboration_route_catalog"
+    assert data["count"] == 1
+    route = data["routes"][0]
+    assert route["task_type"] == "research-option-validation"
+    assert route["agent_sequence"] == [
+        "research",
+        "reviewer",
+        "planner",
+        "reviewer",
+        "doc-writer",
+    ]
+    assert "tech-selection" in route["aliases"]
+    assert route["stages"][0]["expected_output"] == "research_option_comparison JSON。"
+    assert data["aliases"]["tech-selection"] == "research-option-validation"
+    assert "不代表任何 Agent 已经自动执行" in data["boundary"]
+
+
 def test_plan_agent_collaboration_builds_research_option_validation_route(
     tmp_path: Path,
 ) -> None:

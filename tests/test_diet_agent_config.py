@@ -58,6 +58,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "classify_task_intent" in tools
     assert "format_entry_response" in tools
     assert "build_agent_handoff_prompt" in tools
+    assert "list_agent_collaboration_routes" in tools
     assert "plan_agent_collaboration" in tools
     assert "explain_agent_route" in tools
     assert "prepare_entry_route_response" in tools
@@ -73,6 +74,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "classify_task_intent" in combined_prompt
     assert "format_entry_response" in combined_prompt
     assert "build_agent_handoff_prompt" in combined_prompt
+    assert "list_agent_collaboration_routes" in combined_prompt
     assert "plan_agent_collaboration" in combined_prompt
     assert "explain_agent_route" in combined_prompt
     assert "prepare_entry_route_response" in combined_prompt
@@ -96,6 +98,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "classify_task_intent" in tools
         assert "format_entry_response" in tools
         assert "list_agent_capabilities" in tools
+        assert "list_agent_collaboration_routes" in tools
         assert "suggest_agent_delegation" in tools
         assert "build_agent_handoff_prompt" in tools
         assert "plan_agent_collaboration" in tools
@@ -105,6 +108,8 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "classify_task_intent" in soul
         assert "build_agent_handoff_prompt" in identity
         assert "build_agent_handoff_prompt" in soul
+        assert "list_agent_collaboration_routes" in identity
+        assert "list_agent_collaboration_routes" in soul
         assert "plan_agent_collaboration" in identity
         assert "plan_agent_collaboration" in soul
         assert "explain_agent_route" in identity
@@ -115,6 +120,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "suggest_agent_delegation" in soul
         assert "classify_task_intent" in tools_md
         assert "build_agent_handoff_prompt" in tools_md
+        assert "list_agent_collaboration_routes" in tools_md
         assert "plan_agent_collaboration" in tools_md
         assert "explain_agent_route" in tools_md
         assert "prepare_entry_route_response" in tools_md
@@ -531,6 +537,8 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "suggest_agent_delegation" in tools["wework-entry"]
     assert "list_agent_capabilities" in tools["feishu-entry"]
     assert "list_agent_capabilities" in tools["wework-entry"]
+    assert "list_agent_collaboration_routes" in tools["feishu-entry"]
+    assert "list_agent_collaboration_routes" in tools["wework-entry"]
     assert "build_agent_handoff_prompt" in tools["feishu-entry"]
     assert "build_agent_handoff_prompt" in tools["wework-entry"]
     assert "plan_agent_collaboration" in tools["feishu-entry"]
@@ -549,6 +557,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     }:
         assert "suggest_agent_delegation" not in tools[agent_id]
         assert "list_agent_capabilities" not in tools[agent_id]
+        assert "list_agent_collaboration_routes" not in tools[agent_id]
         assert "build_agent_handoff_prompt" not in tools[agent_id]
         assert "plan_agent_collaboration" not in tools[agent_id]
         assert "explain_agent_route" not in tools[agent_id]
@@ -578,6 +587,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "personal_day_review_plan_generate",
         "diet_day_review_plan_generate",
         "build_agent_handoff_prompt",
+        "list_agent_collaboration_routes",
         "plan_agent_collaboration",
         "research-option-validation",
         "explain_agent_route",

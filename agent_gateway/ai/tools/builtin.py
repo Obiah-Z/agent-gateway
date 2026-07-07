@@ -2515,24 +2515,10 @@ def register_builtin_tools(
         ]
         return "\n".join(sections).strip()
 
-    def plan_agent_collaboration(
-        user_goal: str,
-        task_type: str = "",
-        preferred_agents: list[str] | None = None,
-        constraints: list[str] | None = None,
-        expected_output: str = "",
-        should_persist: bool = False,
-    ) -> str:
-        """为复杂任务生成多 Agent 协作路线，不执行任何 Agent。"""
+    def _agent_collaboration_route_templates() -> dict[str, list[dict[str, str]]]:
+        """返回入口层可规划的多 Agent 协作路线模板。"""
 
-        goal = user_goal.strip()
-        if not goal:
-            return "Error: user_goal is required"
-        normalized_type = task_type.strip().lower().replace("_", "-")
-        requested = [agent.strip() for agent in preferred_agents or [] if agent.strip()]
-        constraints_clean = _clean_strings(constraints)
-
-        templates: dict[str, list[dict[str, str]]] = {
+        return {
             "repo-adoption": [
                 {
                     "agent_id": "repo-analyzer",
@@ -2624,7 +2610,11 @@ def register_builtin_tools(
                 },
             ],
         }
-        aliases = {
+
+    def _agent_collaboration_route_aliases() -> dict[str, str]:
+        """返回协作路线别名，便于入口层接受更自然的 task_type。"""
+
+        return {
             "repo-analysis": "repo-adoption",
             "github": "repo-adoption",
             "document": "research-document",
@@ -2636,6 +2626,74 @@ def register_builtin_tools(
             "review": "plan-review-document",
             "ops": "ops-diagnosis",
         }
+
+    def list_agent_collaboration_routes(
+        task_types: list[str] | None = None,
+        include_stages: bool = True,
+    ) -> str:
+        """列出入口层支持的多 Agent 协作路线，不执行任何 Agent。"""
+
+        templates = _agent_collaboration_route_templates()
+        aliases = _agent_collaboration_route_aliases()
+        wanted = {
+            aliases.get(item.strip().lower().replace("_", "-"), item.strip().lower().replace("_", "-"))
+            for item in task_types or []
+            if item.strip()
+        }
+        routes = []
+        for route_type, stages in templates.items():
+            if wanted and route_type not in wanted:
+                continue
+            row: dict[str, Any] = {
+                "task_type": route_type,
+                "agent_sequence": [stage["agent_id"] for stage in stages],
+                "stage_count": len(stages),
+                "aliases": sorted(alias for alias, target in aliases.items() if target == route_type),
+                "note": "该路线只表示建议协作顺序，不会自动调用任何 Agent。",
+            }
+            if include_stages:
+                row["stages"] = [
+                    {
+                        "step": index,
+                        "agent_id": stage["agent_id"],
+                        "purpose": stage["purpose"],
+                        "expected_output": stage["expected_output"],
+                    }
+                    for index, stage in enumerate(stages, start=1)
+                ]
+            routes.append(row)
+
+        return json.dumps(
+            {
+                "type": "agent_collaboration_route_catalog",
+                "count": len(routes),
+                "routes": routes,
+                "aliases": aliases,
+                "boundary": "这是协作路线目录，不代表任何 Agent 已经自动执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def plan_agent_collaboration(
+        user_goal: str,
+        task_type: str = "",
+        preferred_agents: list[str] | None = None,
+        constraints: list[str] | None = None,
+        expected_output: str = "",
+        should_persist: bool = False,
+    ) -> str:
+        """为复杂任务生成多 Agent 协作路线，不执行任何 Agent。"""
+
+        goal = user_goal.strip()
+        if not goal:
+            return "Error: user_goal is required"
+        normalized_type = task_type.strip().lower().replace("_", "-")
+        requested = [agent.strip() for agent in preferred_agents or [] if agent.strip()]
+        constraints_clean = _clean_strings(constraints)
+
+        templates = _agent_collaboration_route_templates()
+        aliases = _agent_collaboration_route_aliases()
         selected_type = aliases.get(normalized_type, normalized_type) or "plan-review-document"
         stages = templates.get(selected_type, templates["plan-review-document"])
         if requested:
@@ -4944,6 +5002,31 @@ def register_builtin_tools(
             },
             handler=build_agent_handoff_prompt,
             tags=("agent", "delegation", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="list_agent_collaboration_routes",
+            description=(
+                "List available multi-agent collaboration route templates, aliases, "
+                "agent sequences, and optional stage details. This does not execute agents."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "task_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional task types or aliases to filter, for example repo-adoption or research-option-validation.",
+                    },
+                    "include_stages": {
+                        "type": "boolean",
+                        "description": "Whether to include per-stage purpose and expected output.",
+                    },
+                },
+            },
+            handler=list_agent_collaboration_routes,
+            tags=("agent", "collaboration", "routing", "catalog"),
         )
     )
     registry.register(

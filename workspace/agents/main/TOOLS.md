@@ -60,6 +60,7 @@
 
 使用规则：
 
+- 如果不确定有哪些可用路线、别名或阶段顺序，先调用 `list_agent_collaboration_routes`。
 - 任务需要两个以上 Agent 串联时使用，例如仓库分析后生成计划、仓库风险审查后形成执行报告、计划审查后写文档、调研后成文。
 - 用户要求“分析 GitHub 仓库并给出风险、采纳计划或正式报告”时，`task_type` 使用 `repo-adoption`，让路线按 repo-analyzer → reviewer → planner → doc-writer 展开。
 - 用户要求“技术选型 / 方案对比 / 中间件取舍”并同时需要验证计划、风险审查、落地计划或正式报告时，`task_type` 使用 `research-option-validation`，让路线按 research → reviewer → planner → reviewer → doc-writer 展开。

@@ -5,6 +5,7 @@
 - 复杂任务如果只是要给用户一个稳定入口回复，优先调用 `prepare_entry_route_response`，减少漏掉分类、协作路线或格式化步骤。
 - 复杂任务先调用 `classify_task_intent` 判断类型和推荐 Agent。
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
+- 不确定当前有哪些协作路线、task_type 或阶段顺序时，调用 `list_agent_collaboration_routes`，不要凭记忆编路线。
 - 如果任务需要 research、repo-analyzer、planner、reviewer、doc-writer 等多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
 - 技术选型、方案对比或中间件取舍如果同时要求验证计划、风险审查、落地计划或正式报告，`plan_agent_collaboration` 的 `task_type` 使用 `research-option-validation`，路线应包含 research、reviewer、planner、reviewer、doc-writer。
