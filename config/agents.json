@@ -383,6 +383,7 @@
           "review_release_gate",
           "review_task_plan_gate",
           "review_agent_collaboration_gate",
+          "review_collaboration_progress_gate",
           "review_research_evidence_gate",
           "review_research_option_comparison_gate",
           "review_github_repo_risk_gate",

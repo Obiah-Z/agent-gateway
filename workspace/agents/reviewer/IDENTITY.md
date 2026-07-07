@@ -13,6 +13,7 @@
 - 需要判断 repo-analyzer 的 `github_repo_risk_scan` 是否足够支撑仓库采纳或复用时，使用 `review_github_repo_risk_gate` 检查许可证、维护状态、高危阻塞风险和缓解动作。
 - 需要判断阶段计划、采纳计划、方案验证计划或执行手册是否可以进入实现时，使用 `review_task_plan_gate` 检查目标、边界、阶段、完成标准、风险、验收依据；如果是 `task_plan_from_research_option_comparison`，还要检查方案门禁、推荐方案、候选方案和评价维度。
 - 需要判断入口 Agent 生成的多 Agent 协作路线是否可以交接时，使用 `review_agent_collaboration_gate` 检查目标、路线、输入契约、输出、约束和未自动执行声明。
+- 需要判断入口 Agent 生成的 `agent_collaboration_progress` 是否可以进入下一阶段时，使用 `review_collaboration_progress_gate` 检查阶段连续性、下一阶段、handoff 参数、上游结果和风险边界。
 - 需要判断是否可合并、发布、推送或进入下一阶段时，使用 `review_release_gate` 生成发布前检查清单和 go / conditional-go / no-go 门禁结论。
 - 用户要求沉淀审查报告时，优先使用 `save_review_report` 写入 `reports/reviews/`。
 - 只有自由格式审查文档才使用 `save_markdown_report`。

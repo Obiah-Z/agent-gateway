@@ -694,6 +694,87 @@ def test_review_agent_collaboration_gate_blocks_missing_contracts(tmp_path: Path
     assert "明确说明该结果只生成协作路线，不代表任何 Agent 已经执行。" in data["next_actions"]
 
 
+def test_review_collaboration_progress_gate_allows_next_stage(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    progress = {
+        "type": "agent_collaboration_progress",
+        "task_type": "research-option-validation",
+        "status": "in-progress",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "next_stage": {
+            "step": 3,
+            "agent_id": "planner",
+            "purpose": "把方案对比和门禁结论转成最小验证计划。",
+            "expected_output": "task_plan_from_research_option_comparison JSON。",
+        },
+        "stages": [
+            {"step": 1, "agent_id": "research", "status": "completed"},
+            {"step": 2, "agent_id": "reviewer", "status": "completed"},
+            {"step": 3, "agent_id": "planner", "status": "next"},
+            {"step": 4, "agent_id": "reviewer", "status": "pending"},
+        ],
+        "next_handoff_args": {
+            "stage": 3,
+            "upstream_result_summary": "reviewer 已给出 conditional-go。",
+        },
+        "boundary": "这是协作进度摘要，不代表任何 Agent 已经自动执行。",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_collaboration_progress_gate",
+            {"progress_json": json.dumps(progress, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "collaboration_progress_gate_review"
+    assert data["decision"] == "go"
+    assert data["next_stage"]["agent_id"] == "planner"
+    assert all(item["passed"] for item in data["checklist"])
+    assert data["next_actions"] == ["协作进度具备进入下一阶段交接的条件。"]
+
+
+def test_review_collaboration_progress_gate_blocks_missing_handoff_context(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    progress = {
+        "type": "agent_collaboration_progress",
+        "task_type": "research-option-validation",
+        "status": "in-progress",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "next_stage": {"step": 3, "agent_id": "planner"},
+        "stages": [
+            {"step": 1, "agent_id": "research", "status": "completed"},
+            {"step": 2, "agent_id": "reviewer", "status": "pending"},
+            {"step": 3, "agent_id": "planner", "status": "next"},
+            {"step": 4, "agent_id": "reviewer", "status": "completed"},
+        ],
+        "next_handoff_args": {"stage": 2},
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_collaboration_progress_gate",
+            {"progress_json": json.dumps(progress, ensure_ascii=False)},
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    failed_items = [item["item"] for item in data["checklist"] if not item["passed"]]
+    assert "阶段状态连续" in failed_items
+    assert "下一阶段 handoff 参数可用" in failed_items
+    assert "上游结果可追溯" in failed_items
+    assert "修正 stages 状态，确保已完成阶段连续且最多只有一个 next。" in data["next_actions"]
+    assert "补充 next_handoff_args，并确保 stage 与 next_stage.step 一致。" in data[
+        "next_actions"
+    ]
+
+
 def test_review_research_evidence_gate_allows_verified_pack(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

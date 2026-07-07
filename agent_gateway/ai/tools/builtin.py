@@ -1317,6 +1317,127 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_collaboration_progress_gate(
+        progress_json: str = "",
+        review_target: str = "",
+        known_risks: list[str] | None = None,
+    ) -> str:
+        """审查多 Agent 协作进度是否可以进入下一阶段交接。"""
+
+        progress: dict[str, Any] = {}
+        if progress_json.strip():
+            parsed = json.loads(progress_json)
+            if not isinstance(parsed, dict):
+                return "Error: progress_json must be a JSON object"
+            if parsed.get("type") != "agent_collaboration_progress":
+                return "Error: progress_json type must be agent_collaboration_progress"
+            progress = parsed
+
+        target = review_target.strip() or str(progress.get("task_type") or "").strip()
+        status = str(progress.get("status") or "").strip()
+        next_stage = progress.get("next_stage") if isinstance(progress.get("next_stage"), dict) else {}
+        next_handoff_args = progress.get("next_handoff_args") if isinstance(progress.get("next_handoff_args"), dict) else {}
+        stages = [item for item in progress.get("stages") or [] if isinstance(item, dict)]
+        risks = _clean_strings(known_risks)
+        total = int(progress.get("total_stage_count") or len(stages) or 0)
+        completed = int(progress.get("completed_stage_count") or 0)
+
+        skipped_or_invalid = 0
+        seen_next = 0
+        for index, stage in enumerate(stages, start=1):
+            stage_status = str(stage.get("status") or "").strip()
+            if stage_status == "next":
+                seen_next += 1
+            if index <= completed and stage_status != "completed":
+                skipped_or_invalid += 1
+            if index > completed + 1 and stage_status == "completed":
+                skipped_or_invalid += 1
+
+        has_next = bool(next_stage)
+        has_handoff_args = bool(next_handoff_args) and int(next_handoff_args.get("stage") or 0) == int(next_stage.get("step") or 0)
+        has_upstream = bool(str(next_handoff_args.get("upstream_result_summary") or next_handoff_args.get("upstream_result_json") or "").strip())
+        if completed == 0:
+            has_upstream = True
+        if status == "completed" and has_next:
+            risks.append("协作状态已完成，但仍存在 next_stage。")
+        if status != "completed" and not has_next:
+            risks.append("协作尚未完成，但缺少 next_stage。")
+
+        checklist = [
+            {
+                "item": "进度对象有效",
+                "passed": bool(target) and total > 0 and 0 <= completed <= total,
+                "evidence": f"task_type={target or 'missing'}；completed={completed}；total={total}",
+            },
+            {
+                "item": "阶段状态连续",
+                "passed": skipped_or_invalid == 0 and seen_next <= 1,
+                "evidence": f"异常阶段数：{skipped_or_invalid}；next 标记数：{seen_next}。",
+            },
+            {
+                "item": "下一阶段判断一致",
+                "passed": (status == "completed" and not has_next) or (status != "completed" and has_next),
+                "evidence": f"status={status or 'missing'}；next_stage={next_stage.get('step') if next_stage else 'none'}。",
+            },
+            {
+                "item": "下一阶段 handoff 参数可用",
+                "passed": (status == "completed") or has_handoff_args,
+                "evidence": "已提供 next_handoff_args。" if has_handoff_args else "缺少可用 next_handoff_args。",
+            },
+            {
+                "item": "上游结果可追溯",
+                "passed": (status == "completed") or has_upstream,
+                "evidence": "已有上游摘要或 JSON。" if has_upstream else "缺少 upstream_result_summary / upstream_result_json。",
+            },
+            {
+                "item": "风险边界已说明",
+                "passed": bool(risks) or status == "completed" or bool(str(progress.get("boundary") or "").strip()),
+                "evidence": "；".join(risks[:4]) if risks else str(progress.get("boundary") or "缺少风险边界。"),
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        next_actions = []
+        for item in failed:
+            if item["item"] == "进度对象有效":
+                next_actions.append("补充有效的 task_type、total_stage_count 和 completed_stage_count。")
+            elif item["item"] == "阶段状态连续":
+                next_actions.append("修正 stages 状态，确保已完成阶段连续且最多只有一个 next。")
+            elif item["item"] == "下一阶段判断一致":
+                next_actions.append("根据 status 修正 next_stage：未完成必须有下一阶段，已完成不能再交接。")
+            elif item["item"] == "下一阶段 handoff 参数可用":
+                next_actions.append("补充 next_handoff_args，并确保 stage 与 next_stage.step 一致。")
+            elif item["item"] == "上游结果可追溯":
+                next_actions.append("补充 upstream_result_summary 或 upstream_result_json，避免下一阶段缺上下文。")
+            elif item["item"] == "风险边界已说明":
+                next_actions.append("补充协作进度边界、风险或不可自动执行声明。")
+        if not next_actions:
+            next_actions.append("协作进度具备进入下一阶段交接的条件。")
+
+        return json.dumps(
+            {
+                "type": "collaboration_progress_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "completed_stage_count": completed,
+                "total_stage_count": total,
+                "next_stage": next_stage or None,
+                "risks": risks[:8],
+                "next_actions": next_actions[:6],
+                "note": "这是多 Agent 协作进度门禁审查，不会自动执行任何 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def review_research_evidence_gate(
         evidence_json: str = "",
         review_target: str = "",
@@ -4826,6 +4947,29 @@ def register_builtin_tools(
             },
             handler=review_agent_collaboration_gate,
             tags=("review", "agent", "collaboration", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_collaboration_progress_gate",
+            description=(
+                "Review whether an agent_collaboration_progress object can safely "
+                "advance to the next stage: contiguous progress, next stage, handoff "
+                "args, upstream traceability, risks, and go/conditional-go/no-go decision."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "progress_json": {
+                        "type": "string",
+                        "description": "JSON string returned by summarize_collaboration_progress.",
+                    },
+                    "review_target": {"type": "string"},
+                    "known_risks": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=review_collaboration_progress_gate,
+            tags=("review", "agent", "collaboration", "progress", "gate", "risk"),
         )
     )
     registry.register(
