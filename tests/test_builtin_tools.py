@@ -1466,6 +1466,71 @@ def test_render_agent_collaboration_progress_markdown_formats_status(
     assert "build_collaboration_stage_handoff" in markdown
 
 
+def test_render_collaboration_progress_gate_markdown_formats_review(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    progress = {
+        "type": "agent_collaboration_progress",
+        "task_type": "research-option-validation",
+        "status": "in-progress",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "stages": [
+            {
+                "step": 1,
+                "agent_id": "research",
+                "status": "completed",
+                "output_summary": "已输出方案对比。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "status": "completed",
+                "output_summary": "conditional-go。",
+            },
+            {
+                "step": 3,
+                "agent_id": "planner",
+                "status": "next",
+                "output_summary": "",
+            },
+        ],
+    }
+    review = {
+        "type": "collaboration_progress_gate_review",
+        "review_target": "research-option-validation",
+        "decision": "conditional-go",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "next_stage": {"step": 3, "agent_id": "planner"},
+        "checklist": [
+            {"item": "阶段状态连续", "passed": True, "evidence": "阶段连续。"},
+            {"item": "风险边界已说明", "passed": False, "evidence": "缺少风险边界。"},
+        ],
+        "risks": ["需要补充风险边界。"],
+        "next_actions": ["补充协作进度边界。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_collaboration_progress_gate_markdown",
+        {
+            "gate_review_json": json.dumps(review, ensure_ascii=False),
+            "progress_json": json.dumps(progress, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 协作进度门禁审查：research-option-validation")
+    assert "- 门禁结论：conditional-go" in markdown
+    assert "| 2 | reviewer | completed | conditional-go。 |" in markdown
+    assert "| 风险边界已说明 | 未通过 | 缺少风险边界。 |" in markdown
+    assert "- 需要补充风险边界。" in markdown
+    assert "- 补充协作进度边界。" in markdown
+    assert "```json" in markdown
+
+
 def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

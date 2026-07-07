@@ -261,6 +261,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "render_research_option_validation_plan_markdown",
         "render_agent_collaboration_markdown",
         "render_agent_collaboration_progress_markdown",
+        "render_collaboration_progress_gate_markdown",
         "save_structured_document",
         "save_markdown_report",
     }.issubset(tools["doc-writer"])
@@ -401,6 +402,10 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_agent_collaboration_progress_markdown" in soul
     assert "render_agent_collaboration_progress_markdown" in tools_md
     assert "agent_collaboration_progress" in tools_md
+    assert "render_collaboration_progress_gate_markdown" in identity
+    assert "render_collaboration_progress_gate_markdown" in soul
+    assert "render_collaboration_progress_gate_markdown" in tools_md
+    assert "collaboration_progress_gate_review" in tools_md
     assert "不代表任何 Agent 已经执行" in soul
     assert "材料不足" in tools_md
 
@@ -610,6 +615,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_execution_record_markdown",
         "render_agent_collaboration_markdown",
         "render_agent_collaboration_progress_markdown",
+        "render_collaboration_progress_gate_markdown",
         "review_agent_collaboration_gate",
         "review_collaboration_progress_gate",
         "adapt_collaboration_plan_to_task_plan",

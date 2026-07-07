@@ -312,6 +312,7 @@
           "render_research_option_validation_plan_markdown",
           "render_agent_collaboration_markdown",
           "render_agent_collaboration_progress_markdown",
+          "render_collaboration_progress_gate_markdown",
           "save_structured_document",
           "save_markdown_report",
           "get_current_time",
