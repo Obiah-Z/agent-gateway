@@ -133,6 +133,24 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "bash" not in tools["reviewer"]
 
 
+def test_ops_agent_has_readonly_health_tool_and_safety_prompt() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
+    identity = (ROOT / "workspace" / "agents" / "ops" / "IDENTITY.md").read_text(
+        encoding="utf-8"
+    )
+    soul = (ROOT / "workspace" / "agents" / "ops" / "SOUL.md").read_text(encoding="utf-8")
+    tools_md = (ROOT / "workspace" / "agents" / "ops" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ops_readonly_health" in tools["ops"]
+    assert "ops_readonly_health" in identity
+    assert "ops_readonly_health" in soul
+    assert "ops_readonly_health" in tools_md
+    assert "禁止执行删除" in tools_md
+
+
 def test_shared_capability_agents_document_handoff_inputs() -> None:
     required_terms = {
         "repo-analyzer": ["## 委派输入", "repo_url", "analysis_goal"],

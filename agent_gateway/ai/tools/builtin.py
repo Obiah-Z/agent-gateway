@@ -137,6 +137,41 @@ def _extract_markdown_list_items(section: str) -> list[str]:
     return items
 
 
+def _directory_size(path: Path, *, max_files: int = 20_000) -> tuple[int, int, bool]:
+    """只读估算目录大小，返回字节数、扫描文件数和是否截断。"""
+
+    if not path.exists():
+        return 0, 0, False
+    if path.is_file():
+        return path.stat().st_size, 1, False
+
+    total = 0
+    count = 0
+    truncated = False
+    for root, _, files in os.walk(path):
+        for filename in files:
+            count += 1
+            if count > max_files:
+                truncated = True
+                return total, count - 1, truncated
+            try:
+                total += (Path(root) / filename).stat().st_size
+            except OSError:
+                continue
+    return total, count, truncated
+
+
+def _format_bytes(value: int | float) -> str:
+    """把字节数格式化为易读字符串。"""
+
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(size) < 1024 or unit == "TiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{size:.0f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TiB"
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -417,6 +452,78 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def ops_readonly_health(include_sizes: bool = True) -> str:
+        """生成只读运维健康简报，不执行 shell 命令。"""
+
+        project_root = workspace_root.parent
+        monitored_paths = {
+            "project": project_root,
+            "workspace": workspace_root,
+            "data": project_root / "data",
+            "config": project_root / "config",
+        }
+        disk = os.statvfs(project_root)
+        total = disk.f_frsize * disk.f_blocks
+        free = disk.f_frsize * disk.f_bavail
+        used = max(0, total - free)
+        usage_percent = round((used / total) * 100, 1) if total else 0.0
+
+        paths = []
+        for name, path in monitored_paths.items():
+            exists = path.exists()
+            row = {
+                "name": name,
+                "path": str(path),
+                "exists": exists,
+                "is_dir": path.is_dir() if exists else False,
+                "size_bytes": 0,
+                "size": "0 B",
+                "file_count": 0,
+                "truncated": False,
+            }
+            if exists and include_sizes:
+                size_bytes, file_count, truncated = _directory_size(path)
+                row.update(
+                    {
+                        "size_bytes": size_bytes,
+                        "size": _format_bytes(size_bytes),
+                        "file_count": file_count,
+                        "truncated": truncated,
+                    }
+                )
+            paths.append(row)
+
+        risk_flags = []
+        if usage_percent >= 90:
+            risk_flags.append("disk_critical")
+        elif usage_percent >= 80:
+            risk_flags.append("disk_warning")
+        missing = [row["name"] for row in paths if not row["exists"]]
+        if missing:
+            risk_flags.append("missing_paths")
+
+        return json.dumps(
+            {
+                "type": "ops_readonly_health",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "project_root": str(project_root),
+                "disk": {
+                    "total_bytes": total,
+                    "used_bytes": used,
+                    "free_bytes": free,
+                    "total": _format_bytes(total),
+                    "used": _format_bytes(used),
+                    "free": _format_bytes(free),
+                    "usage_percent": usage_percent,
+                },
+                "paths": paths,
+                "risk_flags": risk_flags,
+                "note": "只读采集结果；未执行 shell 命令，未修改文件。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -686,6 +793,26 @@ def register_builtin_tools(
             },
             handler=list_agent_capabilities,
             tags=("agent", "catalog", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="ops_readonly_health",
+            description=(
+                "Collect a read-only Gateway health summary using Python file "
+                "metadata only: disk usage and key project directory sizes."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "include_sizes": {
+                        "type": "boolean",
+                        "description": "Whether to scan key directories for size and file counts.",
+                    }
+                },
+            },
+            handler=ops_readonly_health,
+            tags=("ops", "health", "read"),
         )
     )
     registry.register(

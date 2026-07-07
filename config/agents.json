@@ -198,6 +198,7 @@
           "read_file",
           "list_directory",
           "get_current_time",
+          "ops_readonly_health",
           "bash"
         ]
       },

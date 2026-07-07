@@ -282,6 +282,29 @@ def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) 
     assert data["agents"][0]["tools"] == ["save_task_plan"]
 
 
+def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "reports").mkdir(parents=True)
+    (workspace / "reports" / "example.md").write_text("hello", encoding="utf-8")
+    (tmp_path / "data").mkdir()
+    (tmp_path / "config").mkdir()
+    registry = ToolRegistry()
+    register_builtin_tools(registry, workspace)
+
+    result = registry.dispatch("ops_readonly_health", {"include_sizes": True})
+
+    data = json.loads(result)
+    assert data["type"] == "ops_readonly_health"
+    assert data["project_root"] == str(tmp_path)
+    assert data["disk"]["total_bytes"] > 0
+    assert data["disk"]["usage_percent"] >= 0
+    paths = {row["name"]: row for row in data["paths"]}
+    assert {"project", "workspace", "data", "config"}.issubset(paths)
+    assert paths["workspace"]["exists"] is True
+    assert paths["workspace"]["file_count"] == 1
+    assert data["note"] == "只读采集结果；未执行 shell 命令，未修改文件。"
+
+
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
