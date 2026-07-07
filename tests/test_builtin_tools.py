@@ -644,6 +644,60 @@ def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     assert data["note"] == "只读采集结果；未执行 shell 命令，未修改文件。"
 
 
+def test_summarize_ops_health_reports_normal_state(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    health = {
+        "type": "ops_readonly_health",
+        "generated_at": "2026-07-07T00:00:00+00:00",
+        "project_root": str(tmp_path),
+        "disk": {"usage_percent": 42.0, "free": "50.0 GiB"},
+        "paths": [
+            {"name": "workspace", "exists": True, "size_bytes": 1024, "size": "1.0 KiB", "file_count": 1}
+        ],
+        "risk_flags": [],
+        "note": "只读采集结果；未执行 shell 命令，未修改文件。",
+    }
+
+    result = registry.dispatch(
+        "summarize_ops_health",
+        {"health_json": json.dumps(health, ensure_ascii=False)},
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "ops_health_summary"
+    assert data["risk_level"] == "normal"
+    assert "磁盘使用率 42.0%" in data["findings"][0]
+    assert "保持当前巡检频率" in data["safe_recommendations"][0]
+    assert "删除文件" in data["manual_confirmation_required"]
+
+
+def test_summarize_ops_health_flags_missing_paths_and_disk_warning(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    health = {
+        "type": "ops_readonly_health",
+        "disk": {"usage_percent": 91.5, "free": "2.0 GiB"},
+        "paths": [
+            {"name": "workspace", "exists": False, "size_bytes": 0, "size": "0 B", "file_count": 0},
+            {"name": "data", "exists": True, "size_bytes": 2 * 1024 * 1024 * 1024, "size": "2.0 GiB", "file_count": 100},
+        ],
+        "risk_flags": ["disk_critical", "missing_paths"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "summarize_ops_health",
+            {"health_json": json.dumps(health, ensure_ascii=False)},
+        )
+    )
+
+    assert data["risk_level"] == "critical"
+    assert any("关键路径缺失：workspace" in item for item in data["findings"])
+    assert any("较大目录：data 2.0 GiB" in item for item in data["findings"])
+    assert "优先做只读空间定位" in data["safe_recommendations"][0]
+
+
 def test_assess_risk_decision_scores_findings_and_actions(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

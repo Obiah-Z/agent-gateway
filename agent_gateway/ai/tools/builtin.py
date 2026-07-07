@@ -1125,6 +1125,98 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def summarize_ops_health(health_json: str) -> str:
+        """把只读健康采集结果整理为风险等级、关键发现和安全建议。"""
+
+        if not health_json.strip():
+            return "Error: health_json is required"
+        data = json.loads(health_json)
+        if not isinstance(data, dict):
+            return "Error: health_json must be a JSON object"
+        if data.get("type") != "ops_readonly_health":
+            return "Error: health_json type must be ops_readonly_health"
+
+        disk = data.get("disk") or {}
+        if not isinstance(disk, dict):
+            disk = {}
+        paths = data.get("paths") or []
+        if not isinstance(paths, list):
+            paths = []
+        flags = _clean_strings(data.get("risk_flags") if isinstance(data.get("risk_flags"), list) else [])
+        usage_percent = float(disk.get("usage_percent") or 0)
+        missing_paths = [
+            str(row.get("name", "unknown"))
+            for row in paths
+            if isinstance(row, dict) and not row.get("exists")
+        ]
+        large_paths = [
+            {
+                "name": str(row.get("name", "unknown")),
+                "size": str(row.get("size", "0 B")),
+                "file_count": int(row.get("file_count") or 0),
+            }
+            for row in paths
+            if isinstance(row, dict) and int(row.get("size_bytes") or 0) >= 1024 * 1024 * 1024
+        ]
+
+        if "disk_critical" in flags or usage_percent >= 90 or missing_paths:
+            risk_level = "critical" if usage_percent >= 90 else "warning"
+        elif "disk_warning" in flags or usage_percent >= 80 or large_paths:
+            risk_level = "warning"
+        else:
+            risk_level = "normal"
+
+        findings = [
+            f"磁盘使用率 {usage_percent:.1f}%，可用空间 {disk.get('free', 'unknown')}。",
+        ]
+        if missing_paths:
+            findings.append(f"关键路径缺失：{', '.join(missing_paths)}。")
+        if large_paths:
+            findings.append(
+                "较大目录："
+                + "；".join(
+                    f"{row['name']} {row['size']} ({row['file_count']} files)"
+                    for row in large_paths[:4]
+                )
+                + "。"
+            )
+        if not flags and not missing_paths:
+            findings.append("未发现关键路径缺失或磁盘告警标记。")
+
+        recommendations = []
+        if usage_percent >= 90:
+            recommendations.append("优先做只读空间定位，确认大文件、日志和缓存来源。")
+        elif usage_percent >= 80:
+            recommendations.append("持续观察磁盘趋势，优先确认日志和构建产物增长。")
+        else:
+            recommendations.append("保持当前巡检频率，暂无紧急处理需求。")
+        if missing_paths:
+            recommendations.append("确认缺失路径是否由配置、挂载或部署模式变更导致。")
+        recommendations.append("所有清理、重启、改配置动作都需要用户手动确认。")
+
+        manual = [
+            "删除文件",
+            "清空日志",
+            "重启服务",
+            "修改配置",
+            "修改权限或提权",
+        ]
+
+        return json.dumps(
+            {
+                "type": "ops_health_summary",
+                "risk_level": risk_level,
+                "generated_at": data.get("generated_at", ""),
+                "project_root": data.get("project_root", ""),
+                "findings": findings,
+                "safe_recommendations": recommendations,
+                "manual_confirmation_required": manual,
+                "source_note": data.get("note", "只读采集结果。"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def assess_risk_decision(
         review_target: str,
         findings: list[dict[str, str]] | None = None,
@@ -1842,6 +1934,27 @@ def register_builtin_tools(
             },
             handler=ops_readonly_health,
             tags=("ops", "health", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="summarize_ops_health",
+            description=(
+                "Summarize ops_readonly_health JSON into risk level, findings, "
+                "safe recommendations, and actions requiring manual confirmation."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["health_json"],
+                "properties": {
+                    "health_json": {
+                        "type": "string",
+                        "description": "JSON string returned by ops_readonly_health.",
+                    }
+                },
+            },
+            handler=summarize_ops_health,
+            tags=("ops", "health", "summary", "read"),
         )
     )
     registry.register(

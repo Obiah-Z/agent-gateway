@@ -208,6 +208,7 @@
           "list_directory",
           "get_current_time",
           "ops_readonly_health",
+          "summarize_ops_health",
           "bash"
         ]
       },
