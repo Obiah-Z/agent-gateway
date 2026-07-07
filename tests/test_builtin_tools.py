@@ -746,6 +746,57 @@ def test_render_repo_analysis_markdown_can_be_saved_as_report(tmp_path: Path) ->
     assert "## 建议下一步" in content
 
 
+def test_render_github_repo_risk_markdown_formats_risk_scan(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    scan = {
+        "type": "github_repo_risk_scan",
+        "repository": "demo/risky",
+        "url": "https://github.com/demo/risky",
+        "intended_use": "学习 Agent 工具组织",
+        "risk_level": "high",
+        "decision": "hold",
+        "risk_items": [
+            {
+                "severity": "high",
+                "area": "license",
+                "issue": "许可证缺失或未识别。",
+                "impact": "复用边界不清晰。",
+                "mitigation": "复用前人工确认 LICENSE。",
+            }
+        ],
+        "dependency_files": ["requirements.txt", "package.json"],
+        "summary": {
+            "license": "unknown",
+            "archived": True,
+            "open_issues": 120,
+            "stars": 5,
+        },
+        "next_actions": ["复核许可证和 README。"],
+        "note": (
+            "这是基于 github_repo_summary 的轻量风险扫描，"
+            "不代表已经完成法律、安全或运行验证。"
+        ),
+    }
+
+    markdown = registry.dispatch(
+        "render_github_repo_risk_markdown",
+        {
+            "risk_scan_json": json.dumps(scan, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 仓库风险扫描：demo/risky")
+    assert "- 风险等级：high" in markdown
+    assert "- 建议决策：hold" in markdown
+    assert "| high | license | 许可证缺失或未识别。 | 复用边界不清晰。 | 复用前人工确认 LICENSE。 |" in markdown
+    assert "- requirements.txt" in markdown
+    assert "- package.json" in markdown
+    assert "- 复核许可证和 README。" in markdown
+    assert "```json" in markdown
+
+
 def test_render_research_evidence_markdown_formats_sources_and_gaps(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

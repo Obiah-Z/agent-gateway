@@ -1249,6 +1249,79 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_github_repo_risk_markdown(
+        risk_scan_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 repo-analyzer 的仓库风险扫描 JSON 渲染成正式 Markdown。"""
+
+        if not risk_scan_json.strip():
+            return "Error: risk_scan_json is required"
+        scan = json.loads(risk_scan_json)
+        if not isinstance(scan, dict):
+            return "Error: risk_scan_json must be a JSON object"
+        if scan.get("type") != "github_repo_risk_scan":
+            return "Error: risk_scan_json type must be github_repo_risk_scan"
+
+        repository = str(scan.get("repository") or "unknown/repository")
+        document_title = title.strip() or f"仓库风险扫描：{repository}"
+        summary_data = scan.get("summary") if isinstance(scan.get("summary"), dict) else {}
+        summary = "\n".join(
+            [
+                f"- 仓库：{repository}",
+                f"- 地址：{scan.get('url') or '未提供'}",
+                f"- 预期用途：{scan.get('intended_use') or '未说明'}",
+                f"- 风险等级：{scan.get('risk_level') or 'unknown'}",
+                f"- 建议决策：{scan.get('decision') or 'unknown'}",
+                f"- 许可证：{summary_data.get('license') or 'unknown'}",
+                f"- 是否归档：{'是' if summary_data.get('archived') else '否'}",
+                f"- Open Issues：{summary_data.get('open_issues', 0)}",
+                f"- Stars：{summary_data.get('stars', 0)}",
+            ]
+        )
+
+        risk_rows = []
+        for item in scan.get("risk_items") or []:
+            if not isinstance(item, dict):
+                continue
+            risk_rows.append(
+                [
+                    item.get("severity") or "unknown",
+                    item.get("area") or "unknown",
+                    item.get("issue") or "未说明",
+                    item.get("impact") or "待评估",
+                    item.get("mitigation") or "待补充",
+                ]
+            )
+        dependency_files = _clean_strings(
+            scan.get("dependency_files") if isinstance(scan.get("dependency_files"), list) else []
+        )
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(scan, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section(
+                    "风险项",
+                    _markdown_table(["级别", "领域", "问题", "影响", "建议"], risk_rows),
+                ),
+                _markdown_section("依赖文件信号", _markdown_bullets(dependency_files)),
+                _markdown_section("建议下一步", _markdown_bullets(scan.get("next_actions"))),
+                _markdown_section(
+                    "说明",
+                    str(scan.get("note") or "这是轻量风险扫描，不代表已经完成法律、安全或运行验证。"),
+                ),
+            ]
+        ) + metadata
+
     def render_research_evidence_markdown(
         evidence_json: str,
         title: str = "",
@@ -3183,6 +3256,35 @@ def register_builtin_tools(
             },
             handler=render_repo_analysis_markdown,
             tags=("document", "markdown", "github", "report"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_github_repo_risk_markdown",
+            description=(
+                "Render a github_repo_risk_scan JSON object from repo-analyzer into "
+                "a formal Chinese Markdown repository risk scan document."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["risk_scan_json"],
+                "properties": {
+                    "risk_scan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_risk_scan.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw risk scan metadata.",
+                    },
+                },
+            },
+            handler=render_github_repo_risk_markdown,
+            tags=("document", "markdown", "github", "risk"),
         )
     )
     registry.register(

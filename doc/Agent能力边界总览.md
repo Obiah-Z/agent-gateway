@@ -18,7 +18,7 @@
 
 `reviewer` 负责风险审查、发布门禁、计划门禁、协作路线门禁和证据复用门禁。`review_research_evidence_gate` 用于检查 research 证据包是否具备问题、结论、来源 URL、一手来源、关键事实、不确定点和时效说明；`review_agent_collaboration_gate` 用于检查入口 Agent 生成的多 Agent 协作路线是否具备目标、交接契约、阶段输出、约束和未自动执行声明。reviewer 不直接修改系统或执行高风险动作。
 
-`doc-writer` 负责正式 Markdown 成文。`render_research_evidence_markdown` 用于把 research 的证据包渲染为调研证据文档，`render_execution_record_markdown` 用于把 planner/reviewer 的结构化结果渲染为执行记录，`render_agent_collaboration_markdown` 用于把入口 Agent 生成的多 Agent 协作路线渲染为正式方案。它只表达路线和交接契约，不代表任何 Agent 已经自动执行。
+`doc-writer` 负责正式 Markdown 成文。`render_repo_analysis_markdown` 用于把 repo-analyzer 的仓库分析结果渲染为正式报告，`render_github_repo_risk_markdown` 用于把 `github_repo_risk_scan` 渲染为仓库风险扫描文档，`render_research_evidence_markdown` 用于把 research 的证据包渲染为调研证据文档，`render_execution_record_markdown` 用于把 planner/reviewer 的结构化结果渲染为执行记录，`render_agent_collaboration_markdown` 用于把入口 Agent 生成的多 Agent 协作路线渲染为正式方案。它只表达路线和交接契约，不代表任何 Agent 已经自动执行。
 
 ## 个人 Agent
 

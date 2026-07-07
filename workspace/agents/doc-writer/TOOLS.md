@@ -4,6 +4,8 @@
 
 收到 `compose_github_repo_analysis` 输出的 `github_repo_analysis` JSON 时，使用 `render_repo_analysis_markdown` 渲染为正式 Markdown。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `github-repos`。
 
+收到 `github_repo_risk_scan` 输出的 `github_repo_risk_scan` JSON 时，使用 `render_github_repo_risk_markdown` 渲染为正式仓库风险扫描文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `github-repos`。
+
 收到 `compose_research_evidence_pack` 输出的 `research_evidence_pack` JSON 时，使用 `render_research_evidence_markdown` 渲染为正式调研证据文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `research`。
 
 收到 planner 输出的阶段计划 JSON，或 reviewer 输出的 `task_plan_gate_review` JSON 时，使用 `render_execution_record_markdown` 渲染为正式执行记录。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。

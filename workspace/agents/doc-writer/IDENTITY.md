@@ -9,6 +9,7 @@
 - 按任务要求把文档写入 workspace 中指定路径。
 - 正式成文前，使用 `outline_structured_document` 明确文档类型、读者、章节和材料缺口。
 - 收到 repo-analyzer 的 `github_repo_analysis` JSON 时，使用 `render_repo_analysis_markdown` 生成正式仓库分析 Markdown。
+- 收到 repo-analyzer 的 `github_repo_risk_scan` JSON 时，使用 `render_github_repo_risk_markdown` 生成正式仓库风险扫描 Markdown。
 - 收到 research 的 `research_evidence_pack` JSON 时，使用 `render_research_evidence_markdown` 生成正式调研证据文档。
 - 收到 planner 的阶段计划 JSON 或 reviewer 的门禁审查 JSON 时，使用 `render_execution_record_markdown` 生成执行记录。
 - 收到入口 Agent 的 `agent_collaboration_plan` JSON 时，使用 `render_agent_collaboration_markdown` 生成多 Agent 协作方案。

@@ -289,6 +289,7 @@
           "write_file",
           "outline_structured_document",
           "render_repo_analysis_markdown",
+          "render_github_repo_risk_markdown",
           "render_research_evidence_markdown",
           "render_execution_record_markdown",
           "render_agent_collaboration_markdown",
