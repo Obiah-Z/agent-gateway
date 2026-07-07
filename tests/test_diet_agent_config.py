@@ -61,6 +61,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "build_collaboration_stage_handoff" in tools
     assert "summarize_collaboration_progress" in tools
     assert "compose_collaboration_final_summary" in tools
+    assert "format_collaboration_final_summary" in tools
     assert "list_agent_capabilities" in tools
     assert "format_agent_capability_catalog" in tools
     assert "match_agent_capability" in tools
@@ -86,6 +87,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "build_collaboration_stage_handoff" in combined_prompt
     assert "summarize_collaboration_progress" in combined_prompt
     assert "compose_collaboration_final_summary" in combined_prompt
+    assert "format_collaboration_final_summary" in combined_prompt
     assert "list_agent_capabilities" in combined_prompt
     assert "format_agent_capability_catalog" in combined_prompt
     assert "match_agent_capability" in combined_prompt
@@ -127,6 +129,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "build_collaboration_stage_handoff" in tools
         assert "summarize_collaboration_progress" in tools
         assert "compose_collaboration_final_summary" in tools
+        assert "format_collaboration_final_summary" in tools
         assert "plan_agent_collaboration" in tools
         assert "explain_agent_route" in tools
         assert "prepare_entry_route_response" in tools
@@ -139,6 +142,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "summarize_collaboration_progress" in identity
         assert "summarize_collaboration_progress" in soul
         assert "compose_collaboration_final_summary" in soul
+        assert "format_collaboration_final_summary" in soul
         assert "list_agent_capabilities" in identity
         assert "format_agent_capability_catalog" in identity
         assert "match_agent_capability" in identity
@@ -165,6 +169,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "build_collaboration_stage_handoff" in tools_md
         assert "summarize_collaboration_progress" in tools_md
         assert "compose_collaboration_final_summary" in tools_md
+        assert "format_collaboration_final_summary" in tools_md
         assert "list_agent_capabilities" in tools_md
         assert "format_agent_capability_catalog" in tools_md
         assert "match_agent_capability" in tools_md
@@ -636,6 +641,8 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "build_collaboration_stage_handoff" in tools["wework-entry"]
     assert "summarize_collaboration_progress" in tools["feishu-entry"]
     assert "summarize_collaboration_progress" in tools["wework-entry"]
+    assert "format_collaboration_final_summary" in tools["feishu-entry"]
+    assert "format_collaboration_final_summary" in tools["wework-entry"]
     assert "plan_agent_collaboration" in tools["feishu-entry"]
     assert "plan_agent_collaboration" in tools["wework-entry"]
     assert "explain_agent_route" in tools["feishu-entry"]
@@ -662,6 +669,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "build_collaboration_stage_handoff" not in tools[agent_id]
         assert "summarize_collaboration_progress" not in tools[agent_id]
         assert "compose_collaboration_final_summary" not in tools[agent_id]
+        assert "format_collaboration_final_summary" not in tools[agent_id]
         assert "plan_agent_collaboration" not in tools[agent_id]
         assert "explain_agent_route" not in tools[agent_id]
         assert "prepare_entry_route_response" not in tools[agent_id]
@@ -699,6 +707,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "build_collaboration_stage_handoff",
         "summarize_collaboration_progress",
         "compose_collaboration_final_summary",
+        "format_collaboration_final_summary",
         "list_agent_capabilities",
         "format_agent_capability_catalog",
         "match_agent_capability",

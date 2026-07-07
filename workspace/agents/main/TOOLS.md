@@ -114,7 +114,18 @@
 - 用户要求“总结结果”“给我最终结论”“汇总交付”时使用。
 - 必须传入原始 `agent_collaboration_plan`，并尽量传入 `completed_stage_outputs` 和 `agent_collaboration_progress`。
 - 输出的是 `agent_collaboration_final_summary` JSON，用于稳定表达最终结论、阶段摘要、未决项和下一步。
+- 输出给用户前，继续调用 `format_collaboration_final_summary`，不要直接把 JSON 原样发给用户。
 - 该工具不会重新执行任何 Agent，也不替代 doc-writer 生成正式文档。
+
+## `format_collaboration_final_summary`
+
+用于把 `agent_collaboration_final_summary` JSON 转成入口层可直接回复用户的中文摘要。
+
+使用规则：
+
+- 在 `compose_collaboration_final_summary` 之后使用。
+- 用户只要最终结论时，`include_stage_details` 可以设为 `false`；用户要复盘协作过程时保留阶段明细。
+- 输出仍然只是对已完成阶段结果的整理，不代表重新执行任何 Agent。
 
 ## `explain_agent_route`
 

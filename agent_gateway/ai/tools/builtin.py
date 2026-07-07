@@ -3435,6 +3435,67 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_collaboration_final_summary(
+        summary_json: str,
+        include_stage_details: bool = True,
+    ) -> str:
+        """把入口层协作最终摘要格式化成用户可读回复。"""
+
+        if not summary_json.strip():
+            return "Error: summary_json is required"
+        summary = json.loads(summary_json)
+        if not isinstance(summary, dict):
+            return "Error: summary_json must be a JSON object"
+        if summary.get("type") != "agent_collaboration_final_summary":
+            return "Error: summary_json type must be agent_collaboration_final_summary"
+
+        lines = [
+            "# 协作最终摘要",
+            "",
+            "## 最终结论",
+            str(summary.get("final_conclusion") or "缺少最终结论。").strip(),
+            "",
+            "## 状态",
+            f"- 任务类型：{summary.get('task_type') or 'unknown'}",
+            f"- 当前状态：{summary.get('status') or 'unknown'}",
+            f"- 完成阶段：{summary.get('completed_stage_count', 0)} / {summary.get('total_stage_count', 0)}",
+        ]
+
+        if include_stage_details:
+            stage_rows = []
+            for item in summary.get("stage_summaries") or []:
+                if not isinstance(item, dict):
+                    continue
+                stage_rows.append(
+                    [
+                        item.get("step") or "待定",
+                        item.get("agent_id") or "unknown",
+                        item.get("status") or "unknown",
+                        item.get("output_summary") or "暂无阶段输出。",
+                    ]
+                )
+            lines.extend(
+                [
+                    "",
+                    "## 阶段结果",
+                    _markdown_table(["步骤", "Agent", "状态", "摘要"], stage_rows),
+                ]
+            )
+
+        unresolved = _clean_strings(summary.get("unresolved_items"))
+        if unresolved:
+            lines.extend(["", "## 未决事项", _markdown_bullets(unresolved)])
+
+        lines.extend(["", "## 下一步", _markdown_bullets(summary.get("next_actions"))])
+        lines.extend(
+            [
+                "",
+                "## 边界",
+                str(summary.get("boundary") or "这是入口层最终摘要，不代表重新执行任何 Agent。").strip(),
+            ]
+        )
+        return "\n".join(lines).strip()
+
     def _agent_collaboration_route_templates() -> dict[str, list[dict[str, str]]]:
         """返回入口层可规划的多 Agent 协作路线模板。"""
 
@@ -6566,6 +6627,31 @@ def register_builtin_tools(
             },
             handler=compose_collaboration_final_summary,
             tags=("agent", "collaboration", "summary", "handoff", "entry"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_collaboration_final_summary",
+            description=(
+                "Format an agent_collaboration_final_summary JSON object into a concise "
+                "Chinese user-facing final reply."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["summary_json"],
+                "properties": {
+                    "summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_collaboration_final_summary.",
+                    },
+                    "include_stage_details": {
+                        "type": "boolean",
+                        "description": "Whether to include the stage result table.",
+                    },
+                },
+            },
+            handler=format_collaboration_final_summary,
+            tags=("agent", "collaboration", "summary", "format", "entry"),
         )
     )
     registry.register(

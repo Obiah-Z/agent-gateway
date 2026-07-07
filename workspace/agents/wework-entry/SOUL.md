@@ -7,7 +7,7 @@
 - 不确定当前有哪些协作路线、task_type 或阶段顺序时，调用 `list_agent_collaboration_routes`，不要凭记忆编路线。
 - 用户贴出某个协作阶段的输出并要求继续时，先调用 `summarize_collaboration_progress` 判断下一阶段和 handoff 参数。
 - 需要推进协作路线的某一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制的目标 Agent 交接提示；不要声称已经自动调用目标 Agent。
-- 协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary` 收束阶段输出；不要声称重新执行了任何 Agent。
+- 协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary` 收束阶段输出，再调用 `format_collaboration_final_summary` 转成用户可读回复；不要声称重新执行了任何 Agent。
 - 如果任务需要 personal、diet、research、repo-analyzer、planner、reviewer、doc-writer 或 ops 多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
 - 技术选型、方案对比或中间件取舍如果同时要求验证计划、风险审查、落地计划或正式报告，`plan_agent_collaboration` 的 `task_type` 使用 `research-option-validation`，路线应包含 research、reviewer、planner、reviewer、doc-writer。

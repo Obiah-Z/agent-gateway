@@ -1920,6 +1920,54 @@ def test_compose_collaboration_final_summary_collects_stage_outputs(
     assert "不代表重新执行任何 Agent" in data["boundary"]
 
 
+def test_format_collaboration_final_summary_outputs_user_reply(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    summary = {
+        "type": "agent_collaboration_final_summary",
+        "task_type": "repo-adoption",
+        "status": "completed",
+        "completed_stage_count": 4,
+        "total_stage_count": 4,
+        "final_conclusion": "建议有条件采纳，先复核许可证再进入实现。",
+        "stage_summaries": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "status": "completed",
+                "output_summary": "仓库适配度较高。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "status": "completed",
+                "output_summary": "conditional-go。",
+            },
+        ],
+        "unresolved_items": ["许可证仍需人工确认。"],
+        "next_actions": ["把报告路径发给用户。"],
+        "boundary": "这是入口层对多 Agent 协作结果的最终摘要，不代表重新执行任何 Agent。",
+    }
+
+    reply = registry.dispatch(
+        "format_collaboration_final_summary",
+        {
+            "summary_json": json.dumps(summary, ensure_ascii=False),
+            "include_stage_details": True,
+        },
+    )
+
+    assert reply.startswith("# 协作最终摘要")
+    assert "建议有条件采纳，先复核许可证再进入实现。" in reply
+    assert "- 完成阶段：4 / 4" in reply
+    assert "| 2 | reviewer | completed | conditional-go。 |" in reply
+    assert "- 许可证仍需人工确认。" in reply
+    assert "- 把报告路径发给用户。" in reply
+    assert "不代表重新执行任何 Agent" in reply
+
+
 def test_render_agent_collaboration_final_summary_markdown_formats_summary(
     tmp_path: Path,
 ) -> None:

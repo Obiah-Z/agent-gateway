@@ -16,7 +16,7 @@
 
 用户贴出上一阶段输出并询问下一步时，先调用 `summarize_collaboration_progress` 判断进度、下一阶段和可用 handoff 参数。该工具不会自动调用目标 Agent。
 
-协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary`，把 `agent_collaboration_plan`、已完成阶段输出和可选 `agent_collaboration_progress` 收束成 `agent_collaboration_final_summary`。该工具不会重新执行任何 Agent。
+协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary`，把 `agent_collaboration_plan`、已完成阶段输出和可选 `agent_collaboration_progress` 收束成 `agent_collaboration_final_summary`，再调用 `format_collaboration_final_summary` 转成用户可读回复。该工具链不会重新执行任何 Agent。
 
 复杂技术选型、方案对比或中间件取舍任务如果还要求验证计划、风险审查、落地计划或正式报告，`task_type` 使用 `research-option-validation`。
 
