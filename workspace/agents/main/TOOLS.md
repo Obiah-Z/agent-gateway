@@ -103,7 +103,18 @@
 - 用户说“上一阶段完成了 / 继续下一步 / 接下来交给谁”时使用。
 - `completed_stage_outputs` 里每项至少包含 `step` 或 `stage`，以及 `summary`、`output_summary`、`result`、`json` 或 `payload`。
 - 工具会返回 `next_stage` 和可直接传给 `build_collaboration_stage_handoff` 的 `next_handoff_args`。
+- 输出给用户前，继续调用 `format_collaboration_progress`，不要直接把 JSON 原样发给用户。
 - 输出只是进度摘要，不代表任何 Agent 已经执行。
+
+## `format_collaboration_progress`
+
+用于把 `agent_collaboration_progress` JSON 转成入口层可直接回复用户的中文进度摘要。
+
+使用规则：
+
+- 在 `summarize_collaboration_progress` 之后使用。
+- 用户只问“下一步是谁”时，`include_stage_details` 可以设为 `false`；用户要复盘路线时保留阶段明细。
+- 输出仍然只是进度说明，不代表已经调用下一阶段 Agent。
 
 ## `compose_collaboration_final_summary`
 

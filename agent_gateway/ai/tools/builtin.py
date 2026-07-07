@@ -3342,6 +3342,68 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_collaboration_progress(
+        progress_json: str,
+        include_stage_details: bool = True,
+    ) -> str:
+        """把入口层协作进度摘要格式化成用户可读回复。"""
+
+        if not progress_json.strip():
+            return "Error: progress_json is required"
+        progress = json.loads(progress_json)
+        if not isinstance(progress, dict):
+            return "Error: progress_json must be a JSON object"
+        if progress.get("type") != "agent_collaboration_progress":
+            return "Error: progress_json type must be agent_collaboration_progress"
+
+        next_stage = progress.get("next_stage") if isinstance(progress.get("next_stage"), dict) else {}
+        next_stage_line = (
+            f"第 {next_stage.get('step')} 阶段交给 `{next_stage.get('agent_id') or 'unknown'}`："
+            f"{next_stage.get('purpose') or '按职责处理'}"
+            if next_stage
+            else "协作路线已完成。"
+        )
+        lines = [
+            "# 协作进度摘要",
+            "",
+            "## 当前状态",
+            f"- 任务类型：{progress.get('task_type') or 'unknown'}",
+            f"- 当前状态：{progress.get('status') or 'unknown'}",
+            f"- 完成阶段：{progress.get('completed_stage_count', 0)} / {progress.get('total_stage_count', 0)}",
+            f"- 下一阶段：{next_stage_line}",
+        ]
+
+        if include_stage_details:
+            stage_rows = []
+            for item in progress.get("stages") or []:
+                if not isinstance(item, dict):
+                    continue
+                stage_rows.append(
+                    [
+                        item.get("step") or "待定",
+                        item.get("agent_id") or "unknown",
+                        item.get("status") or "unknown",
+                        item.get("output_summary") or item.get("expected_output") or "暂无",
+                    ]
+                )
+            lines.extend(
+                [
+                    "",
+                    "## 阶段进度",
+                    _markdown_table(["步骤", "Agent", "状态", "摘要"], stage_rows),
+                ]
+            )
+
+        lines.extend(["", "## 下一步", _markdown_bullets(progress.get("next_actions"))])
+        lines.extend(
+            [
+                "",
+                "## 边界",
+                str(progress.get("boundary") or "这是协作进度摘要，不代表任何 Agent 已经自动执行。").strip(),
+            ]
+        )
+        return "\n".join(lines).strip()
+
     def compose_collaboration_final_summary(
         collaboration_plan_json: str,
         completed_stage_outputs: list[dict[str, Any]] | None = None,
@@ -6591,6 +6653,31 @@ def register_builtin_tools(
             },
             handler=summarize_collaboration_progress,
             tags=("agent", "collaboration", "progress", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_collaboration_progress",
+            description=(
+                "Format an agent_collaboration_progress JSON object into a concise "
+                "Chinese user-facing progress reply."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["progress_json"],
+                "properties": {
+                    "progress_json": {
+                        "type": "string",
+                        "description": "JSON string returned by summarize_collaboration_progress.",
+                    },
+                    "include_stage_details": {
+                        "type": "boolean",
+                        "description": "Whether to include the stage progress table.",
+                    },
+                },
+            },
+            handler=format_collaboration_progress,
+            tags=("agent", "collaboration", "progress", "format", "entry"),
         )
     )
     registry.register(

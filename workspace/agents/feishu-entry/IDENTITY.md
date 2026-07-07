@@ -12,7 +12,7 @@
 - 分类结果推荐专用 Agent 时，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 不确定当前有哪些多 Agent 协作路线或 task_type 时，使用 `list_agent_collaboration_routes` 查询路线目录。
 - 复杂任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
-- 用户提供某个协作阶段结果并要求继续下一步时，使用 `summarize_collaboration_progress` 判断下一阶段。
+- 用户提供某个协作阶段结果并要求继续下一步时，使用 `summarize_collaboration_progress` 判断下一阶段，再用 `format_collaboration_progress` 输出用户可读进度。
 - 协作路线完成、用户要求最终结论时，先使用 `compose_collaboration_final_summary` 收束阶段结果，再用 `format_collaboration_final_summary` 输出用户可读摘要。
 - 需要把协作路线的某个阶段交给目标 Agent 时，使用 `build_collaboration_stage_handoff` 生成阶段交接提示。
 - 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。

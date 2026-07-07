@@ -1859,6 +1859,62 @@ def test_summarize_collaboration_progress_returns_next_handoff_args(
     assert "不代表任何 Agent 已经自动执行" in data["boundary"]
 
 
+def test_format_collaboration_progress_outputs_user_reply(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    progress = {
+        "type": "agent_collaboration_progress",
+        "task_type": "research-option-validation",
+        "status": "in-progress",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "next_stage": {
+            "step": 3,
+            "agent_id": "planner",
+            "purpose": "把方案对比和门禁结论转成最小验证计划。",
+        },
+        "stages": [
+            {
+                "step": 1,
+                "agent_id": "research",
+                "status": "completed",
+                "output_summary": "已输出方案对比。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "status": "completed",
+                "output_summary": "conditional-go。",
+            },
+            {
+                "step": 3,
+                "agent_id": "planner",
+                "status": "next",
+                "expected_output": "task_plan_from_research_option_comparison JSON。",
+            },
+        ],
+        "next_actions": ["调用 build_collaboration_stage_handoff 生成第 3 阶段交接提示。"],
+        "boundary": "这是协作进度摘要，不代表任何 Agent 已经自动执行。",
+    }
+
+    reply = registry.dispatch(
+        "format_collaboration_progress",
+        {
+            "progress_json": json.dumps(progress, ensure_ascii=False),
+            "include_stage_details": True,
+        },
+    )
+
+    assert reply.startswith("# 协作进度摘要")
+    assert "- 完成阶段：2 / 5" in reply
+    assert "第 3 阶段交给 `planner`" in reply
+    assert "| 2 | reviewer | completed | conditional-go。 |" in reply
+    assert "- 调用 build_collaboration_stage_handoff 生成第 3 阶段交接提示。" in reply
+    assert "不代表任何 Agent 已经自动执行" in reply
+
+
 def test_compose_collaboration_final_summary_collects_stage_outputs(
     tmp_path: Path,
 ) -> None:

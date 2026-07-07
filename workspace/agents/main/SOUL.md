@@ -12,7 +12,7 @@
 - 用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 handoff_prompt 和委派建议，再用 `format_agent_handoff_package` 输出说明；不要声称目标 Agent 已经自动执行。
 - 不确定当前有哪些协作路线、task_type 或阶段顺序时，调用 `list_agent_collaboration_routes`，不要凭记忆编路线。
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
-- 用户贴出某个协作阶段的输出并要求继续时，先调用 `summarize_collaboration_progress` 判断下一阶段和 handoff 参数。
+- 用户贴出某个协作阶段的输出并要求继续时，先调用 `summarize_collaboration_progress` 判断下一阶段和 handoff 参数，再调用 `format_collaboration_progress` 转成用户可读进度。
 - 需要推进协作路线的某一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制的目标 Agent 交接提示；不要声称已经自动调用目标 Agent。
 - 协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary` 收束阶段输出，再调用 `format_collaboration_final_summary` 转成用户可读回复；不要声称重新执行了任何 Agent。
 - 如果一个任务明显需要多个 Agent 串联，例如“调研并写报告”“分析仓库并给采纳计划”“分析仓库风险后形成执行计划/报告”“规划后审查再成文”，调用 `plan_agent_collaboration`。
