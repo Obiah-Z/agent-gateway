@@ -12,7 +12,7 @@
 
 `research` 负责联网检索、来源核验和证据包沉淀。新增的 `compose_research_evidence_pack` 用于把来源、关键事实、不确定点和下游用途整理成可复用材料。
 
-`repo-analyzer` 负责 GitHub 仓库分析、Gateway 适配评估和采纳路线图，不负责正式文档成文和任务执行。
+`repo-analyzer` 负责 GitHub 仓库分析、Gateway 适配评估、轻量风险扫描和采纳路线图。`github_repo_risk_scan` 用于检查许可证、维护状态、README 证据、issue 数和依赖文件信号；repo-analyzer 不负责正式文档成文和任务执行。
 
 `planner` 负责阶段计划、执行拆解、采纳计划转换和协作路线转换。`adapt_collaboration_plan_to_task_plan` 用于把入口 Agent 的 `agent_collaboration_plan` 转成可落盘的阶段计划，明确每一阶段交给哪个 Agent、输入依据、输出和完成标准，但不自动调用任何 Agent。
 

@@ -247,6 +247,148 @@ def assess_gateway_repo_fit(
     }
 
 
+def scan_github_repo_risks(
+    repo_summary: dict[str, Any],
+    *,
+    intended_use: str = "",
+) -> dict[str, Any]:
+    """基于仓库摘要生成引入前风险清单。"""
+
+    repository = str(repo_summary.get("repository") or "").strip()
+    license_id = str(repo_summary.get("license") or "").strip()
+    open_issues = _as_int(repo_summary.get("open_issues"))
+    stars = _as_int(repo_summary.get("stars"))
+    archived = bool(repo_summary.get("archived"))
+    readme = repo_summary.get("readme") if isinstance(repo_summary.get("readme"), dict) else {}
+    tree_paths = [
+        str(item.get("path") or "").lower()
+        for item in repo_summary.get("tree") or []
+        if isinstance(item, dict)
+    ]
+
+    risk_items: list[dict[str, str]] = []
+    if archived:
+        risk_items.append(
+            {
+                "severity": "high",
+                "area": "maintenance",
+                "issue": "仓库已归档。",
+                "impact": "不适合直接作为 Gateway 运行依赖，后续安全修复和兼容性维护不可预期。",
+                "mitigation": "只作为设计参考；如需采用，先寻找活跃 fork 或替代实现。",
+            }
+        )
+    if not license_id:
+        risk_items.append(
+            {
+                "severity": "high",
+                "area": "license",
+                "issue": "许可证缺失或未识别。",
+                "impact": "代码、提示词或文档片段的复用边界不清晰。",
+                "mitigation": "复用前人工确认 LICENSE、README 授权说明或联系作者。",
+            }
+        )
+    if readme.get("error") or not str(readme.get("excerpt") or "").strip():
+        risk_items.append(
+            {
+                "severity": "medium",
+                "area": "evidence",
+                "issue": "README 读取失败或内容不足。",
+                "impact": "项目目标、使用方式和边界证据不足，容易误判仓库价值。",
+                "mitigation": "补充读取 README、docs 或关键源码后再形成结论。",
+            }
+        )
+    if open_issues >= 100:
+        risk_items.append(
+            {
+                "severity": "medium",
+                "area": "maintenance",
+                "issue": f"未关闭 issue 较多：{open_issues}。",
+                "impact": "可能存在维护压力、质量问题或用户反馈积压。",
+                "mitigation": "抽样查看最近 issue、PR 和 release，判断是否仍在维护。",
+            }
+        )
+    dependency_files = [
+        path
+        for path in tree_paths
+        if path.endswith(
+            (
+                "requirements.txt",
+                "pyproject.toml",
+                "package.json",
+                "pnpm-lock.yaml",
+                "package-lock.json",
+                "go.mod",
+                "cargo.toml",
+            )
+        )
+    ]
+    if dependency_files:
+        risk_items.append(
+            {
+                "severity": "low",
+                "area": "dependencies",
+                "issue": "仓库包含依赖清单：" + "、".join(dependency_files[:4]) + "。",
+                "impact": "如要运行或移植，需要额外评估依赖体积、许可证和安全更新。",
+                "mitigation": "先只阅读设计；运行前用隔离环境和锁定依赖做验证。",
+            }
+        )
+    if stars < 10 and not archived:
+        risk_items.append(
+            {
+                "severity": "low",
+                "area": "adoption",
+                "issue": f"社区信号较少：{stars} stars。",
+                "impact": "项目可能较新或使用者较少，资料和问题反馈有限。",
+                "mitigation": "降低采纳优先级，先做轻量阅读和小样本验证。",
+            }
+        )
+
+    high_count = sum(1 for item in risk_items if item["severity"] == "high")
+    medium_count = sum(1 for item in risk_items if item["severity"] == "medium")
+    if high_count:
+        decision = "hold"
+        risk_level = "high"
+    elif medium_count:
+        decision = "conditional"
+        risk_level = "medium"
+    elif risk_items:
+        decision = "watch"
+        risk_level = "low"
+    else:
+        decision = "pass"
+        risk_level = "low"
+
+    next_actions = [
+        "复核许可证和 README，区分可直接复用、仅可学习和不可复用内容。",
+        "只把明确安全的设计思想转成 Gateway 小实验，不直接复制未知依赖。",
+    ]
+    if dependency_files:
+        next_actions.append("如需运行仓库，先在隔离环境检查依赖和启动成本。")
+    if intended_use.strip():
+        next_actions.insert(0, f"围绕预期用途「{intended_use.strip()}」复核风险是否可接受。")
+
+    return {
+        "type": "github_repo_risk_scan",
+        "repository": repository,
+        "url": repo_summary.get("url", ""),
+        "intended_use": intended_use.strip(),
+        "risk_level": risk_level,
+        "decision": decision,
+        "risk_items": risk_items,
+        "dependency_files": dependency_files[:12],
+        "summary": {
+            "license": license_id or "unknown",
+            "archived": archived,
+            "open_issues": open_issues,
+            "stars": stars,
+            "pushed_at": repo_summary.get("pushed_at", ""),
+            "updated_at": repo_summary.get("updated_at", ""),
+        },
+        "next_actions": next_actions[:6],
+        "note": "这是基于 github_repo_summary 的轻量风险扫描，不代表已经完成法律、安全或运行验证。",
+    }
+
+
 def compose_repo_analysis(
     repo_summary: dict[str, Any],
     gateway_fit: dict[str, Any] | None = None,
@@ -500,6 +642,18 @@ def register_github_repo_tools(
         assessment = assess_gateway_repo_fit(data, focus=focus or [])
         return json.dumps(assessment, ensure_ascii=False, indent=2)
 
+    def github_repo_risk_scan(
+        repo_summary_json: str,
+        intended_use: str = "",
+    ) -> str:
+        if not repo_summary_json.strip():
+            return "Error: repo_summary_json is required"
+        data = json.loads(repo_summary_json)
+        if not isinstance(data, dict):
+            return "Error: repo_summary_json must be a JSON object"
+        scan = scan_github_repo_risks(data, intended_use=intended_use)
+        return json.dumps(scan, ensure_ascii=False, indent=2)
+
     def compose_github_repo_analysis(
         repo_summary_json: str,
         gateway_fit_json: str = "",
@@ -602,6 +756,31 @@ def register_github_repo_tools(
             },
             handler=github_repo_gateway_fit,
             tags=("github", "repository", "analysis"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="github_repo_risk_scan",
+            description=(
+                "Scan a GitHub repository summary for adoption risks: license, archived state, "
+                "README evidence, issue volume, dependency files, and next validation actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["repo_summary_json"],
+                "properties": {
+                    "repo_summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_summary.",
+                    },
+                    "intended_use": {
+                        "type": "string",
+                        "description": "How Gateway intends to reuse or learn from this repository.",
+                    },
+                },
+            },
+            handler=github_repo_risk_scan,
+            tags=("github", "repository", "risk", "analysis"),
         )
     )
     registry.register(

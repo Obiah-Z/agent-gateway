@@ -9,6 +9,7 @@ from agent_gateway.ai.tools.github_repo import (
     plan_repo_adoption,
     parse_github_repo,
     register_github_repo_tools,
+    scan_github_repo_risks,
 )
 from agent_gateway.ai.tools.registry import ToolRegistry
 
@@ -182,6 +183,77 @@ def test_github_repo_gateway_fit_tool_uses_summary_json() -> None:
     assert fit["repository"] == "demo/repo"
     assert fit["priority"] in {"medium", "high"}
     assert "next_steps" in fit
+
+
+def test_scan_github_repo_risks_flags_license_archive_and_dependencies() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="risky",
+        repo_data={
+            "html_url": "https://github.com/demo/risky",
+            "description": "old agent project",
+            "language": "Python",
+            "topics": ["agent"],
+            "stargazers_count": 5,
+            "open_issues_count": 120,
+            "license": None,
+            "archived": True,
+        },
+        readme={"name": "README.md", "path": "README.md", "content": "", "error": "not found"},
+        tree=[
+            {"path": "requirements.txt", "type": "blob", "size": 200},
+            {"path": "package.json", "type": "blob", "size": 500},
+        ],
+    )
+
+    scan = scan_github_repo_risks(summary, intended_use="学习 Agent 工具组织")
+
+    assert scan["type"] == "github_repo_risk_scan"
+    assert scan["repository"] == "demo/risky"
+    assert scan["risk_level"] == "high"
+    assert scan["decision"] == "hold"
+    assert scan["dependency_files"] == ["requirements.txt", "package.json"]
+    assert scan["summary"]["license"] == "unknown"
+    assert any(item["area"] == "license" and item["severity"] == "high" for item in scan["risk_items"])
+    assert any(item["area"] == "maintenance" for item in scan["risk_items"])
+    assert scan["next_actions"][0] == "围绕预期用途「学习 Agent 工具组织」复核风险是否可接受。"
+
+
+def test_github_repo_risk_scan_tool_outputs_stable_json() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="safe",
+        repo_data={
+            "html_url": "https://github.com/demo/safe",
+            "description": "Agent workflow templates",
+            "language": "Markdown",
+            "topics": ["agent", "workflow"],
+            "stargazers_count": 300,
+            "open_issues_count": 2,
+            "license": {"spdx_id": "MIT"},
+            "archived": False,
+        },
+        readme={"name": "README.md", "path": "README.md", "content": "workflow docs", "error": ""},
+        tree=[{"path": "README.md", "type": "blob", "size": 200}],
+    )
+    registry = ToolRegistry()
+    register_github_repo_tools(registry, client=object())
+
+    scan = json.loads(
+        registry.dispatch(
+            "github_repo_risk_scan",
+            {
+                "repo_summary_json": json.dumps(summary, ensure_ascii=False),
+                "intended_use": "参考 workflow 文档结构",
+            },
+        )
+    )
+
+    assert scan["type"] == "github_repo_risk_scan"
+    assert scan["risk_level"] == "low"
+    assert scan["decision"] == "pass"
+    assert scan["risk_items"] == []
+    assert scan["summary"]["license"] == "MIT"
 
 
 def test_compose_repo_analysis_combines_summary_fit_and_findings() -> None:

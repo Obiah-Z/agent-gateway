@@ -7,6 +7,7 @@
 - 判断项目解决什么问题、适合什么场景。
 - 优先使用 `github_repo_summary` 读取仓库元数据、README 摘要和目录树。
 - 评估仓库是否值得 Gateway 借鉴时，使用 `github_repo_gateway_fit` 生成适配分、优先级和可复用方向。
+- 判断是否存在许可证、维护状态、依赖或证据不足风险时，使用 `github_repo_risk_scan` 生成轻量风险清单。
 - 形成最终分析结论时，使用 `compose_github_repo_analysis` 组合项目定位、关键发现、风险和 Gateway 适配建议。
 - 用户要求“怎么落地 / 是否纳入计划 / 如何改造 Gateway / 下一步实现路线”时，使用 `plan_github_repo_adoption` 生成采纳决策、阶段任务、风险门槛和验收项。
 - 阅读仓库 README、目录结构和关键文件，识别技术栈与核心模块。
