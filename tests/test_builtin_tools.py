@@ -511,6 +511,84 @@ def test_review_agent_collaboration_gate_blocks_missing_contracts(tmp_path: Path
     assert "明确说明该结果只生成协作路线，不代表任何 Agent 已经执行。" in data["next_actions"]
 
 
+def test_review_research_evidence_gate_allows_verified_pack(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    evidence = {
+        "type": "research_evidence_pack",
+        "topic": "Redis 看门狗",
+        "research_question": "是否适合 Gateway session lane？",
+        "conclusion": "可作为长任务锁续期候选。",
+        "evidence_quality": "strong",
+        "primary_source_count": 1,
+        "sources": [
+            {
+                "title": "Redisson Docs",
+                "url": "https://redisson.org/docs/data-and-services/locks-and-synchronizers/",
+                "source_type": "docs",
+                "fact": "Redisson watchdog 会自动续期锁。",
+            },
+            {
+                "title": "Redis SET",
+                "url": "https://redis.io/docs/latest/commands/set/",
+                "source_type": "docs",
+                "fact": "锁需要唯一值和过期时间。",
+            },
+        ],
+        "key_facts": ["锁续期适合模型调用耗时不可预测场景。"],
+        "source_conflicts": [],
+        "uncertainty": [],
+        "freshness": "2026-07-07 检索。",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_research_evidence_gate",
+            {"evidence_json": json.dumps(evidence, ensure_ascii=False), "time_sensitive": True},
+        )
+    )
+
+    assert data["type"] == "research_evidence_gate_review"
+    assert data["decision"] == "go"
+    assert data["source_count"] == 2
+    assert data["primary_source_count"] == 1
+    assert all(item["passed"] for item in data["checklist"])
+    assert data["next_actions"] == ["证据包可交给 doc-writer、planner 或 reviewer 继续复用。"]
+
+
+def test_review_research_evidence_gate_blocks_weak_pack(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    evidence = {
+        "type": "research_evidence_pack",
+        "topic": "未知方案",
+        "research_question": "能不能用？",
+        "conclusion": "",
+        "evidence_quality": "missing",
+        "sources": [{"title": "没有链接的来源", "source_type": "blog", "fact": "只是一句描述。"}],
+        "key_facts": [],
+        "uncertainty": ["缺少来源。"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_research_evidence_gate",
+            {
+                "evidence_json": json.dumps(evidence, ensure_ascii=False),
+                "min_sources": 2,
+                "require_primary_source": True,
+                "time_sensitive": True,
+            },
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    assert len([item for item in data["checklist"] if not item["passed"]]) >= 3
+    assert "为每个来源补充可访问 URL。" in data["next_actions"]
+    assert "补充官方文档、论文或一手资料来源。" in data["next_actions"]
+    assert "补充检索日期、发布时间或最后更新时间。" in data["next_actions"]
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

@@ -357,6 +357,7 @@
           "review_release_gate",
           "review_task_plan_gate",
           "review_agent_collaboration_gate",
+          "review_research_evidence_gate",
           "save_review_report",
           "save_markdown_report"
         ]

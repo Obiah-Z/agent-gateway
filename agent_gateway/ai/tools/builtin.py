@@ -989,6 +989,126 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_research_evidence_gate(
+        evidence_json: str = "",
+        review_target: str = "",
+        min_sources: int = 2,
+        require_primary_source: bool = True,
+        time_sensitive: bool = False,
+    ) -> str:
+        """审查 research 证据包是否足够交给下游 Agent 复用。"""
+
+        evidence: dict[str, Any] = {}
+        if evidence_json.strip():
+            parsed = json.loads(evidence_json)
+            if not isinstance(parsed, dict):
+                return "Error: evidence_json must be a JSON object"
+            evidence = parsed
+        target = review_target.strip() or str(evidence.get("topic") or evidence.get("research_question") or "").strip()
+        sources = evidence.get("sources") if isinstance(evidence.get("sources"), list) else []
+        source_count = len([source for source in sources if isinstance(source, dict)])
+        primary_count = int(evidence.get("primary_source_count") or 0)
+        if primary_count <= 0:
+            primary_count = sum(
+                1
+                for source in sources
+                if isinstance(source, dict)
+                and str(source.get("source_type") or "").lower() in {"official", "docs", "paper", "primary", "官方", "论文"}
+            )
+        urls = [
+            str(source.get("url") or "").strip()
+            for source in sources
+            if isinstance(source, dict) and str(source.get("url") or "").strip()
+        ]
+        key_facts = _clean_strings(evidence.get("key_facts") if isinstance(evidence.get("key_facts"), list) else [])
+        conflicts = _clean_strings(evidence.get("source_conflicts") if isinstance(evidence.get("source_conflicts"), list) else [])
+        uncertainty = _clean_strings(evidence.get("uncertainty") if isinstance(evidence.get("uncertainty"), list) else [])
+        quality = str(evidence.get("evidence_quality") or "").strip().lower()
+        freshness = str(evidence.get("freshness") or "").strip()
+
+        checklist = [
+            {
+                "item": "调研问题和结论已明确",
+                "passed": bool(target) and bool(str(evidence.get("conclusion") or "").strip()),
+                "evidence": str(evidence.get("conclusion") or "缺少 conclusion。").strip(),
+            },
+            {
+                "item": "来源数量达到门槛",
+                "passed": source_count >= max(1, min_sources),
+                "evidence": f"来源数量：{source_count}，要求至少：{max(1, min_sources)}。",
+            },
+            {
+                "item": "来源 URL 可核验",
+                "passed": len(urls) == source_count and source_count > 0,
+                "evidence": f"可核验 URL 数量：{len(urls)}。",
+            },
+            {
+                "item": "一手来源满足要求",
+                "passed": (not require_primary_source) or primary_count > 0,
+                "evidence": f"一手来源数量：{primary_count}。",
+            },
+            {
+                "item": "关键事实已摘录",
+                "passed": bool(key_facts),
+                "evidence": "；".join(key_facts[:3]) if key_facts else "缺少 key_facts。",
+            },
+            {
+                "item": "冲突和不确定点已标注",
+                "passed": quality not in {"missing", ""} and (not conflicts or bool(uncertainty) or quality == "limited"),
+                "evidence": "；".join([*conflicts[:2], *uncertainty[:2]]) or f"evidence_quality={quality or 'missing'}。",
+            },
+            {
+                "item": "时效信息已说明",
+                "passed": (not time_sensitive) or bool(freshness),
+                "evidence": freshness or "缺少 freshness。",
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed or quality in {"limited", "medium"}:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        next_actions = []
+        for item in failed:
+            if item["item"] == "时效信息已说明":
+                next_actions.append("补充检索日期、发布时间或最后更新时间。")
+        for item in failed:
+            if item["item"] == "调研问题和结论已明确":
+                next_actions.append("补充 research_question/topic 和 conclusion。")
+            elif item["item"] == "来源数量达到门槛":
+                next_actions.append(f"补充至少 {max(1, min_sources)} 个可交叉验证来源。")
+            elif item["item"] == "来源 URL 可核验":
+                next_actions.append("为每个来源补充可访问 URL。")
+            elif item["item"] == "一手来源满足要求":
+                next_actions.append("补充官方文档、论文或一手资料来源。")
+            elif item["item"] == "关键事实已摘录":
+                next_actions.append("从来源中摘录可复用 key_facts。")
+            elif item["item"] == "冲突和不确定点已标注":
+                next_actions.append("标注来源冲突、不确定点或证据质量限制。")
+        if not next_actions:
+            next_actions.append("证据包可交给 doc-writer、planner 或 reviewer 继续复用。")
+
+        return json.dumps(
+            {
+                "type": "research_evidence_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "evidence_quality": quality or "missing",
+                "source_count": source_count,
+                "primary_source_count": primary_count,
+                "risks": [*conflicts[:4], *uncertainty[:4]],
+                "next_actions": next_actions[:6],
+                "note": "这是 research 证据包复用前门禁审查，不代表事实已经永久有效。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -2843,6 +2963,31 @@ def register_builtin_tools(
             },
             handler=review_agent_collaboration_gate,
             tags=("review", "agent", "collaboration", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_research_evidence_gate",
+            description=(
+                "Review whether a research_evidence_pack is reliable enough for "
+                "downstream reuse: question, conclusion, source count, URLs, primary "
+                "sources, key facts, uncertainty, freshness, and go/conditional-go/no-go decision."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "evidence_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_evidence_pack.",
+                    },
+                    "review_target": {"type": "string"},
+                    "min_sources": {"type": "integer"},
+                    "require_primary_source": {"type": "boolean"},
+                    "time_sensitive": {"type": "boolean"},
+                },
+            },
+            handler=review_research_evidence_gate,
+            tags=("review", "research", "evidence", "gate", "risk"),
         )
     )
     registry.register(

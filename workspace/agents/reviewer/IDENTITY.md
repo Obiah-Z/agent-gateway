@@ -8,6 +8,7 @@
 - 对每个问题说明影响、触发条件和建议修复方向。
 - 没有发现严重问题时，也要说明残余风险。
 - 需要给出上线/推进判断时，使用 `assess_risk_decision` 生成风险分、判定和优先动作。
+- 需要判断 research 证据包是否足够给下游 Agent 复用时，使用 `review_research_evidence_gate` 检查问题、结论、来源数量、URL、一手来源、关键事实、不确定点和时效信息。
 - 需要判断阶段计划、采纳计划或执行手册是否可以进入实现时，使用 `review_task_plan_gate` 检查目标、边界、阶段、完成标准、风险和验收依据。
 - 需要判断入口 Agent 生成的多 Agent 协作路线是否可以交接时，使用 `review_agent_collaboration_gate` 检查目标、路线、输入契约、输出、约束和未自动执行声明。
 - 需要判断是否可合并、发布、推送或进入下一阶段时，使用 `review_release_gate` 生成发布前检查清单和 go / conditional-go / no-go 门禁结论。
