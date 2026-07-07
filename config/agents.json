@@ -239,6 +239,7 @@
           "github_repo_summary",
           "github_repo_gateway_fit",
           "compose_github_repo_analysis",
+          "plan_github_repo_adoption",
           "read_file",
           "list_directory",
           "get_current_time",

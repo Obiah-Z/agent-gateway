@@ -187,6 +187,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     )
     assert "github_repo_gateway_fit" in tools["repo-analyzer"]
     assert "compose_github_repo_analysis" in tools["repo-analyzer"]
+    assert "plan_github_repo_adoption" in tools["repo-analyzer"]
     assert {
         "read_file",
         "list_directory",
@@ -292,6 +293,9 @@ def test_repo_analyzer_has_gateway_fit_tool_and_prompt() -> None:
     assert "compose_github_repo_analysis" in identity
     assert "compose_github_repo_analysis" in soul
     assert "compose_github_repo_analysis" in tools_md
+    assert "plan_github_repo_adoption" in identity
+    assert "plan_github_repo_adoption" in soul
+    assert "plan_github_repo_adoption" in tools_md
     assert "github_repo_summary" in tools_md
 
 

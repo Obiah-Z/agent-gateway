@@ -321,6 +321,133 @@ def compose_repo_analysis(
     }
 
 
+def plan_repo_adoption(
+    repo_analysis: dict[str, Any],
+    *,
+    adoption_goal: str = "",
+    max_stages: int = 4,
+) -> dict[str, Any]:
+    """把仓库分析结论转成 Gateway 可执行的采纳路线图。"""
+
+    if repo_analysis.get("type") != "github_repo_analysis":
+        raise ValueError("repo_analysis type must be github_repo_analysis")
+    gateway_fit = repo_analysis.get("gateway_fit") if isinstance(repo_analysis.get("gateway_fit"), dict) else {}
+    score = _as_int(gateway_fit.get("score"))
+    priority = str(gateway_fit.get("priority") or "unknown")
+    risks = [str(item).strip() for item in repo_analysis.get("risks") or [] if str(item).strip()]
+    reuse_ideas = [
+        str(item).strip()
+        for item in repo_analysis.get("gateway_reuse_ideas") or []
+        if str(item).strip()
+    ]
+    recommendations = [
+        str(item).strip()
+        for item in repo_analysis.get("recommendations") or []
+        if str(item).strip()
+    ]
+    decision = _adoption_decision(score, priority, risks)
+    stages = _adoption_stages(
+        reuse_ideas=reuse_ideas,
+        recommendations=recommendations,
+        max_stages=max_stages,
+    )
+    return {
+        "type": "github_repo_adoption_plan",
+        "repository": repo_analysis.get("repository", ""),
+        "url": repo_analysis.get("url", ""),
+        "adoption_goal": adoption_goal.strip() or repo_analysis.get("analysis_goal", ""),
+        "decision": decision,
+        "fit": {
+            "score": score,
+            "priority": priority,
+            "signals": gateway_fit.get("signals") or [],
+        },
+        "stages": stages,
+        "risk_gates": _adoption_risk_gates(risks),
+        "acceptance_checks": _adoption_acceptance_checks(stages),
+        "handoff": {
+            "target_agent_id": "planner",
+            "summary": "可交给 planner 拆成 PROJECT_PLAN 小阶段；进入实现前应先通过 risk_gates。",
+        },
+        "note": "这是基于仓库分析生成的采纳路线图，不代表已经完成代码实现或依赖引入。",
+    }
+
+
+def _adoption_decision(score: int, priority: str, risks: list[str]) -> dict[str, str]:
+    severe_risk = any("许可证" in risk or "归档" in risk for risk in risks)
+    if severe_risk:
+        action = "hold"
+        reason = "存在许可或维护状态风险，先人工确认再进入实现。"
+    elif priority == "high" or score >= 70:
+        action = "adopt"
+        reason = "适配分较高，建议进入小步验证和落地拆解。"
+    elif priority == "medium" or score >= 40:
+        action = "pilot"
+        reason = "有参考价值，但应先做轻量原型或文档对比。"
+    else:
+        action = "watch"
+        reason = "当前信号不足，建议保留观察，不进入近期实现。"
+    return {"action": action, "reason": reason}
+
+
+def _adoption_stages(
+    *,
+    reuse_ideas: list[str],
+    recommendations: list[str],
+    max_stages: int,
+) -> list[dict[str, Any]]:
+    seeds = reuse_ideas or recommendations or ["先阅读 README、目录结构和关键文件，确认是否存在可迁移设计。"]
+    stages = [
+        {
+            "id": "stage-1",
+            "title": "证据复核",
+            "objective": "确认 README、许可证、维护状态和关键目录是否支持继续采纳。",
+            "tasks": [
+                "复核 README 与目录树，标注可见证据和推断内容。",
+                "确认许可证、最近更新时间和是否归档。",
+            ],
+        }
+    ]
+    for index, idea in enumerate(seeds[: max(1, min(max_stages - 1, 5))], start=2):
+        stages.append(
+            {
+                "id": f"stage-{index}",
+                "title": f"落地验证 {index - 1}",
+                "objective": idea,
+                "tasks": [
+                    "拆成一个不超过半天的小实验。",
+                    "只改 Gateway 中最小必要范围，保留回滚路径。",
+                    "补充对应测试或文档验收项。",
+                ],
+            }
+        )
+    return stages[: max(1, min(max_stages, 6))]
+
+
+def _adoption_risk_gates(risks: list[str]) -> list[str]:
+    gates = [
+        "确认许可证允许学习、引用或复用。",
+        "确认仓库未归档且关键依赖仍可获得。",
+    ]
+    gates.extend(risks[:4])
+    return list(dict.fromkeys(gates))
+
+
+def _adoption_acceptance_checks(stages: list[dict[str, Any]]) -> list[str]:
+    checks = ["形成一份可追溯的证据摘要。"]
+    if len(stages) > 1:
+        checks.append("至少完成一个最小落地实验，并记录是否继续推进。")
+    checks.append("相关代码或文档变更必须有聚焦测试或人工验收说明。")
+    return checks
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _gateway_reuse_ideas(text: str, tree_paths: list[str]) -> list[str]:
     """根据仓库文本和目录信号生成 Gateway 可借鉴方向。"""
 
@@ -403,6 +530,26 @@ def register_github_repo_tools(
             recommendations=recommendations,
         )
         return json.dumps(analysis, ensure_ascii=False, indent=2)
+
+    def plan_github_repo_adoption(
+        repo_analysis_json: str,
+        adoption_goal: str = "",
+        max_stages: int = 4,
+    ) -> str:
+        if not repo_analysis_json.strip():
+            return "Error: repo_analysis_json is required"
+        analysis = json.loads(repo_analysis_json)
+        if not isinstance(analysis, dict):
+            return "Error: repo_analysis_json must be a JSON object"
+        try:
+            plan = plan_repo_adoption(
+                analysis,
+                adoption_goal=adoption_goal,
+                max_stages=max_stages,
+            )
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return json.dumps(plan, ensure_ascii=False, indent=2)
 
     registry.register(
         RegisteredTool(
@@ -499,5 +646,35 @@ def register_github_repo_tools(
             },
             handler=compose_github_repo_analysis,
             tags=("github", "repository", "analysis", "report"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="plan_github_repo_adoption",
+            description=(
+                "Turn a github_repo_analysis JSON object into a Gateway adoption plan: "
+                "decision, implementation stages, risk gates, acceptance checks, and planner handoff."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["repo_analysis_json"],
+                "properties": {
+                    "repo_analysis_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_github_repo_analysis.",
+                    },
+                    "adoption_goal": {
+                        "type": "string",
+                        "description": "What Gateway wants to adopt or learn from this repository.",
+                    },
+                    "max_stages": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 6,
+                    },
+                },
+            },
+            handler=plan_github_repo_adoption,
+            tags=("github", "repository", "planning"),
         )
     )

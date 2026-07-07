@@ -6,6 +6,7 @@ from agent_gateway.ai.tools.github_repo import (
     assess_gateway_repo_fit,
     compose_repo_analysis,
     normalize_github_repo_summary,
+    plan_repo_adoption,
     parse_github_repo,
     register_github_repo_tools,
 )
@@ -262,3 +263,61 @@ def test_compose_github_repo_analysis_tool_outputs_stable_json() -> None:
     assert analysis["project_positioning"]["language"] == "Python"
     assert analysis["gateway_fit"]["score"] == fit["fit_score"]
     assert analysis["recommendations"]
+
+
+def test_plan_repo_adoption_turns_analysis_into_gateway_roadmap() -> None:
+    analysis = {
+        "type": "github_repo_analysis",
+        "repository": "demo/workflow",
+        "url": "https://github.com/demo/workflow",
+        "analysis_goal": "判断 workflow 是否值得落地。",
+        "gateway_fit": {
+            "score": 82,
+            "priority": "high",
+            "signals": ["包含 Agent workflow 信号。"],
+        },
+        "gateway_reuse_ideas": ["参考工作流模板，改进 Gateway 主动任务编排。"],
+        "recommendations": ["先做一个最小 Cron workflow 原型。"],
+        "risks": ["需要确认许可证复用边界。"],
+    }
+
+    plan = plan_repo_adoption(analysis, adoption_goal="拆成 Gateway 落地阶段", max_stages=3)
+
+    assert plan["type"] == "github_repo_adoption_plan"
+    assert plan["repository"] == "demo/workflow"
+    assert plan["decision"]["action"] == "hold"
+    assert plan["fit"]["score"] == 82
+    assert plan["stages"][0]["title"] == "证据复核"
+    assert plan["stages"][1]["objective"] == "参考工作流模板，改进 Gateway 主动任务编排。"
+    assert "确认许可证允许学习、引用或复用。" in plan["risk_gates"]
+    assert plan["handoff"]["target_agent_id"] == "planner"
+
+
+def test_plan_github_repo_adoption_tool_outputs_stable_json() -> None:
+    registry = ToolRegistry()
+    register_github_repo_tools(registry, client=object())
+    analysis = {
+        "type": "github_repo_analysis",
+        "repository": "demo/agent",
+        "url": "https://github.com/demo/agent",
+        "analysis_goal": "学习 Agent prompt 组织。",
+        "gateway_fit": {"score": 75, "priority": "high", "signals": []},
+        "gateway_reuse_ideas": ["参考 Agent 提示词边界。"],
+        "recommendations": [],
+        "risks": [],
+    }
+
+    plan = json.loads(
+        registry.dispatch(
+            "plan_github_repo_adoption",
+            {
+                "repo_analysis_json": json.dumps(analysis, ensure_ascii=False),
+                "adoption_goal": "优化 Gateway Agent 提示词",
+                "max_stages": 2,
+            },
+        )
+    )
+
+    assert plan["decision"]["action"] == "adopt"
+    assert plan["adoption_goal"] == "优化 Gateway Agent 提示词"
+    assert len(plan["stages"]) == 2

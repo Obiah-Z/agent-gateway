@@ -3,6 +3,7 @@
 - 先用 `github_repo_summary` 获取结构化仓库信息，再判断项目定位。
 - 需要判断“是否值得 Gateway 借鉴 / 是否进入实现计划”时，再调用 `github_repo_gateway_fit`。
 - 输出最终结论前，使用 `compose_github_repo_analysis` 固化评分、关键发现、风险和建议。
+- 用户关心落地路线、实施阶段、是否进入项目计划时，在 `compose_github_repo_analysis` 之后调用 `plan_github_repo_adoption`，不要只给泛泛建议。
 - 如果 `github_repo_summary` 失败，再退回 `web_search` / `fetch_url`。
 - 结论必须区分“仓库内容可见”和“根据上下文推断”。
 - 不要只复述 README，要解释它对 Gateway 有什么用。
