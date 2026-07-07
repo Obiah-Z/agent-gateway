@@ -331,6 +331,61 @@ def test_review_release_gate_blocks_open_critical_risk(tmp_path: Path) -> None:
     assert "补 session lane 互斥测试。" in data["next_actions"]
 
 
+def test_review_task_plan_gate_allows_complete_plan(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "task_plan_from_adoption",
+        "title": "workflow 采纳计划",
+        "goal": "采纳 workflow 模板优化 Gateway 主动任务。",
+        "scope": "只做最小原型，不修改生产配置。",
+        "phases": [
+            {
+                "name": "证据复核",
+                "task": "复核 README 和许可证",
+                "output": "证据摘要",
+                "done": "证据摘要已落盘",
+            }
+        ],
+        "risks": ["许可证需要人工确认。"],
+        "next_steps": ["pytest tests/test_builtin_tools.py -q"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_task_plan_gate",
+            {"plan_json": json.dumps(plan, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "task_plan_gate_review"
+    assert data["decision"] == "go"
+    assert all(item["passed"] for item in data["checklist"])
+    assert data["next_actions"] == ["计划具备进入执行的基本条件，执行前保留审查记录。"]
+
+
+def test_review_task_plan_gate_blocks_under_specified_plan(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "title": "模糊计划",
+        "goal": "",
+        "phases": [{"name": "阶段一", "task": "做一下"}],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_task_plan_gate",
+            {"plan_json": json.dumps(plan, ensure_ascii=False)},
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    assert len([item for item in data["checklist"] if not item["passed"]]) >= 3
+    assert "补充 scope，明确做什么和不做什么。" in data["next_actions"]
+    assert "为每个阶段补齐完成标准。" in data["next_actions"]
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

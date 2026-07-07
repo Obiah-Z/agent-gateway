@@ -645,6 +645,106 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_task_plan_gate(
+        plan_json: str = "",
+        review_target: str = "",
+        required_evidence: list[str] | None = None,
+        known_risks: list[str] | None = None,
+    ) -> str:
+        """审查阶段计划是否具备进入执行的基本条件。"""
+
+        plan: dict[str, Any] = {}
+        if plan_json.strip():
+            parsed = json.loads(plan_json)
+            if not isinstance(parsed, dict):
+                return "Error: plan_json must be a JSON object"
+            plan = parsed
+        target = review_target.strip() or str(plan.get("title") or plan.get("goal") or "").strip()
+        phases = plan.get("phases") if isinstance(plan.get("phases"), list) else []
+        risks = _clean_strings(known_risks)
+        risks.extend(_clean_strings(plan.get("risks") if isinstance(plan.get("risks"), list) else []))
+        evidence = _clean_strings(required_evidence)
+        evidence.extend(_clean_strings(plan.get("acceptance_checks") if isinstance(plan.get("acceptance_checks"), list) else []))
+        evidence.extend(_clean_strings(plan.get("next_steps") if isinstance(plan.get("next_steps"), list) else []))
+
+        checklist = [
+            {
+                "item": "目标已明确",
+                "passed": bool(str(plan.get("goal") or target).strip()),
+                "evidence": str(plan.get("goal") or target or "缺少目标。").strip(),
+            },
+            {
+                "item": "边界已说明",
+                "passed": bool(str(plan.get("scope", "")).strip()),
+                "evidence": str(plan.get("scope") or "缺少 scope / 不做事项。").strip(),
+            },
+            {
+                "item": "阶段计划可执行",
+                "passed": bool(phases) and all(isinstance(phase, dict) and phase.get("task") for phase in phases),
+                "evidence": f"阶段数量：{len(phases)}" if phases else "缺少 phases。",
+            },
+            {
+                "item": "完成标准已说明",
+                "passed": bool(phases)
+                and all(
+                    isinstance(phase, dict)
+                    and str(phase.get("done") or phase.get("acceptance") or "").strip()
+                    for phase in phases
+                ),
+                "evidence": "每个阶段都有完成标准。" if phases else "缺少阶段完成标准。",
+            },
+            {
+                "item": "风险和门槛已列出",
+                "passed": bool(risks),
+                "evidence": "；".join(risks[:4]) if risks else "缺少风险项。",
+            },
+            {
+                "item": "验收或测试依据已列出",
+                "passed": bool(evidence),
+                "evidence": "；".join(evidence[:4]) if evidence else "缺少验收或测试依据。",
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        next_actions = []
+        for item in failed:
+            if item["item"] == "目标已明确":
+                next_actions.append("补充明确目标和预期交付物。")
+            elif item["item"] == "边界已说明":
+                next_actions.append("补充 scope，明确做什么和不做什么。")
+            elif item["item"] == "阶段计划可执行":
+                next_actions.append("把计划拆成至少一个可执行阶段。")
+            elif item["item"] == "完成标准已说明":
+                next_actions.append("为每个阶段补齐完成标准。")
+            elif item["item"] == "风险和门槛已列出":
+                next_actions.append("补充主要风险、风险门槛和规避动作。")
+            elif item["item"] == "验收或测试依据已列出":
+                next_actions.append("补充测试命令、人工验收或回滚验证依据。")
+        if not next_actions:
+            next_actions.append("计划具备进入执行的基本条件，执行前保留审查记录。")
+
+        return json.dumps(
+            {
+                "type": "task_plan_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "risks": risks[:8],
+                "evidence": evidence[:8],
+                "next_actions": next_actions[:6],
+                "note": "这是计划进入执行前的门禁审查，不代表代码已经通过发布门禁。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -1783,6 +1883,29 @@ def register_builtin_tools(
             },
             handler=review_release_gate,
             tags=("review", "release", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_task_plan_gate",
+            description=(
+                "Review whether a task plan is ready to enter execution: goal, scope, "
+                "phases, acceptance criteria, risks, evidence, and go/conditional-go/no-go decision."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string from structure_task_breakdown, adapt_adoption_plan_to_task_plan, or a compatible task plan.",
+                    },
+                    "review_target": {"type": "string"},
+                    "required_evidence": {"type": "array", "items": {"type": "string"}},
+                    "known_risks": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=review_task_plan_gate,
+            tags=("review", "plan", "gate", "risk"),
         )
     )
     registry.register(

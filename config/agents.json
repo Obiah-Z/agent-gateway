@@ -341,6 +341,7 @@
           "memory_search",
           "assess_risk_decision",
           "review_release_gate",
+          "review_task_plan_gate",
           "save_review_report",
           "save_markdown_report"
         ]

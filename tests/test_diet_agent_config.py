@@ -210,6 +210,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "save_review_report" in tools["reviewer"]
     assert "assess_risk_decision" in tools["reviewer"]
     assert "review_release_gate" in tools["reviewer"]
+    assert "review_task_plan_gate" in tools["reviewer"]
     assert "save_markdown_report" in tools["repo-analyzer"]
     assert "write_file" not in tools["reviewer"]
     assert "bash" not in tools["reviewer"]
@@ -320,6 +321,9 @@ def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
     assert "review_release_gate" in identity
     assert "review_release_gate" in soul
     assert "review_release_gate" in tools_md
+    assert "review_task_plan_gate" in identity
+    assert "review_task_plan_gate" in soul
+    assert "review_task_plan_gate" in tools_md
     assert "只读 Agent" in tools_md
 
 
