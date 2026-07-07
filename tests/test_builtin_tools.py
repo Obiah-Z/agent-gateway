@@ -1417,6 +1417,51 @@ def test_review_github_repo_risk_gate_blocks_unclear_license(tmp_path: Path) -> 
     assert "人工复核 LICENSE、README 授权说明或联系作者后再复用。" in data["next_actions"]
 
 
+def test_format_github_repo_risk_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    risk_scan = {
+        "type": "github_repo_risk_scan",
+        "repository": "demo/risky",
+        "intended_use": "复用提示词模板",
+        "risk_level": "high",
+        "decision": "hold",
+        "risk_items": [
+            {
+                "severity": "high",
+                "area": "license",
+                "issue": "许可证缺失或未识别。",
+                "impact": "复用边界不清晰。",
+                "mitigation": "复用前人工确认 LICENSE。",
+            }
+        ],
+        "summary": {
+            "license": "unknown",
+            "archived": False,
+        },
+        "next_actions": ["复核许可证和 README。"],
+    }
+    review = registry.dispatch(
+        "review_github_repo_risk_gate",
+        {"risk_scan_json": json.dumps(risk_scan, ensure_ascii=False)},
+    )
+
+    formatted = registry.dispatch(
+        "format_github_repo_risk_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## GitHub 仓库风险门禁审查" in formatted
+    assert "- 结论：不建议继续" in formatted
+    assert "- 审查对象：demo/risky" in formatted
+    assert "- 预期用途：复用提示词模板" in formatted
+    assert "| 许可证风险可接受 | 未通过 | unknown |" in formatted
+    assert "| 高 | license | 许可证缺失或未识别。 | 复用前人工确认 LICENSE。 |" in formatted
+    assert "- 人工复核 LICENSE、README 授权说明或联系作者后再复用。" in formatted
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
