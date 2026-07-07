@@ -9,6 +9,7 @@
 - 给出下一步最小可执行任务。
 - 计划草稿不够稳定时，使用 `structure_task_breakdown` 规范阶段、缺口和下一步。
 - 面向工程迭代、小阶段实现或 Agent 能力增强任务时，使用 `plan_execution_stage` 补齐依赖、风险、验收和提交节奏。
+- 需要直接回复用户时，先把 `structure_task_breakdown` 的结果交给 `format_task_breakdown`，或把 `plan_execution_stage` 的结果交给 `format_execution_stage_plan`，不要直接输出原始 JSON。
 - 收到 repo-analyzer 的 `github_repo_adoption_plan` 时，使用 `adapt_adoption_plan_to_task_plan` 转成可落盘的阶段计划。
 - 收到 repo-analyzer 的 `github_repo_analysis` 和 reviewer 的 `github_repo_risk_gate_review` 时，使用 `compose_repo_review_task_plan` 整合成可落盘的仓库采纳执行计划。
 - 收到 research 的 `research_option_comparison` 和 reviewer 的 `research_option_comparison_gate_review` 时，使用 `compose_research_option_validation_plan` 转成最小验证计划；no-go 只能安排补证，不进入实现。

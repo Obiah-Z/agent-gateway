@@ -324,6 +324,8 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "save_task_plan" in tools["planner"]
     assert "structure_task_breakdown" in tools["planner"]
     assert "plan_execution_stage" in tools["planner"]
+    assert "format_task_breakdown" in tools["planner"]
+    assert "format_execution_stage_plan" in tools["planner"]
     assert "adapt_adoption_plan_to_task_plan" in tools["planner"]
     assert "compose_repo_review_task_plan" in tools["planner"]
     assert "compose_research_option_validation_plan" in tools["planner"]
@@ -394,6 +396,13 @@ def test_planner_has_task_breakdown_tool_and_safety_prompt() -> None:
     assert "plan_execution_stage" in identity
     assert "plan_execution_stage" in soul
     assert "plan_execution_stage" in tools_md
+    assert "format_task_breakdown" in identity
+    assert "format_task_breakdown" in soul
+    assert "format_task_breakdown" in tools_md
+    assert "format_execution_stage_plan" in identity
+    assert "format_execution_stage_plan" in soul
+    assert "format_execution_stage_plan" in tools_md
+    assert "不要直接输出原始 JSON" in identity
     assert "adapt_adoption_plan_to_task_plan" in identity
     assert "adapt_adoption_plan_to_task_plan" in soul
     assert "adapt_adoption_plan_to_task_plan" in tools_md
@@ -715,6 +724,8 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "review_research_option_comparison_gate",
         "render_execution_record_markdown",
         "render_release_gate_markdown",
+        "format_task_breakdown",
+        "format_execution_stage_plan",
         "render_agent_collaboration_markdown",
         "render_agent_collaboration_progress_markdown",
         "render_collaboration_progress_gate_markdown",

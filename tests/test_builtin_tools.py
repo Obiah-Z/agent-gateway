@@ -194,6 +194,65 @@ def test_plan_execution_stage_reports_missing_acceptance_checks(tmp_path: Path) 
     assert data["acceptance_checks"] == ["补充可执行测试或人工验收标准。"]
 
 
+def test_format_task_breakdown_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    breakdown = registry.dispatch(
+        "structure_task_breakdown",
+        {
+            "goal": "增强 Agent 能力",
+            "scope": "先补 Planner 表达层",
+            "phases": [
+                {
+                    "name": "阶段一",
+                    "task": "新增格式化工具",
+                    "output": "中文摘要",
+                    "done": "测试通过",
+                }
+            ],
+        },
+    )
+
+    summary = registry.dispatch(
+        "format_task_breakdown",
+        {"breakdown_json": breakdown},
+    )
+
+    assert "## 计划摘要" in summary
+    assert "- 状态：可执行" in summary
+    assert "| 阶段一 | 新增格式化工具 | 中文摘要 | 测试通过 |" in summary
+    assert "## 下一步" in summary
+
+
+def test_format_execution_stage_plan_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    plan = registry.dispatch(
+        "plan_execution_stage",
+        {
+            "objective": "补 Planner 用户可读摘要",
+            "scope": "只新增格式化工具",
+            "dependencies": ["structure_task_breakdown"],
+            "risks": ["原始 JSON 直接暴露"],
+            "acceptance_checks": ["pytest tests/test_builtin_tools.py -q"],
+            "next_actions": ["新增工具", "更新提示词"],
+        },
+    )
+
+    summary = registry.dispatch(
+        "format_execution_stage_plan",
+        {"plan_json": plan},
+    )
+
+    assert "## 小阶段执行计划" in summary
+    assert "- 状态：可执行" in summary
+    assert "- 目标：补 Planner 用户可读摘要" in summary
+    assert "## 验收检查" in summary
+    assert "- pytest tests/test_builtin_tools.py -q" in summary
+
+
 def test_adapt_adoption_plan_to_task_plan_outputs_save_args(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

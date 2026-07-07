@@ -374,6 +374,8 @@
           "write_file",
           "structure_task_breakdown",
           "plan_execution_stage",
+          "format_task_breakdown",
+          "format_execution_stage_plan",
           "adapt_adoption_plan_to_task_plan",
           "compose_repo_review_task_plan",
           "compose_research_option_validation_plan",

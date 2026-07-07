@@ -474,6 +474,134 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_task_breakdown(
+        breakdown_json: str,
+        include_details: bool = True,
+    ) -> str:
+        """把 task_breakdown JSON 转成适合直接回复用户的中文摘要。"""
+
+        if not breakdown_json.strip():
+            return "Error: breakdown_json is required"
+        data = json.loads(breakdown_json)
+        if not isinstance(data, dict):
+            return "Error: breakdown_json must be a JSON object"
+        if data.get("type") != "task_breakdown":
+            return "Error: breakdown_json type must be task_breakdown"
+
+        status_labels = {
+            "ready": "可执行",
+            "needs_refinement": "需要补充",
+            "blocked": "阻塞",
+        }
+        phases = data.get("phases") if isinstance(data.get("phases"), list) else []
+        rows: list[list[object]] = []
+        for phase in phases:
+            if not isinstance(phase, dict):
+                continue
+            rows.append(
+                [
+                    phase.get("name", "阶段"),
+                    phase.get("task", "待明确"),
+                    phase.get("output", "待明确"),
+                    phase.get("done", "待明确"),
+                ]
+            )
+
+        gaps = data.get("gaps") if isinstance(data.get("gaps"), dict) else {}
+        missing_outputs = _clean_strings(
+            gaps.get("missing_outputs") if isinstance(gaps.get("missing_outputs"), list) else []
+        )
+        missing_acceptance = _clean_strings(
+            gaps.get("missing_acceptance")
+            if isinstance(gaps.get("missing_acceptance"), list)
+            else []
+        )
+        gap_lines = []
+        if missing_outputs:
+            gap_lines.append(f"缺少输出物：{', '.join(missing_outputs)}")
+        if missing_acceptance:
+            gap_lines.append(f"缺少完成标准：{', '.join(missing_acceptance)}")
+        if not gap_lines:
+            gap_lines.append("暂无明显缺口。")
+
+        sections = [
+            "## 计划摘要",
+            f"- 状态：{status_labels.get(str(data.get('readiness', '')), data.get('readiness') or '待判断')}",
+            f"- 目标：{data.get('goal') or '待明确'}",
+            f"- 边界：{data.get('scope') or '待明确'}",
+        ]
+        if data.get("current_state"):
+            sections.append(f"- 当前状态：{data.get('current_state')}")
+        if include_details:
+            sections.extend(
+                [
+                    "",
+                    "## 阶段计划",
+                    _markdown_table(["阶段", "任务", "输出", "完成标准"], rows),
+                    "",
+                    "## 需要补充",
+                    _markdown_bullets(gap_lines),
+                    "",
+                    "## 下一步",
+                    _markdown_bullets(data.get("next_steps") if isinstance(data.get("next_steps"), list) else []),
+                ]
+            )
+        return "\n".join(sections).strip()
+
+    def format_execution_stage_plan(
+        plan_json: str,
+        include_details: bool = True,
+    ) -> str:
+        """把 execution_stage_plan JSON 转成适合直接回复用户的中文摘要。"""
+
+        if not plan_json.strip():
+            return "Error: plan_json is required"
+        data = json.loads(plan_json)
+        if not isinstance(data, dict):
+            return "Error: plan_json must be a JSON object"
+        if data.get("type") != "execution_stage_plan":
+            return "Error: plan_json type must be execution_stage_plan"
+
+        status_labels = {
+            "ready": "可执行",
+            "needs_refinement": "需要补充",
+            "blocked": "阻塞",
+        }
+        sections = [
+            "## 小阶段执行计划",
+            f"- 状态：{status_labels.get(str(data.get('readiness', '')), data.get('readiness') or '待判断')}",
+            f"- 目标：{data.get('objective') or '待明确'}",
+            f"- 范围：{data.get('scope') or '待明确'}",
+            f"- 提交策略：{data.get('commit_strategy') or '每完成一个可验证小阶段提交一次'}",
+        ]
+        if data.get("current_state"):
+            sections.append(f"- 当前状态：{data.get('current_state')}")
+        if include_details:
+            sections.extend(
+                [
+                    "",
+                    "## 依赖",
+                    _markdown_bullets(data.get("dependencies") if isinstance(data.get("dependencies"), list) else []),
+                    "",
+                    "## 风险",
+                    _markdown_bullets(data.get("risks") if isinstance(data.get("risks"), list) else []),
+                    "",
+                    "## 验收检查",
+                    _markdown_bullets(
+                        data.get("acceptance_checks")
+                        if isinstance(data.get("acceptance_checks"), list)
+                        else []
+                    ),
+                    "",
+                    "## 下一步",
+                    _markdown_bullets(data.get("next_actions") if isinstance(data.get("next_actions"), list) else []),
+                ]
+            )
+            gaps = _clean_strings(data.get("gaps") if isinstance(data.get("gaps"), list) else [])
+            if gaps:
+                sections.extend(["", "## 待补充", _markdown_bullets(gaps)])
+        return "\n".join(sections).strip()
+
     def adapt_adoption_plan_to_task_plan(
         adoption_plan_json: str,
         title: str = "",
@@ -6001,6 +6129,56 @@ def register_builtin_tools(
             },
             handler=plan_execution_stage,
             tags=("plan", "execution", "engineering"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_task_breakdown",
+            description=(
+                "Format a task_breakdown JSON object into a concise Chinese "
+                "user-facing plan summary."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["breakdown_json"],
+                "properties": {
+                    "breakdown_json": {
+                        "type": "string",
+                        "description": "JSON string returned by structure_task_breakdown.",
+                    },
+                    "include_details": {
+                        "type": "boolean",
+                        "description": "Whether to include phase table, gaps, and next steps.",
+                    },
+                },
+            },
+            handler=format_task_breakdown,
+            tags=("plan", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_execution_stage_plan",
+            description=(
+                "Format an execution_stage_plan JSON object into a concise Chinese "
+                "user-facing execution-stage summary."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["plan_json"],
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_execution_stage.",
+                    },
+                    "include_details": {
+                        "type": "boolean",
+                        "description": "Whether to include dependencies, risks, checks, and next actions.",
+                    },
+                },
+            },
+            handler=format_execution_stage_plan,
+            tags=("plan", "format", "user-facing"),
         )
     )
     registry.register(
