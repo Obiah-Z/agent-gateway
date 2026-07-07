@@ -2387,6 +2387,89 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_agent_collaboration_progress_markdown(
+        progress_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把入口 Agent 的协作进度 JSON 渲染成正式 Markdown。"""
+
+        if not progress_json.strip():
+            return "Error: progress_json is required"
+        progress = json.loads(progress_json)
+        if not isinstance(progress, dict):
+            return "Error: progress_json must be a JSON object"
+        if progress.get("type") != "agent_collaboration_progress":
+            return "Error: progress_json type must be agent_collaboration_progress"
+
+        task_type = str(progress.get("task_type") or "unknown").strip()
+        status = str(progress.get("status") or "unknown").strip()
+        document_title = title.strip() or f"Agent 协作进度：{task_type}"
+        summary = "\n".join(
+            [
+                f"- 协作类型：{task_type}",
+                f"- 当前状态：{status}",
+                f"- 已完成阶段：{progress.get('completed_stage_count', 0)} / {progress.get('total_stage_count', 0)}",
+                "- 执行边界：这是协作进度摘要，不代表任何 Agent 已经自动执行。",
+            ]
+        )
+
+        stage_rows = []
+        for item in progress.get("stages") or []:
+            if not isinstance(item, dict):
+                continue
+            stage_rows.append(
+                [
+                    item.get("step") or "待定",
+                    item.get("agent_id") or "unknown",
+                    item.get("status") or "unknown",
+                    item.get("expected_output") or "结构化结果",
+                    item.get("output_summary") or "暂无",
+                ]
+            )
+
+        next_stage = progress.get("next_stage") if isinstance(progress.get("next_stage"), dict) else {}
+        if next_stage:
+            next_stage_section = "\n".join(
+                [
+                    f"- 下一阶段：{next_stage.get('step')}",
+                    f"- 目标 Agent：{next_stage.get('agent_id') or 'unknown'}",
+                    f"- 任务：{next_stage.get('purpose') or '按职责处理'}",
+                    f"- 预期输出：{next_stage.get('expected_output') or '结构化结果'}",
+                ]
+            )
+        else:
+            next_stage_section = "协作路线已完成，没有待交接的下一阶段。"
+
+        handoff_args = progress.get("next_handoff_args") if isinstance(progress.get("next_handoff_args"), dict) else {}
+        handoff_section = (
+            "```json\n" + json.dumps(handoff_args, ensure_ascii=False, indent=2) + "\n```"
+            if handoff_args
+            else "暂无下一阶段 handoff 参数。"
+        )
+        next_actions = _clean_strings(progress.get("next_actions") if isinstance(progress.get("next_actions"), list) else [])
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(progress, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section(
+                    "阶段进度",
+                    _markdown_table(["步骤", "Agent", "状态", "预期输出", "输出摘要"], stage_rows),
+                ),
+                _markdown_section("下一阶段", next_stage_section),
+                _markdown_section("下一阶段交接参数", handoff_section),
+                _markdown_section("下一步", _markdown_bullets(next_actions)),
+            ]
+        ) + metadata
+
     def outline_structured_document(
         title: str,
         document_type: str,
@@ -5065,6 +5148,35 @@ def register_builtin_tools(
             },
             handler=render_agent_collaboration_markdown,
             tags=("document", "markdown", "agent", "collaboration"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_agent_collaboration_progress_markdown",
+            description=(
+                "Render an agent_collaboration_progress JSON object into a formal "
+                "Chinese Markdown collaboration progress report."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["progress_json"],
+                "properties": {
+                    "progress_json": {
+                        "type": "string",
+                        "description": "JSON string returned by summarize_collaboration_progress.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw progress metadata.",
+                    },
+                },
+            },
+            handler=render_agent_collaboration_progress_markdown,
+            tags=("document", "markdown", "agent", "collaboration", "progress"),
         )
     )
     registry.register(

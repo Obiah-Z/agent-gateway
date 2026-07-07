@@ -1324,6 +1324,67 @@ def test_render_agent_collaboration_markdown_formats_handoff_route(tmp_path: Pat
     assert "```json" in markdown
 
 
+def test_render_agent_collaboration_progress_markdown_formats_status(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    progress = {
+        "type": "agent_collaboration_progress",
+        "task_type": "research-option-validation",
+        "status": "in-progress",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "next_stage": {
+            "step": 3,
+            "agent_id": "planner",
+            "purpose": "把方案对比和门禁结论转成最小验证计划。",
+            "expected_output": "task_plan_from_research_option_comparison JSON。",
+        },
+        "stages": [
+            {
+                "step": 1,
+                "agent_id": "research",
+                "status": "completed",
+                "expected_output": "research_option_comparison JSON。",
+                "output_summary": "已输出方案对比。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "status": "completed",
+                "expected_output": "research_option_comparison_gate_review JSON。",
+                "output_summary": "conditional-go。",
+            },
+            {
+                "step": 3,
+                "agent_id": "planner",
+                "status": "next",
+                "expected_output": "task_plan_from_research_option_comparison JSON。",
+                "output_summary": "",
+            },
+        ],
+        "next_handoff_args": {
+            "stage": 3,
+            "upstream_result_summary": "conditional-go。",
+        },
+        "next_actions": ["调用 build_collaboration_stage_handoff 生成第 3 阶段交接提示。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_agent_collaboration_progress_markdown",
+        {"progress_json": json.dumps(progress, ensure_ascii=False)},
+    )
+
+    assert markdown.startswith("# Agent 协作进度：research-option-validation")
+    assert "当前状态：in-progress" in markdown
+    assert "| 1 | research | completed | research_option_comparison JSON。 | 已输出方案对比。 |" in markdown
+    assert "目标 Agent：planner" in markdown
+    assert "task_plan_from_research_option_comparison JSON" in markdown
+    assert "upstream_result_summary" in markdown
+    assert "build_collaboration_stage_handoff" in markdown
+
+
 def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
