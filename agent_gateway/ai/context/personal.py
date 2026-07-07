@@ -129,6 +129,44 @@ class PersonalStore:
         rows.sort(key=lambda row: str(row.get("ts", "")), reverse=True)
         return rows[:safe_limit]
 
+    def generate_briefing(
+        self,
+        *,
+        user_scope: str = "",
+        todo_limit: int = 8,
+        review_limit: int = 3,
+    ) -> dict[str, Any]:
+        """汇总个人秘书简报所需的待办和近期复盘。"""
+
+        open_todos = self.list_todos(
+            status="open",
+            limit=todo_limit,
+            user_scope=user_scope,
+        )
+        recent_reviews = self.recent_reviews(
+            limit=review_limit,
+            user_scope=user_scope,
+        )
+        urgent_todos = [
+            row
+            for row in open_todos
+            if str(row.get("priority", "")).lower() in {"high", "urgent"}
+        ]
+        next_steps = [
+            str(row.get("next_step", "")).strip()
+            for row in recent_reviews
+            if str(row.get("next_step", "")).strip()
+        ]
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "open_todos": open_todos,
+            "urgent_todos": urgent_todos,
+            "recent_reviews": recent_reviews,
+            "suggested_focus": self._suggest_focus(open_todos, next_steps),
+            "next_steps": next_steps[:5],
+        }
+
     def _scope_dir(self, user_scope: str) -> Path:
         scope = MemoryStore.normalize_scope(user_scope)
         name = MemoryStore._scope_dir_name(scope) if scope else "global"
@@ -167,6 +205,21 @@ class PersonalStore:
             "created_at": todo.created_at,
             "completed_at": todo.completed_at,
         }
+
+    @staticmethod
+    def _suggest_focus(open_todos: list[dict[str, Any]], next_steps: list[str]) -> str:
+        urgent = [
+            row
+            for row in open_todos
+            if str(row.get("priority", "")).lower() in {"high", "urgent"}
+        ]
+        if urgent:
+            return str(urgent[0].get("title", "")).strip()
+        if next_steps:
+            return next_steps[0]
+        if open_todos:
+            return str(open_todos[0].get("title", "")).strip()
+        return "暂无明确待办，建议先确认今天最重要的一件事。"
 
     @staticmethod
     def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -287,6 +340,20 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps({"items": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
 
+    def personal_briefing_generate(
+        todo_limit: int = 8,
+        review_limit: int = 3,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        briefing = personal_store.generate_briefing(
+            user_scope=_scope(__runtime_context, user_scope),
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        return json.dumps(briefing, ensure_ascii=False, indent=2)
+
     registry.register(
         RegisteredTool(
             name="personal_todo_add",
@@ -364,5 +431,23 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_review_recent,
             tags=("personal", "review", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_briefing_generate",
+            description=(
+                "Generate a structured personal briefing from open todos and "
+                "recent reviews for the current user."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "todo_limit": {"type": "integer"},
+                    "review_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_briefing_generate,
+            tags=("personal", "briefing", "read"),
         )
     )

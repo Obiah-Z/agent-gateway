@@ -77,3 +77,44 @@ def test_personal_review_tools_write_and_read_recent_reviews(tmp_path: Path) -> 
 
     assert saved["summary"] == "今日完成项目复盘"
     assert recent["items"][0]["next_step"] == "明天练秒杀设计"
+
+
+def test_personal_briefing_generate_summarizes_user_scope(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "背项目难点", "priority": "urgent"},
+        runtime_context={"memory_user_scope": "user:alice"},
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理简历", "priority": "normal"},
+        runtime_context={"memory_user_scope": "user:bob"},
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "今天完成 Redis 复盘",
+            "completed": ["整理 Redis 面试表达"],
+            "next_step": "明天练 RabbitMQ 选型",
+        },
+        runtime_context={"memory_user_scope": "user:alice"},
+    )
+
+    briefing = json.loads(
+        registry.dispatch(
+            "personal_briefing_generate",
+            {"todo_limit": 5, "review_limit": 2},
+            runtime_context={"memory_user_scope": "user:alice"},
+        )
+    )
+
+    assert briefing["user_scope"] == "user:alice"
+    assert briefing["suggested_focus"] == "背项目难点"
+    assert [row["title"] for row in briefing["open_todos"]] == ["背项目难点"]
+    assert briefing["urgent_todos"][0]["priority"] == "urgent"
+    assert briefing["recent_reviews"][0]["summary"] == "今天完成 Redis 复盘"
+    assert briefing["next_steps"] == ["明天练 RabbitMQ 选型"]

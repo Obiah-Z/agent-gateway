@@ -189,4 +189,5 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_todo_complete",
         "personal_review_add",
         "personal_review_recent",
+        "personal_briefing_generate",
     }.issubset(tools[SECRETARY_AGENT_ID])

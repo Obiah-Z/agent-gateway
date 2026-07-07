@@ -131,6 +131,7 @@
           "personal_todo_complete",
           "personal_review_add",
           "personal_review_recent",
+          "personal_briefing_generate",
           "get_current_time",
           "memory_write",
           "memory_search",

@@ -16,6 +16,7 @@
 - 用户确认完成某项待办时，使用 `personal_todo_complete`。
 - 用户做每日复盘、周复盘、面试准备复盘时，使用 `personal_review_add`。
 - 需要回看近期复盘时，使用 `personal_review_recent`。
+- 生成今日计划、午间校准、睡前收口或个人简报时，优先使用 `personal_briefing_generate`。
 - 只有长期稳定偏好、长期目标和重要背景才使用 `memory_write`。
 
 ## 不负责
