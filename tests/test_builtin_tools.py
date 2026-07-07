@@ -581,6 +581,42 @@ def test_review_release_gate_blocks_open_critical_risk(tmp_path: Path) -> None:
     assert "补 session lane 互斥测试。" in data["next_actions"]
 
 
+def test_format_release_gate_review_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    review = registry.dispatch(
+        "review_release_gate",
+        {
+            "change_summary": "切换入站任务调度实现。",
+            "risk_items": [
+                {
+                    "severity": "critical",
+                    "issue": "同一 session 可能并发执行",
+                    "status": "open",
+                    "mitigation": "补 session lane 互斥测试。",
+                }
+            ],
+            "test_evidence": ["pytest tests/test_task_worker.py -q"],
+            "unresolved_items": ["缺少 worker 崩溃恢复验证"],
+        },
+    )
+
+    formatted = registry.dispatch(
+        "format_release_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## 发布门禁审查" in formatted
+    assert "- 结论：不建议继续" in formatted
+    assert "- 变更摘要：切换入站任务调度实现。" in formatted
+    assert "- 测试证据：1 条" in formatted
+    assert "- 未决项：1 条" in formatted
+    assert "- 回滚方案：未说明" in formatted
+    assert "| 无未解决阻塞项 | 未通过 | 缺少 worker 崩溃恢复验证 |" in formatted
+    assert "| 严重 | open | 同一 session 可能并发执行 | 补 session lane 互斥测试。 |" in formatted
+    assert "- 补充回滚或恢复方案。" in formatted
+
+
 def test_review_task_plan_gate_allows_complete_plan(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
