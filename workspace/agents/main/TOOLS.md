@@ -28,6 +28,7 @@
 
 - 对普通聊天，传入 `recommended_agent_id=main` 和 `can_answer_directly=true`。
 - 对需要专用 Agent 的任务，传入分类得到的 `intent`、`recommended_agent_id`、`reason`、`context_summary` 和可选 `handoff_prompt`。
+- 对需要多 Agent 协作的任务，传入 `requires_collaboration=true`、`collaboration_task_type` 和 `collaboration_plan_json`，让回复展示协作路线而不是单个 Agent 委派。
 - 输出后不要再改写成另一种结构，避免入口回复风格漂移。
 
 ## `build_agent_handoff_prompt`

@@ -1254,6 +1254,47 @@ def test_format_entry_response_formats_delegation_reply(tmp_path: Path) -> None:
     assert "不代表目标 Agent 已经自动执行" in result
 
 
+def test_format_entry_response_formats_collaboration_route(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库并输出风险扫描。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "purpose": "审查风险门禁。",
+            },
+        ],
+    }
+
+    result = registry.dispatch(
+        "format_entry_response",
+        {
+            "intent": "repo-adoption",
+            "recommended_agent_id": "repo-analyzer",
+            "reason": "需要多个能力 Agent 串联处理。",
+            "context_summary": "用户希望分析仓库、评估风险并形成采纳计划。",
+            "current_reply": "我会先生成协作路线。",
+            "requires_collaboration": True,
+            "collaboration_task_type": "repo-adoption",
+            "collaboration_plan_json": json.dumps(plan, ensure_ascii=False),
+        },
+    )
+
+    assert "判断：这属于 repo-adoption，需要多 Agent 协作。" in result
+    assert "协作类型：`repo-adoption`。" in result
+    assert "1. `repo-analyzer`：分析仓库并输出风险扫描。" in result
+    assert "2. `reviewer`：审查风险门禁。" in result
+    assert "不代表这些 Agent 已经自动执行" in result
+
+
 def test_format_entry_response_formats_direct_reply(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

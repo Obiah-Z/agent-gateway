@@ -12,6 +12,8 @@
 
 `classify_task_intent` 会把普通仓库理解类请求归为 `repo-analysis`，把包含风险、采纳、引入、复用、计划或报告要求的复杂仓库请求归为 `repo-adoption`，并返回 `requires_collaboration=true` 与 `collaboration_task_type=repo-adoption`，供入口层触发协作路线。
 
+入口层生成 `agent_collaboration_plan` 后，应把该 JSON 作为 `collaboration_plan_json` 传给 `format_entry_response`，向用户展示阶段路线和“尚未自动执行”的边界，而不是只输出单个 Agent 的委派建议。
+
 ## 共享能力 Agent
 
 `research` 负责联网检索、来源核验和证据包沉淀。新增的 `compose_research_evidence_pack` 用于把来源、关键事实、不确定点和下游用途整理成可复用材料。

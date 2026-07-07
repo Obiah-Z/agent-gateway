@@ -2434,11 +2434,57 @@ def register_builtin_tools(
         context_summary: str = "",
         handoff_prompt: str = "",
         can_answer_directly: bool = False,
+        requires_collaboration: bool = False,
+        collaboration_task_type: str = "",
+        collaboration_plan_json: str = "",
     ) -> str:
         """把入口 Agent 的分类和委派结论格式化为稳定中文回复。"""
 
         normalized_intent = intent.strip() or "unknown"
         agent_id = recommended_agent_id.strip() or "main"
+        collaboration_plan: dict[str, Any] = {}
+        if collaboration_plan_json.strip():
+            parsed_plan = json.loads(collaboration_plan_json)
+            if not isinstance(parsed_plan, dict):
+                return "Error: collaboration_plan_json must be a JSON object"
+            if parsed_plan.get("type") != "agent_collaboration_plan":
+                return "Error: collaboration_plan_json type must be agent_collaboration_plan"
+            collaboration_plan = parsed_plan
+
+        if requires_collaboration or collaboration_plan:
+            task_type = (
+                collaboration_task_type.strip()
+                or str(collaboration_plan.get("task_type") or "").strip()
+                or normalized_intent
+            )
+            route_rows = []
+            for stage in collaboration_plan.get("handoff_sequence") or []:
+                if not isinstance(stage, dict):
+                    continue
+                route_rows.append(
+                    f"{stage.get('step') or len(route_rows) + 1}. "
+                    f"`{stage.get('agent_id') or 'unknown'}`："
+                    f"{stage.get('purpose') or '按职责处理'}"
+                )
+            if not route_rows:
+                route_rows.append("1. 调用 `plan_agent_collaboration` 生成协作路线。")
+            lines = [
+                f"判断：这属于 {normalized_intent}，需要多 Agent 协作。",
+                f"协作类型：`{task_type}`。",
+                f"原因：{reason.strip() or '该任务需要多个能力 Agent 串联处理。'}",
+                f"交接摘要：{context_summary.strip() or '请保留用户原始目标、关键上下文和期望输出。'}",
+                "",
+                "建议路线：",
+                *route_rows,
+                "",
+                f"当前简要回复：{current_reply.strip() or '我已识别为复杂任务，会先生成协作路线，再按阶段推进。'}",
+                "",
+                "说明：这是协作路线说明，不代表这些 Agent 已经自动执行。",
+            ]
+            if handoff_prompt.strip():
+                lines.extend(["", "可复制交接提示：", handoff_prompt.strip()])
+            return "\n".join(lines)
+
         if can_answer_directly or agent_id == "main":
             return "\n".join(
                 [
@@ -4035,6 +4081,18 @@ def register_builtin_tools(
                     "handoff_prompt": {
                         "type": "string",
                         "description": "Optional ready-to-send handoff prompt.",
+                    },
+                    "requires_collaboration": {
+                        "type": "boolean",
+                        "description": "Whether this response should explain a multi-agent route.",
+                    },
+                    "collaboration_task_type": {
+                        "type": "string",
+                        "description": "Task type passed to plan_agent_collaboration, for example repo-adoption.",
+                    },
+                    "collaboration_plan_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by plan_agent_collaboration.",
                     },
                     "current_reply": {
                         "type": "string",
