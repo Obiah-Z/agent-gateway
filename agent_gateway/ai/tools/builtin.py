@@ -172,6 +172,25 @@ def _format_bytes(value: int | float) -> str:
     return f"{size:.1f} TiB"
 
 
+def _normalize_severity(value: str) -> str:
+    """归一化风险严重级别。"""
+
+    severity = str(value or "").strip().lower()
+    aliases = {
+        "critical": "critical",
+        "blocker": "critical",
+        "致命": "critical",
+        "严重": "critical",
+        "高": "high",
+        "high": "high",
+        "中": "medium",
+        "medium": "medium",
+        "低": "low",
+        "low": "low",
+    }
+    return aliases.get(severity, "medium")
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -524,6 +543,70 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def assess_risk_decision(
+        review_target: str,
+        findings: list[dict[str, str]] | None = None,
+        test_gaps: list[str] | None = None,
+        residual_risks: list[str] | None = None,
+        evidence_level: str = "medium",
+    ) -> str:
+        """把审查发现转换为稳定的风险评分和通过判定。"""
+
+        findings = findings or []
+        test_gaps = test_gaps or []
+        residual_risks = residual_risks or []
+        severity_weights = {"critical": 40, "high": 25, "medium": 12, "low": 5}
+        normalized_findings = []
+        score = 0
+        for finding in findings:
+            severity = _normalize_severity(str(finding.get("severity", "")))
+            score += severity_weights[severity]
+            normalized_findings.append(
+                {
+                    "severity": severity,
+                    "issue": str(finding.get("issue", "")).strip(),
+                    "impact": str(finding.get("impact", "")).strip(),
+                    "suggestion": str(finding.get("suggestion", "")).strip(),
+                }
+            )
+        score += min(len(test_gaps) * 8, 24)
+        score += min(len(residual_risks) * 5, 15)
+        if evidence_level.strip().lower() in {"low", "弱", "insufficient", "不足"}:
+            score += 15
+        score = min(score, 100)
+        severities = {row["severity"] for row in normalized_findings}
+        if "critical" in severities or score >= 75:
+            decision = "不建议继续"
+        elif "high" in severities or score >= 35 or test_gaps:
+            decision = "有条件通过"
+        else:
+            decision = "通过"
+        priority_actions = []
+        for row in normalized_findings:
+            if row["severity"] in {"critical", "high"} and row["suggestion"]:
+                priority_actions.append(row["suggestion"])
+        priority_actions.extend(str(item).strip() for item in test_gaps if str(item).strip())
+        if not priority_actions and residual_risks:
+            priority_actions.extend(str(item).strip() for item in residual_risks if str(item).strip())
+        if not priority_actions:
+            priority_actions.append("按现有方案推进，并保留回归验证记录。")
+
+        return json.dumps(
+            {
+                "type": "risk_decision_assessment",
+                "review_target": review_target.strip(),
+                "risk_score": score,
+                "decision": decision,
+                "evidence_level": evidence_level.strip().lower() or "medium",
+                "findings": normalized_findings,
+                "test_gaps": [str(item).strip() for item in test_gaps if str(item).strip()],
+                "residual_risks": [str(item).strip() for item in residual_risks if str(item).strip()],
+                "priority_actions": priority_actions[:5],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -813,6 +896,45 @@ def register_builtin_tools(
             },
             handler=ops_readonly_health,
             tags=("ops", "health", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="assess_risk_decision",
+            description=(
+                "Assess risk findings into a stable risk score, release decision, "
+                "and prioritized mitigation actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["review_target"],
+                "properties": {
+                    "review_target": {"type": "string"},
+                    "findings": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "severity": {
+                                    "type": "string",
+                                    "description": "critical/high/medium/low, or Chinese equivalents.",
+                                },
+                                "issue": {"type": "string"},
+                                "impact": {"type": "string"},
+                                "suggestion": {"type": "string"},
+                            },
+                        },
+                    },
+                    "test_gaps": {"type": "array", "items": {"type": "string"}},
+                    "residual_risks": {"type": "array", "items": {"type": "string"}},
+                    "evidence_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "insufficient"],
+                    },
+                },
+            },
+            handler=assess_risk_decision,
+            tags=("review", "risk", "decision"),
         )
     )
     registry.register(

@@ -128,6 +128,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         tools["reviewer"]
     )
     assert "save_review_report" in tools["reviewer"]
+    assert "assess_risk_decision" in tools["reviewer"]
     assert "save_markdown_report" in tools["repo-analyzer"]
     assert "write_file" not in tools["reviewer"]
     assert "bash" not in tools["reviewer"]
@@ -149,6 +150,23 @@ def test_ops_agent_has_readonly_health_tool_and_safety_prompt() -> None:
     assert "ops_readonly_health" in soul
     assert "ops_readonly_health" in tools_md
     assert "禁止执行删除" in tools_md
+
+
+def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
+    identity = (ROOT / "workspace" / "agents" / "reviewer" / "IDENTITY.md").read_text(
+        encoding="utf-8"
+    )
+    soul = (ROOT / "workspace" / "agents" / "reviewer" / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    tools_md = (ROOT / "workspace" / "agents" / "reviewer" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "assess_risk_decision" in identity
+    assert "assess_risk_decision" in soul
+    assert "assess_risk_decision" in tools_md
+    assert "只读 Agent" in tools_md
 
 
 def test_shared_capability_agents_document_handoff_inputs() -> None:

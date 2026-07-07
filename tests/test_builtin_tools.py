@@ -305,6 +305,46 @@ def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     assert data["note"] == "只读采集结果；未执行 shell 命令，未修改文件。"
 
 
+def test_assess_risk_decision_scores_findings_and_actions(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "assess_risk_decision",
+        {
+            "review_target": "分布式入站队列方案",
+            "findings": [
+                {
+                    "severity": "高",
+                    "issue": "锁可能过期",
+                    "impact": "同一会话可能并发执行",
+                    "suggestion": "增加锁续期和任务接管。",
+                },
+                {
+                    "severity": "low",
+                    "issue": "文档缺少压测说明",
+                    "impact": "容量边界不清晰",
+                    "suggestion": "补充压测基线。",
+                },
+            ],
+            "test_gaps": ["缺少 worker 崩溃恢复测试"],
+            "residual_risks": ["模型调用耗时仍可能拖慢队列"],
+            "evidence_level": "low",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "risk_decision_assessment"
+    assert data["review_target"] == "分布式入站队列方案"
+    assert data["decision"] == "有条件通过"
+    assert data["risk_score"] == 58
+    assert data["findings"][0]["severity"] == "high"
+    assert data["priority_actions"][:2] == [
+        "增加锁续期和任务接管。",
+        "缺少 worker 崩溃恢复测试",
+    ]
+
+
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
