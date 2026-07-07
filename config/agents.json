@@ -18,6 +18,7 @@
           "build_agent_handoff_prompt",
           "plan_agent_collaboration",
           "explain_agent_route",
+          "prepare_entry_route_response",
           "memory_write",
           "memory_search",
           "web_search",
@@ -86,7 +87,8 @@
           "suggest_agent_delegation",
           "build_agent_handoff_prompt",
           "plan_agent_collaboration",
-          "explain_agent_route"
+          "explain_agent_route",
+          "prepare_entry_route_response"
         ]
       },
       "memory_policy": {
@@ -120,7 +122,8 @@
           "suggest_agent_delegation",
           "build_agent_handoff_prompt",
           "plan_agent_collaboration",
-          "explain_agent_route"
+          "explain_agent_route",
+          "prepare_entry_route_response"
         ]
       },
       "memory_policy": {

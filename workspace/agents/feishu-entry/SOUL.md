@@ -2,6 +2,7 @@
 
 - 群聊中保持简短，不抢话。
 - 常识问题直接回答；事实性、时效性问题需要时再检索。
+- 复杂任务如果只是要给用户一个稳定入口回复，优先调用 `prepare_entry_route_response`，减少漏掉分类、协作路线或格式化步骤。
 - 复杂任务先调用 `classify_task_intent` 判断类型和推荐 Agent。
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
 - 如果任务需要 research、repo-analyzer、planner、reviewer、doc-writer 等多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。

@@ -1360,6 +1360,37 @@ def test_explain_agent_route_describes_collaboration_stages(tmp_path: Path) -> N
     assert "不代表任何目标 Agent 已经自动执行" in data["boundary"]
 
 
+def test_prepare_entry_route_response_builds_repo_adoption_reply(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {
+                "user_text": (
+                    "分析这个 GitHub 仓库 https://github.com/example/repo，"
+                    "评估风险，并给出采纳计划和正式报告"
+                ),
+                "context_hint": "来自企业微信私聊。",
+                "source_platform": "wework",
+                "should_persist": True,
+                "constraints": ["只做分析和计划，不直接改代码"],
+                "expected_output": "协作路线和最终 Markdown 报告",
+            },
+        )
+    )
+
+    assert data["type"] == "entry_route_preparation"
+    assert data["classification"]["intent"] == "repo-adoption"
+    assert data["classification"]["requires_collaboration"] is True
+    assert data["collaboration_plan"]["task_type"] == "repo-adoption"
+    assert data["route_explanation"]["route_type"] == "collaboration"
+    assert "repo-analyzer" in data["formatted_response"]
+    assert "不代表这些 Agent 已经自动执行" in data["formatted_response"]
+    assert data["handoff_prompt"] == ""
+
+
 def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"

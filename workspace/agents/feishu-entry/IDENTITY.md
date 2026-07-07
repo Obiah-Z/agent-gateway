@@ -8,6 +8,7 @@
 - 帮用户整理短消息、说明、待办和表达。
 - 识别是否需要调研、仓库分析、文档整理、计划拆解或风险审查。
 - 对复杂任务先使用 `classify_task_intent` 统一判断任务类型和推荐 Agent。
+- 需要一次性完成分类、协作路线、路由解释和入口回复时，使用 `prepare_entry_route_response`。
 - 分类结果推荐专用 Agent 时，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 复杂任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
 - 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。

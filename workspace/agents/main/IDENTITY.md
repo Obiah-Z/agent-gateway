@@ -7,6 +7,7 @@
 - 直接回答简单问题、概念解释和轻量咨询。
 - 对复杂任务先判断意图，再决定是否建议交给专用 Agent。
 - 使用 `classify_task_intent` 判断任务更适合 main、research、planner、doc-writer、reviewer、repo-analyzer、ops、个人秘书或饮食助手。
+- 需要一次性完成分类、协作路线、路由解释和入口回复时，使用 `prepare_entry_route_response`。
 - 推荐专用 Agent 前，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
 - 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。

@@ -2635,6 +2635,83 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def prepare_entry_route_response(
+        user_text: str,
+        context_hint: str = "",
+        source_platform: str = "",
+        should_persist: bool = False,
+        constraints: list[str] | None = None,
+        expected_output: str = "",
+    ) -> str:
+        """一站式准备入口层路由响应，不执行任何目标 Agent。"""
+
+        goal = user_text.strip()
+        if not goal:
+            return "Error: user_text is required"
+        classification = json.loads(classify_task_intent(goal, context_hint=context_hint))
+        if not isinstance(classification, dict):
+            return "Error: classify_task_intent returned non-object"
+
+        constraints_clean = _clean_strings(constraints)
+        collaboration_plan_json = ""
+        handoff_prompt = ""
+        if classification.get("requires_collaboration"):
+            collaboration_plan_json = plan_agent_collaboration(
+                user_goal=goal,
+                task_type=str(classification.get("collaboration_task_type") or ""),
+                constraints=constraints_clean,
+                expected_output=expected_output,
+                should_persist=should_persist,
+            )
+        elif classification.get("recommended_agent_id") not in {"", "main"}:
+            handoff_prompt = build_agent_handoff_prompt(
+                user_goal=goal,
+                target_agent_id=str(classification.get("recommended_agent_id") or "main"),
+                context_summary=str(classification.get("reason") or context_hint or "入口层识别到专用 Agent 更适合处理。"),
+                constraints=constraints_clean,
+                expected_output=expected_output,
+                source_platform=source_platform,
+                should_persist=should_persist,
+                known_inputs=[context_hint] if context_hint.strip() else [],
+            )
+
+        route_explanation_json = explain_agent_route(
+            user_goal=goal,
+            intent=str(classification.get("intent") or "unknown"),
+            recommended_agent_id=str(classification.get("recommended_agent_id") or "main"),
+            reason=str(classification.get("reason") or ""),
+            requires_collaboration=bool(classification.get("requires_collaboration")),
+            collaboration_task_type=str(classification.get("collaboration_task_type") or ""),
+            collaboration_plan_json=collaboration_plan_json,
+            next_step=str(classification.get("suggested_next_step") or ""),
+        )
+        formatted_response = format_entry_response(
+            intent=str(classification.get("intent") or "unknown"),
+            recommended_agent_id=str(classification.get("recommended_agent_id") or "main"),
+            reason=str(classification.get("reason") or ""),
+            context_summary=context_hint.strip() or goal,
+            handoff_prompt=handoff_prompt,
+            current_reply="我已完成入口路由判断，可以按下面路线继续推进。",
+            can_answer_directly=bool(classification.get("can_answer_directly")),
+            requires_collaboration=bool(classification.get("requires_collaboration")),
+            collaboration_task_type=str(classification.get("collaboration_task_type") or ""),
+            collaboration_plan_json=collaboration_plan_json,
+        )
+
+        return json.dumps(
+            {
+                "type": "entry_route_preparation",
+                "classification": classification,
+                "collaboration_plan": json.loads(collaboration_plan_json) if collaboration_plan_json else None,
+                "route_explanation": json.loads(route_explanation_json),
+                "handoff_prompt": handoff_prompt,
+                "formatted_response": formatted_response,
+                "boundary": "这是入口层路由准备结果，不代表任何目标 Agent 已经自动执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def ops_readonly_health(include_sizes: bool = True) -> str:
         """生成只读运维健康简报，不执行 shell 命令。"""
 
@@ -4241,6 +4318,30 @@ def register_builtin_tools(
             },
             handler=explain_agent_route,
             tags=("agent", "routing", "explanation"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="prepare_entry_route_response",
+            description=(
+                "Prepare a full entry-agent routing response in one step: classify the "
+                "request, create a collaboration plan when needed, explain the route, "
+                "and format the user-facing response. This does not execute target agents."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_text"],
+                "properties": {
+                    "user_text": {"type": "string"},
+                    "context_hint": {"type": "string"},
+                    "source_platform": {"type": "string"},
+                    "should_persist": {"type": "boolean"},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "expected_output": {"type": "string"},
+                },
+            },
+            handler=prepare_entry_route_response,
+            tags=("agent", "routing", "entry", "format"),
         )
     )
     registry.register(
