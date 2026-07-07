@@ -68,6 +68,17 @@
 - 每个阶段完成后，上一阶段结构化输出应作为下一阶段 `upstream_result`。
 - 给用户说明时必须强调这是协作路线，不代表已经执行。
 
+## `build_collaboration_stage_handoff`
+
+用于把 `agent_collaboration_plan` 中的某个阶段转换成可复制给目标 Agent 的交接提示。
+
+使用规则：
+
+- 已经有协作路线，并且用户要开始某一阶段或进入下一阶段时使用。
+- `stage` 使用从 1 开始的阶段号。
+- 如果已有上一阶段结果，放入 `upstream_result_summary` 或 `upstream_result_json`。
+- 输出只是交接提示，不代表目标 Agent 已经执行。
+
 ## `explain_agent_route`
 
 用于解释入口层为什么选择某个 Agent 或某条协作路线。

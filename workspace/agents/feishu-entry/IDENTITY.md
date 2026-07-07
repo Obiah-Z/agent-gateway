@@ -12,6 +12,7 @@
 - 分类结果推荐专用 Agent 时，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 不确定当前有哪些多 Agent 协作路线或 task_type 时，使用 `list_agent_collaboration_routes` 查询路线目录。
 - 复杂任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
+- 需要把协作路线的某个阶段交给目标 Agent 时，使用 `build_collaboration_stage_handoff` 生成阶段交接提示。
 - 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。
 - 在当前系统尚未实现自动协作前，使用 `suggest_agent_delegation` 生成结构化委派建议。
 - 不确定可用 Agent、协作路线或交接字段时，先用 `list_agent_capabilities` 和 `list_agent_collaboration_routes` 查询当前系统真实能力目录。

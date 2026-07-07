@@ -1448,6 +1448,41 @@ def test_list_agent_collaboration_routes_filters_by_alias(tmp_path: Path) -> Non
     assert "不代表任何 Agent 已经自动执行" in data["boundary"]
 
 
+def test_build_collaboration_stage_handoff_uses_upstream_result(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = json.loads(
+        registry.dispatch(
+            "plan_agent_collaboration",
+            {
+                "user_goal": "对比 RabbitMQ、Redis、Kafka，并形成 Gateway 入站队列验证计划。",
+                "task_type": "research-option-validation",
+                "constraints": ["只做验证计划，不直接改生产配置"],
+            },
+        )
+    )
+
+    handoff = registry.dispatch(
+        "build_collaboration_stage_handoff",
+        {
+            "collaboration_plan_json": json.dumps(plan, ensure_ascii=False),
+            "stage": 3,
+            "upstream_result_summary": "reviewer 已给出 conditional-go，要求只进入最小验证。",
+            "additional_context": "重点关注入站削峰和会话串行。",
+        },
+    )
+
+    assert "目标 Agent：planner" in handoff
+    assert "协作类型：research-option-validation" in handoff
+    assert "阶段：3/5" in handoff
+    assert "把方案对比和门禁结论转成最小验证计划" in handoff
+    assert "research_option_comparison_gate_review JSON" in handoff
+    assert "reviewer 已给出 conditional-go" in handoff
+    assert "- 只做验证计划，不直接改生产配置" in handoff
+    assert "重点关注入站削峰和会话串行。" in handoff
+    assert "不代表目标 Agent 已经执行" in handoff
+
+
 def test_plan_agent_collaboration_builds_research_option_validation_route(
     tmp_path: Path,
 ) -> None:

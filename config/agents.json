@@ -16,6 +16,7 @@
           "classify_task_intent",
           "format_entry_response",
           "build_agent_handoff_prompt",
+          "build_collaboration_stage_handoff",
           "list_agent_collaboration_routes",
           "plan_agent_collaboration",
           "explain_agent_route",
@@ -89,6 +90,7 @@
           "list_agent_collaboration_routes",
           "suggest_agent_delegation",
           "build_agent_handoff_prompt",
+          "build_collaboration_stage_handoff",
           "plan_agent_collaboration",
           "explain_agent_route",
           "prepare_entry_route_response"
@@ -125,6 +127,7 @@
           "list_agent_collaboration_routes",
           "suggest_agent_delegation",
           "build_agent_handoff_prompt",
+          "build_collaboration_stage_handoff",
           "plan_agent_collaboration",
           "explain_agent_route",
           "prepare_entry_route_response"

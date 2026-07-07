@@ -10,6 +10,8 @@
 
 如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
 
+需要开始协作路线的某一阶段，或把上一阶段结果交给下一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制交接提示。该工具不会自动调用目标 Agent。
+
 复杂技术选型、方案对比或中间件取舍任务如果还要求验证计划、风险审查、落地计划或正式报告，`task_type` 使用 `research-option-validation`。
 
 用户追问为什么这样路由、为什么需要多个 Agent 或下一步先交给谁时，调用 `explain_agent_route`。该工具只解释路线，不会自动执行目标 Agent。

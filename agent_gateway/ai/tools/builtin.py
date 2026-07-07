@@ -2515,6 +2515,76 @@ def register_builtin_tools(
         ]
         return "\n".join(sections).strip()
 
+    def build_collaboration_stage_handoff(
+        collaboration_plan_json: str,
+        stage: int = 1,
+        upstream_result_summary: str = "",
+        upstream_result_json: str = "",
+        additional_context: str = "",
+    ) -> str:
+        """为多 Agent 协作路线中的某个阶段生成标准交接提示。"""
+
+        if not collaboration_plan_json.strip():
+            return "Error: collaboration_plan_json is required"
+        plan = json.loads(collaboration_plan_json)
+        if not isinstance(plan, dict):
+            return "Error: collaboration_plan_json must be a JSON object"
+        if plan.get("type") != "agent_collaboration_plan":
+            return "Error: collaboration_plan_json type must be agent_collaboration_plan"
+        handoffs = [item for item in plan.get("handoff_sequence") or [] if isinstance(item, dict)]
+        if not handoffs:
+            return "Error: collaboration_plan_json has no handoff_sequence"
+        if stage < 1 or stage > len(handoffs):
+            return f"Error: stage must be between 1 and {len(handoffs)}"
+
+        current = handoffs[stage - 1]
+        previous = handoffs[stage - 2] if stage > 1 else {}
+        input_contract = current.get("input_contract") if isinstance(current.get("input_contract"), dict) else {}
+        constraints = _clean_strings(input_contract.get("constraints") if isinstance(input_contract.get("constraints"), list) else [])
+        upstream_text = upstream_result_summary.strip()
+        if not upstream_text and upstream_result_json.strip():
+            try:
+                parsed_upstream = json.loads(upstream_result_json)
+                upstream_text = json.dumps(parsed_upstream, ensure_ascii=False, indent=2)
+            except json.JSONDecodeError:
+                upstream_text = upstream_result_json.strip()
+
+        sections = [
+            f"目标 Agent：{current.get('agent_id') or 'unknown'}",
+            f"协作类型：{plan.get('task_type') or 'unknown'}",
+            f"阶段：{stage}/{len(handoffs)}",
+            "",
+            "## 用户原始目标",
+            str(plan.get("user_goal") or input_contract.get("user_goal") or "待补充").strip(),
+            "",
+            "## 本阶段任务",
+            str(current.get("purpose") or "按目标 Agent 职责处理。").strip(),
+            "",
+            "## 期望输出",
+            str(current.get("expected_output") or "结构化阶段输出。").strip(),
+            "",
+            "## 上游阶段",
+            (
+                f"{previous.get('step') or stage - 1}. `{previous.get('agent_id')}`："
+                f"{previous.get('expected_output') or previous.get('purpose') or '上游结果'}"
+                if previous
+                else "这是第一阶段，无上游阶段。"
+            ),
+            "",
+            "## 上游结果摘要",
+            upstream_text or "暂无上游结果；如果这是第一阶段，请基于用户原始目标开始。",
+            "",
+            "## 已知约束",
+            _markdown_bullets(constraints),
+            "",
+            "## 额外上下文",
+            additional_context.strip() or "无。",
+            "",
+            "## 边界",
+            "这是阶段交接提示，不代表目标 Agent 已经执行；完成后请输出结构化结果，供下一阶段继续使用。",
+        ]
+        return "\n".join(sections).strip()
+
     def _agent_collaboration_route_templates() -> dict[str, list[dict[str, str]]]:
         """返回入口层可规划的多 Agent 协作路线模板。"""
 
@@ -5002,6 +5072,40 @@ def register_builtin_tools(
             },
             handler=build_agent_handoff_prompt,
             tags=("agent", "delegation", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="build_collaboration_stage_handoff",
+            description=(
+                "Build a standardized handoff prompt for one stage inside an "
+                "agent_collaboration_plan. This does not execute the target agent."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["collaboration_plan_json", "stage"],
+                "properties": {
+                    "collaboration_plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_agent_collaboration.",
+                    },
+                    "stage": {
+                        "type": "integer",
+                        "description": "1-based stage number to prepare handoff for.",
+                    },
+                    "upstream_result_summary": {
+                        "type": "string",
+                        "description": "Short summary of the previous stage output.",
+                    },
+                    "upstream_result_json": {
+                        "type": "string",
+                        "description": "Optional raw JSON output from the previous stage.",
+                    },
+                    "additional_context": {"type": "string"},
+                },
+            },
+            handler=build_collaboration_stage_handoff,
+            tags=("agent", "collaboration", "handoff"),
         )
     )
     registry.register(

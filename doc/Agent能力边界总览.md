@@ -6,7 +6,7 @@
 
 `main`、`feishu-entry` 和 `wework-entry` 是入口层。入口层负责普通问答、意图分类、标准交接提示和委派建议，不负责深度执行。
 
-关键工具包括 `prepare_entry_route_response`、`classify_task_intent`、`build_agent_handoff_prompt`、`list_agent_collaboration_routes`、`plan_agent_collaboration`、`explain_agent_route`、`format_entry_response`、`suggest_agent_delegation` 和 `list_agent_capabilities`。其中 `prepare_entry_route_response` 只把分类、协作路线、路由解释和用户回复组合成入口层准备结果，不执行目标 Agent；`suggest_agent_delegation` 只表示建议，不代表目标 Agent 已经自动执行；`list_agent_collaboration_routes` 只列出可用协作路线、别名和阶段模板；`plan_agent_collaboration` 只生成多 Agent 协作路线，不自动调用任何 Agent；`explain_agent_route` 只解释为什么选择某个 Agent 或协作路线，不代表目标 Agent 已经执行。
+关键工具包括 `prepare_entry_route_response`、`classify_task_intent`、`build_agent_handoff_prompt`、`build_collaboration_stage_handoff`、`list_agent_collaboration_routes`、`plan_agent_collaboration`、`explain_agent_route`、`format_entry_response`、`suggest_agent_delegation` 和 `list_agent_capabilities`。其中 `prepare_entry_route_response` 只把分类、协作路线、路由解释和用户回复组合成入口层准备结果，不执行目标 Agent；`suggest_agent_delegation` 只表示建议，不代表目标 Agent 已经自动执行；`list_agent_collaboration_routes` 只列出可用协作路线、别名和阶段模板；`plan_agent_collaboration` 只生成多 Agent 协作路线，不自动调用任何 Agent；`build_collaboration_stage_handoff` 只把某一阶段和上游结果整理成可复制交接提示；`explain_agent_route` 只解释为什么选择某个 Agent 或协作路线，不代表目标 Agent 已经执行。
 
 复杂 GitHub 仓库任务如果同时要求分析、风险、采纳计划或正式报告，入口层应使用 `repo-adoption` 协作路线：repo-analyzer 先产出仓库分析和风险扫描，reviewer 做仓库风险门禁，planner 整合成采纳执行计划，doc-writer 最后成文落盘。
 
