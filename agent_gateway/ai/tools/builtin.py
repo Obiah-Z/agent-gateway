@@ -552,6 +552,91 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def adapt_collaboration_plan_to_task_plan(
+        collaboration_json: str,
+        title: str = "",
+        scope: str = "",
+    ) -> str:
+        """把入口 Agent 的多 Agent 协作路线转换成 planner 阶段计划。"""
+
+        if not collaboration_json.strip():
+            return "Error: collaboration_json is required"
+        data = json.loads(collaboration_json)
+        if not isinstance(data, dict):
+            return "Error: collaboration_json must be a JSON object"
+        if data.get("type") != "agent_collaboration_plan":
+            return "Error: collaboration_json type must be agent_collaboration_plan"
+
+        task_type = str(data.get("task_type") or "agent-collaboration").strip()
+        user_goal = str(data.get("user_goal") or "按协作路线完成任务。").strip()
+        expected_output = str(data.get("expected_output") or "多 Agent 协作产物。").strip()
+        constraints = _clean_strings(data.get("constraints") if isinstance(data.get("constraints"), list) else [])
+        next_actions = _clean_strings(data.get("next_actions") if isinstance(data.get("next_actions"), list) else [])
+        phases = []
+        for index, stage in enumerate(data.get("handoff_sequence") or [], start=1):
+            if not isinstance(stage, dict):
+                continue
+            agent_id = str(stage.get("agent_id") or "待指定 Agent").strip()
+            purpose = str(stage.get("purpose") or "按协作路线执行本阶段。").strip()
+            output = str(stage.get("expected_output") or "阶段输出待明确").strip()
+            input_contract = stage.get("input_contract")
+            if isinstance(input_contract, dict):
+                upstream = str(input_contract.get("upstream_result") or input_contract.get("user_goal") or "").strip()
+            else:
+                upstream = str(input_contract or "").strip()
+            task_parts = [purpose]
+            if upstream:
+                task_parts.append(f"输入依据：{upstream}")
+            phases.append(
+                {
+                    "name": f"阶段 {stage.get('step') or index}：{agent_id}",
+                    "task": "；".join(task_parts),
+                    "output": output,
+                    "done": f"产出 {output}，并作为后续阶段的结构化输入。",
+                }
+            )
+        if not phases:
+            phases.append(
+                {
+                    "name": "阶段一：补齐协作路线",
+                    "task": "补充 handoff_sequence、目标 Agent、输入契约和阶段输出。",
+                    "output": "可执行协作阶段计划",
+                    "done": "协作路线、输入、输出和边界均已明确。",
+                }
+            )
+
+        plan_title = title.strip() or f"{task_type} 协作执行计划"
+        plan_scope = scope.strip() or "只把多 Agent 协作路线转成可执行阶段计划，不自动调用任何 Agent。"
+        plan_next_steps = ["先执行第一阶段，并保留结构化输出作为下一阶段输入。"]
+        plan_next_steps.extend(next_actions[:4])
+        if data.get("should_persist"):
+            plan_next_steps.append("按需使用 save_task_plan 将本计划落盘到 reports/plans/。")
+
+        return json.dumps(
+            {
+                "type": "task_plan_from_collaboration",
+                "title": plan_title,
+                "goal": user_goal,
+                "scope": plan_scope,
+                "task_type": task_type,
+                "expected_output": expected_output,
+                "phases": phases[:8],
+                "risks": constraints,
+                "next_steps": plan_next_steps[:6],
+                "save_task_plan_args": {
+                    "title": plan_title,
+                    "goal": user_goal,
+                    "scope": plan_scope,
+                    "phases": phases[:8],
+                    "risks": constraints,
+                    "next_steps": plan_next_steps[:6],
+                },
+                "note": "这是从多 Agent 协作路线转换出的 planner 阶段计划草案，不会自动调用任何 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_review_report(
         title: str,
         conclusion: str,
@@ -2544,6 +2629,30 @@ def register_builtin_tools(
             },
             handler=adapt_adoption_plan_to_task_plan,
             tags=("plan", "repository", "adoption"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="adapt_collaboration_plan_to_task_plan",
+            description=(
+                "Convert an agent_collaboration_plan JSON from an entry agent into "
+                "a planner task plan draft with staged handoffs, risks, next steps, "
+                "and save_task_plan args."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["collaboration_json"],
+                "properties": {
+                    "collaboration_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_agent_collaboration.",
+                    },
+                    "title": {"type": "string"},
+                    "scope": {"type": "string"},
+                },
+            },
+            handler=adapt_collaboration_plan_to_task_plan,
+            tags=("plan", "agent", "collaboration"),
         )
     )
     registry.register(

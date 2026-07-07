@@ -244,6 +244,59 @@ def test_adapt_adoption_plan_to_task_plan_outputs_save_args(tmp_path: Path) -> N
     assert (tmp_path / "reports" / "plans" / "workflow-采纳计划.md").exists()
 
 
+def test_adapt_collaboration_plan_to_task_plan_outputs_staged_handoffs(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    collaboration_plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "user_goal": "评估仓库并沉淀采纳方案。",
+        "expected_output": "仓库分析、执行计划和正式报告。",
+        "should_persist": True,
+        "constraints": ["只规划路线，不自动调用任何 Agent。"],
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库价值和风险。",
+                "input_contract": {"user_goal": "评估仓库。"},
+                "expected_output": "github_repo_analysis JSON。",
+            },
+            {
+                "step": 2,
+                "agent_id": "doc-writer",
+                "purpose": "整理成正式 Markdown。",
+                "input_contract": {"upstream_result": "github_repo_analysis JSON。"},
+                "expected_output": "Markdown 报告。",
+            },
+        ],
+        "next_actions": ["先把第一阶段 handoff_prompt 交给 repo-analyzer。"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "adapt_collaboration_plan_to_task_plan",
+            {
+                "collaboration_json": json.dumps(collaboration_plan, ensure_ascii=False),
+                "title": "仓库评估协作计划",
+            },
+        )
+    )
+
+    assert data["type"] == "task_plan_from_collaboration"
+    assert data["title"] == "仓库评估协作计划"
+    assert data["goal"] == "评估仓库并沉淀采纳方案。"
+    assert data["phases"][0]["name"] == "阶段 1：repo-analyzer"
+    assert data["phases"][0]["task"] == "分析仓库价值和风险。；输入依据：评估仓库。"
+    assert data["phases"][1]["output"] == "Markdown 报告。"
+    assert data["risks"] == ["只规划路线，不自动调用任何 Agent。"]
+    assert data["save_task_plan_args"]["phases"][1]["name"] == "阶段 2：doc-writer"
+
+    saved = registry.dispatch("save_task_plan", data["save_task_plan_args"])
+    assert saved == "报告路径：workspace/reports/plans/仓库评估协作计划.md"
+    assert (tmp_path / "reports" / "plans" / "仓库评估协作计划.md").exists()
+
+
 def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

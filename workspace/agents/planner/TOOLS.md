@@ -6,6 +6,8 @@
 
 收到 repo-analyzer 的 `github_repo_adoption_plan` 时，使用 `adapt_adoption_plan_to_task_plan` 转成标准计划草案。这个工具会输出 `save_task_plan_args`，需要落盘时再传给 `save_task_plan`。
 
+收到入口 Agent 的 `agent_collaboration_plan` 时，使用 `adapt_collaboration_plan_to_task_plan` 转成标准协作阶段计划。这个工具会输出 `save_task_plan_args`，需要落盘时再传给 `save_task_plan`。该转换只生成计划，不自动调用任何 Agent。
+
 用户要求落盘计划、方案或执行手册时，再使用 `save_task_plan` 写入 `reports/plans/`。
 
 `planner` 只做计划，不直接执行配置修改、删除文件、重启服务、迁移数据或其他高风险动作。

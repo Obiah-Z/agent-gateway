@@ -228,6 +228,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "structure_task_breakdown" in tools["planner"]
     assert "plan_execution_stage" in tools["planner"]
     assert "adapt_adoption_plan_to_task_plan" in tools["planner"]
+    assert "adapt_collaboration_plan_to_task_plan" in tools["planner"]
     assert {"read_file", "list_directory", "save_markdown_report"}.issubset(
         tools["reviewer"]
     )
@@ -287,6 +288,10 @@ def test_planner_has_task_breakdown_tool_and_safety_prompt() -> None:
     assert "adapt_adoption_plan_to_task_plan" in identity
     assert "adapt_adoption_plan_to_task_plan" in soul
     assert "adapt_adoption_plan_to_task_plan" in tools_md
+    assert "adapt_collaboration_plan_to_task_plan" in identity
+    assert "adapt_collaboration_plan_to_task_plan" in soul
+    assert "adapt_collaboration_plan_to_task_plan" in tools_md
+    assert "不自动调用任何 Agent" in tools_md
     assert "只做计划" in tools_md
 
 
@@ -435,6 +440,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_execution_record_markdown",
         "render_agent_collaboration_markdown",
         "review_agent_collaboration_gate",
+        "adapt_collaboration_plan_to_task_plan",
         "ops_runtime_diagnostics",
         "personal_day_review_plan_generate",
         "diet_day_review_plan_generate",
