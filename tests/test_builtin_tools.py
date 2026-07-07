@@ -244,6 +244,54 @@ def test_adapt_adoption_plan_to_task_plan_outputs_save_args(tmp_path: Path) -> N
     assert (tmp_path / "reports" / "plans" / "workflow-采纳计划.md").exists()
 
 
+def test_compose_repo_review_task_plan_blocks_no_go_risk_gate(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    analysis = {
+        "type": "github_repo_analysis",
+        "repository": "demo/risky",
+        "url": "https://github.com/demo/risky",
+        "analysis_goal": "评估是否可复用提示词模板。",
+        "gateway_fit": {"score": 80, "priority": "high", "signals": ["包含 Skill 模板。"]},
+        "gateway_reuse_ideas": ["参考 Skill 分类和提示词结构。"],
+        "risks": ["许可证缺失或未识别。"],
+        "recommendations": ["先复核许可证。"],
+    }
+    risk_gate = {
+        "type": "github_repo_risk_gate_review",
+        "review_target": "demo/risky",
+        "decision": "no-go",
+        "source_decision": "hold",
+        "checklist": [],
+        "next_actions": ["人工复核 LICENSE、README 授权说明或联系作者后再复用。"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "compose_repo_review_task_plan",
+            {
+                "repo_analysis_json": json.dumps(analysis, ensure_ascii=False),
+                "risk_gate_json": json.dumps(risk_gate, ensure_ascii=False),
+                "title": "risky 仓库采纳计划",
+            },
+        )
+    )
+
+    assert data["type"] == "task_plan_from_repo_review"
+    assert data["repository"] == "demo/risky"
+    assert data["decision"]["risk_gate"] == "no-go"
+    assert data["decision"]["recommended_action"] == "hold"
+    assert data["phases"][1]["name"] == "阻塞项处理"
+    assert data["save_task_plan_args"]["title"] == "risky 仓库采纳计划"
+
+    saved = registry.dispatch("save_task_plan", data["save_task_plan_args"])
+    assert saved == "报告路径：workspace/reports/plans/risky-仓库采纳计划.md"
+    content = (tmp_path / "reports" / "plans" / "risky-仓库采纳计划.md").read_text(
+        encoding="utf-8"
+    )
+    assert "阻塞项处理" in content
+
+
 def test_adapt_collaboration_plan_to_task_plan_outputs_staged_handoffs(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

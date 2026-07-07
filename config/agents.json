@@ -326,6 +326,7 @@
           "structure_task_breakdown",
           "plan_execution_stage",
           "adapt_adoption_plan_to_task_plan",
+          "compose_repo_review_task_plan",
           "adapt_collaboration_plan_to_task_plan",
           "save_task_plan",
           "save_markdown_report",

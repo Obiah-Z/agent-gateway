@@ -552,6 +552,153 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def compose_repo_review_task_plan(
+        repo_analysis_json: str,
+        risk_gate_json: str = "",
+        adoption_plan_json: str = "",
+        title: str = "",
+        scope: str = "",
+    ) -> str:
+        """把仓库分析、风险门禁和可选采纳路线整合成 planner 阶段计划。"""
+
+        if not repo_analysis_json.strip():
+            return "Error: repo_analysis_json is required"
+        analysis = json.loads(repo_analysis_json)
+        if not isinstance(analysis, dict):
+            return "Error: repo_analysis_json must be a JSON object"
+        if analysis.get("type") != "github_repo_analysis":
+            return "Error: repo_analysis_json type must be github_repo_analysis"
+
+        risk_gate: dict[str, Any] = {}
+        if risk_gate_json.strip():
+            parsed_gate = json.loads(risk_gate_json)
+            if not isinstance(parsed_gate, dict):
+                return "Error: risk_gate_json must be a JSON object"
+            if parsed_gate.get("type") != "github_repo_risk_gate_review":
+                return "Error: risk_gate_json type must be github_repo_risk_gate_review"
+            risk_gate = parsed_gate
+
+        adoption_plan: dict[str, Any] = {}
+        if adoption_plan_json.strip():
+            parsed_adoption = json.loads(adoption_plan_json)
+            if not isinstance(parsed_adoption, dict):
+                return "Error: adoption_plan_json must be a JSON object"
+            if parsed_adoption.get("type") != "github_repo_adoption_plan":
+                return "Error: adoption_plan_json type must be github_repo_adoption_plan"
+            adoption_plan = parsed_adoption
+
+        repository = str(analysis.get("repository") or risk_gate.get("review_target") or "unknown repository")
+        gateway_fit = analysis.get("gateway_fit") if isinstance(analysis.get("gateway_fit"), dict) else {}
+        gate_decision = str(risk_gate.get("decision") or "").strip()
+        adoption_decision = (
+            adoption_plan.get("decision") if isinstance(adoption_plan.get("decision"), dict) else {}
+        )
+        source_decision = str(
+            adoption_decision.get("action") or risk_gate.get("source_decision") or "unknown"
+        ).strip()
+        risk_actions = _clean_strings(
+            risk_gate.get("next_actions") if isinstance(risk_gate.get("next_actions"), list) else []
+        )
+        analysis_recommendations = _clean_strings(
+            analysis.get("recommendations") if isinstance(analysis.get("recommendations"), list) else []
+        )
+        reuse_ideas = _clean_strings(
+            analysis.get("gateway_reuse_ideas") if isinstance(analysis.get("gateway_reuse_ideas"), list) else []
+        )
+        risk_items = _clean_strings(analysis.get("risks") if isinstance(analysis.get("risks"), list) else [])
+        risk_items.extend(risk_actions[:4])
+
+        phases = [
+            {
+                "name": "证据与门禁复核",
+                "task": "复核仓库分析、许可证、维护状态、风险门禁结论和预期用途。",
+                "output": "可追溯的采纳证据摘要和 go / conditional-go / no-go 判断记录。",
+                "done": "仓库分析、风险扫描和门禁结论均已落盘，未通过项已有处理动作。",
+            }
+        ]
+        if gate_decision == "no-go" or source_decision in {"hold", "block"}:
+            phases.append(
+                {
+                    "name": "阻塞项处理",
+                    "task": "处理许可证、归档状态、高危风险或缺失证据等阻塞项；未解除前不进入实现。",
+                    "output": "阻塞项处理记录和是否继续推进的人工确认。",
+                    "done": "高危阻塞项已关闭，或明确记录为暂缓采纳。",
+                }
+            )
+        else:
+            seeds = reuse_ideas or analysis_recommendations or ["选择一个最小可验证借鉴点。"]
+            phases.append(
+                {
+                    "name": "最小实验拆解",
+                    "task": f"围绕「{seeds[0]}」拆成不超过半天的 Gateway 小实验。",
+                    "output": "最小实验设计、影响范围和回滚方式。",
+                    "done": "实验边界、测试命令和回滚路径已明确。",
+                }
+            )
+            phases.append(
+                {
+                    "name": "实现与验收",
+                    "task": "按最小实验实现改动，补充聚焦测试或人工验收记录。",
+                    "output": "代码或文档改动、测试结果和阶段总结。",
+                    "done": "相关测试通过，变更已按阶段提交。",
+                }
+            )
+
+        next_steps = []
+        if gate_decision == "no-go":
+            next_steps.append("先处理仓库风险门禁未通过项，不进入实现。")
+        elif gate_decision == "conditional-go":
+            next_steps.append("只允许进入最小验证，不直接引入生产依赖。")
+        elif gate_decision == "go":
+            next_steps.append("可以进入最小实验拆解，仍需保留回滚路径。")
+        next_steps.extend(risk_actions[:3])
+        next_steps.extend(analysis_recommendations[:3])
+        if not next_steps:
+            next_steps.append("先把计划写入 reports/plans，再选择第一阶段执行。")
+
+        acceptance_checks = [
+            "形成一份包含分析、风险门禁和采纳判断的执行记录。",
+            "每个实现阶段必须有聚焦测试、人工验收或回滚说明。",
+        ]
+        if gate_decision:
+            acceptance_checks.insert(0, f"风险门禁结论已处理：{gate_decision}。")
+
+        plan_title = title.strip() or f"{repository} 仓库采纳执行计划"
+        plan_scope = scope.strip() or "只把已分析和已审查的仓库结论转成执行计划，不直接引入依赖或修改生产配置。"
+        result = {
+            "type": "task_plan_from_repo_review",
+            "title": plan_title,
+            "goal": f"基于仓库分析和风险门禁，判断并分阶段采纳 {repository} 的可借鉴设计。",
+            "scope": plan_scope,
+            "repository": repository,
+            "fit": {
+                "score": gateway_fit.get("score", 0),
+                "priority": gateway_fit.get("priority", "unknown"),
+                "signals": gateway_fit.get("signals") or [],
+            },
+            "decision": {
+                "risk_gate": gate_decision or "missing",
+                "source_adoption": source_decision,
+                "recommended_action": "hold"
+                if gate_decision == "no-go" or source_decision in {"hold", "block"}
+                else "pilot",
+            },
+            "phases": phases[:5],
+            "risks": list(dict.fromkeys(risk_items))[:8],
+            "acceptance_checks": acceptance_checks,
+            "next_steps": list(dict.fromkeys(next_steps))[:6],
+            "save_task_plan_args": {
+                "title": plan_title,
+                "goal": f"基于仓库分析和风险门禁，判断并分阶段采纳 {repository} 的可借鉴设计。",
+                "scope": plan_scope,
+                "phases": phases[:5],
+                "risks": list(dict.fromkeys(risk_items))[:8],
+                "next_steps": list(dict.fromkeys(next_steps))[:6],
+            },
+            "note": "这是 planner 基于 repo-analyzer/reviewer 结构化结果生成的执行计划草案，不代表已经开始实现。",
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
     def adapt_collaboration_plan_to_task_plan(
         collaboration_json: str,
         title: str = "",
@@ -3217,6 +3364,38 @@ def register_builtin_tools(
             },
             handler=adapt_adoption_plan_to_task_plan,
             tags=("plan", "repository", "adoption"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_repo_review_task_plan",
+            description=(
+                "Compose a planner task plan from github_repo_analysis, optional "
+                "github_repo_risk_gate_review, and optional github_repo_adoption_plan. "
+                "Produces phases, risks, acceptance checks, next steps, and save_task_plan args."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["repo_analysis_json"],
+                "properties": {
+                    "repo_analysis_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_github_repo_analysis.",
+                    },
+                    "risk_gate_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by review_github_repo_risk_gate.",
+                    },
+                    "adoption_plan_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by plan_github_repo_adoption.",
+                    },
+                    "title": {"type": "string"},
+                    "scope": {"type": "string"},
+                },
+            },
+            handler=compose_repo_review_task_plan,
+            tags=("plan", "repository", "review", "adoption"),
         )
     )
     registry.register(
