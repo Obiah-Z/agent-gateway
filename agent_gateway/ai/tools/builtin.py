@@ -1327,6 +1327,61 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_task_plan_gate_review(
+        gate_review_json: str,
+        include_passed_items: bool = False,
+    ) -> str:
+        """把 task_plan_gate_review JSON 转成适合 reviewer 直接回复的中文摘要。"""
+
+        if not gate_review_json.strip():
+            return "Error: gate_review_json is required"
+        data = json.loads(gate_review_json)
+        if not isinstance(data, dict):
+            return "Error: gate_review_json must be a JSON object"
+        if data.get("type") != "task_plan_gate_review":
+            return "Error: gate_review_json type must be task_plan_gate_review"
+
+        decision_labels = {
+            "go": "通过",
+            "conditional-go": "有条件通过",
+            "no-go": "不建议继续",
+        }
+        checklist = data.get("checklist") if isinstance(data.get("checklist"), list) else []
+        failed_rows: list[list[object]] = []
+        passed_rows: list[list[object]] = []
+        for item in checklist:
+            if not isinstance(item, dict):
+                continue
+            row = [
+                item.get("item", "检查项"),
+                "通过" if item.get("passed") else "未通过",
+                item.get("evidence", "缺少证据"),
+            ]
+            if item.get("passed"):
+                passed_rows.append(row)
+            else:
+                failed_rows.append(row)
+
+        decision = str(data.get("decision") or "").strip()
+        sections = [
+            "## 计划门禁审查",
+            f"- 结论：{decision_labels.get(decision, decision or '待判断')}",
+            f"- 审查对象：{data.get('review_target') or '未命名计划'}",
+            f"- 边界：{data.get('note') or '这是执行前门禁，不代表已经完成发布验证。'}",
+            "",
+            "## 未通过项",
+            _markdown_table(["检查项", "状态", "依据"], failed_rows),
+            "",
+            "## 下一步",
+            _markdown_bullets(data.get("next_actions") if isinstance(data.get("next_actions"), list) else []),
+        ]
+        risks = _clean_strings(data.get("risks") if isinstance(data.get("risks"), list) else [])
+        if risks:
+            sections.extend(["", "## 主要风险", _markdown_bullets(risks)])
+        if include_passed_items:
+            sections.extend(["", "## 已通过项", _markdown_table(["检查项", "状态", "依据"], passed_rows)])
+        return "\n".join(sections).strip()
+
     def review_agent_collaboration_gate(
         collaboration_json: str = "",
         review_target: str = "",
@@ -6375,6 +6430,31 @@ def register_builtin_tools(
             },
             handler=review_task_plan_gate,
             tags=("review", "plan", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_task_plan_gate_review",
+            description=(
+                "Format a task_plan_gate_review JSON object into a concise Chinese "
+                "reviewer response with decision, failed checks, risks, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["gate_review_json"],
+                "properties": {
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "JSON string returned by review_task_plan_gate.",
+                    },
+                    "include_passed_items": {
+                        "type": "boolean",
+                        "description": "Whether to include passed checklist items in the summary.",
+                    },
+                },
+            },
+            handler=format_task_plan_gate_review,
+            tags=("review", "plan", "gate", "format", "user-facing"),
         )
     )
     registry.register(

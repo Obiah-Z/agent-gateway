@@ -337,6 +337,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "assess_risk_decision" in tools["reviewer"]
     assert "review_release_gate" in tools["reviewer"]
     assert "review_task_plan_gate" in tools["reviewer"]
+    assert "format_task_plan_gate_review" in tools["reviewer"]
     assert "review_agent_collaboration_gate" in tools["reviewer"]
     assert "review_agent_handoff_package_gate" in tools["reviewer"]
     assert "review_collaboration_progress_gate" in tools["reviewer"]
@@ -536,6 +537,10 @@ def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
     assert "review_task_plan_gate" in identity
     assert "review_task_plan_gate" in soul
     assert "review_task_plan_gate" in tools_md
+    assert "format_task_plan_gate_review" in identity
+    assert "format_task_plan_gate_review" in soul
+    assert "format_task_plan_gate_review" in tools_md
+    assert "不要直接贴原始 JSON" in identity
     assert "task_plan_from_research_option_comparison" in soul
     assert "方案验证计划" in tools_md
     assert "review_agent_collaboration_gate" in identity
@@ -726,6 +731,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_release_gate_markdown",
         "format_task_breakdown",
         "format_execution_stage_plan",
+        "format_task_plan_gate_review",
         "render_agent_collaboration_markdown",
         "render_agent_collaboration_progress_markdown",
         "render_collaboration_progress_gate_markdown",

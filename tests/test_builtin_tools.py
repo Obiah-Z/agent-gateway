@@ -681,6 +681,35 @@ def test_review_task_plan_gate_blocks_no_go_research_validation_plan(
     ]
 
 
+def test_format_task_plan_gate_review_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "title": "模糊计划",
+        "goal": "",
+        "scope": "",
+        "phases": [{"name": "阶段一", "task": ""}],
+        "risks": [],
+        "next_steps": [],
+    }
+    review = registry.dispatch(
+        "review_task_plan_gate",
+        {"plan_json": json.dumps(plan, ensure_ascii=False)},
+    )
+
+    summary = registry.dispatch(
+        "format_task_plan_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## 计划门禁审查" in summary
+    assert "- 结论：不建议继续" in summary
+    assert "| 边界已说明 | 未通过 | 缺少 scope / 不做事项。 |" in summary
+    assert "## 下一步" in summary
+    assert "- 补充 scope，明确做什么和不做什么。" in summary
+    assert "这是计划进入执行前的门禁审查" in summary
+
+
 def test_review_agent_collaboration_gate_allows_complete_route(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

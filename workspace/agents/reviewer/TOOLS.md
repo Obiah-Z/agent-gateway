@@ -10,6 +10,8 @@
 
 审查计划、采纳路线图、方案验证计划、执行手册或 planner 输出是否可以进入实现时，使用 `review_task_plan_gate`。它检查目标、边界、阶段、完成标准、风险和验收依据，输出 go / conditional-go / no-go。输入是 `task_plan_from_research_option_comparison` 时，它还会检查方案门禁、推荐方案、候选方案、评价维度和执行动作限制。
 
+直接回复计划门禁结果时，使用 `format_task_plan_gate_review`，不要把 `review_task_plan_gate` 的原始 JSON 直接贴给用户。
+
 审查入口 Agent 输出的 `agent_collaboration_plan` 是否可以进入人工或后续编排交接时，使用 `review_agent_collaboration_gate`。它检查目标、协作路线、输入契约、阶段输出、约束和“未自动执行”声明，输出 go / conditional-go / no-go。
 
 审查入口 Agent 输出的 `agent_handoff_package` 是否可以交给目标 Agent 时，使用 `review_agent_handoff_package_gate`。它检查目标 Agent、用户原始目标、handoff_prompt 结构、约束边界、推荐依据和“未自动执行”声明，输出 go / conditional-go / no-go。
