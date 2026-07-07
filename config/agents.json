@@ -211,6 +211,7 @@
       "tool_policy": {
         "mode": "allowlist",
         "tool_names": [
+          "github_repo_summary",
           "read_file",
           "list_directory",
           "get_current_time",

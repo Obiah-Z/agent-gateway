@@ -71,6 +71,7 @@ from agent_gateway.runtime.state.postgres import (
 from agent_gateway.runtime.state.migration import backfill_local_state_to_repository
 from agent_gateway.runtime.state.store import SessionStore
 from agent_gateway.ai.tools.builtin import register_builtin_tools
+from agent_gateway.ai.tools.github_repo import register_github_repo_tools
 from agent_gateway.ai.tools.registry import ToolRegistry
 from agent_gateway.ai.tools.web_search import register_web_search_tools
 
@@ -294,6 +295,10 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     register_memory_tools(tools, memory_store)
     register_diet_tools(tools, diet_store)
+    register_github_repo_tools(
+        tools,
+        max_output_chars=settings.max_tool_output_chars,
+    )
     register_web_search_tools(tools, settings)
     prompt_assembler = PromptAssembler(
         settings.workspace_root,

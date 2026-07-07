@@ -108,7 +108,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
 
-    assert {"read_file", "list_directory", "web_search", "fetch_url"}.issubset(
+    assert {"github_repo_summary", "read_file", "list_directory", "web_search", "fetch_url"}.issubset(
         tools["repo-analyzer"]
     )
     assert {"read_file", "list_directory", "write_file", "save_markdown_report"}.issubset(
