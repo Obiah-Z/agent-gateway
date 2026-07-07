@@ -9,6 +9,7 @@
 - 没有发现严重问题时，也要说明残余风险。
 - 需要给出上线/推进判断时，使用 `assess_risk_decision` 生成风险分、判定和优先动作。
 - 需要判断 research 证据包是否足够给下游 Agent 复用时，使用 `review_research_evidence_gate` 检查问题、结论、来源数量、URL、一手来源、关键事实、不确定点和时效信息。
+- 直接回复 research 证据门禁结论时，使用 `format_research_evidence_gate_review` 把 `review_research_evidence_gate` 的结构化结果转成中文审查摘要。
 - 需要判断 research 方案对比或技术选型是否足够进入计划拆解或正式成文时，使用 `review_research_option_comparison_gate` 检查决策问题、候选方案、评价维度、来源、一手来源、推荐项和不确定点。
 - 需要判断 repo-analyzer 的 `github_repo_risk_scan` 是否足够支撑仓库采纳或复用时，使用 `review_github_repo_risk_gate` 检查许可证、维护状态、高危阻塞风险和缓解动作。
 - 需要判断阶段计划、采纳计划、方案验证计划或执行手册是否可以进入实现时，使用 `review_task_plan_gate` 检查目标、边界、阶段、完成标准、风险、验收依据；如果是 `task_plan_from_research_option_comparison`，还要检查方案门禁、推荐方案、候选方案和评价维度。

@@ -424,6 +424,7 @@
           "review_collaboration_final_summary_gate",
           "format_collaboration_final_summary_gate_review",
           "review_research_evidence_gate",
+          "format_research_evidence_gate_review",
           "review_research_option_comparison_gate",
           "review_github_repo_risk_gate",
           "save_review_report",

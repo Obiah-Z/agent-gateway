@@ -1234,6 +1234,44 @@ def test_review_research_evidence_gate_blocks_weak_pack(tmp_path: Path) -> None:
     assert "补充检索日期、发布时间或最后更新时间。" in data["next_actions"]
 
 
+def test_format_research_evidence_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    evidence = {
+        "type": "research_evidence_pack",
+        "topic": "未知方案",
+        "research_question": "能不能用？",
+        "conclusion": "",
+        "evidence_quality": "missing",
+        "sources": [{"title": "没有链接的来源", "source_type": "blog", "fact": "只是一句描述。"}],
+        "key_facts": [],
+        "uncertainty": ["缺少来源。"],
+    }
+    review = registry.dispatch(
+        "review_research_evidence_gate",
+        {
+            "evidence_json": json.dumps(evidence, ensure_ascii=False),
+            "min_sources": 2,
+            "require_primary_source": True,
+            "time_sensitive": True,
+        },
+    )
+
+    formatted = registry.dispatch(
+        "format_research_evidence_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## Research 证据门禁审查" in formatted
+    assert "- 结论：不建议继续" in formatted
+    assert "- 证据质量：missing" in formatted
+    assert "- 来源数量：1" in formatted
+    assert "| 来源 URL 可核验 | 未通过 | 可核验 URL 数量：0。 |" in formatted
+    assert "- 为每个来源补充可访问 URL。" in formatted
+
+
 def test_review_research_option_comparison_gate_allows_complete_comparison(
     tmp_path: Path,
 ) -> None:

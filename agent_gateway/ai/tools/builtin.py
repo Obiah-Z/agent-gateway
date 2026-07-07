@@ -2227,6 +2227,64 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_research_evidence_gate_review(
+        gate_review_json: str,
+        include_passed_items: bool = False,
+    ) -> str:
+        """把 research_evidence_gate_review JSON 转成可直接回复的中文摘要。"""
+
+        if not gate_review_json.strip():
+            return "Error: gate_review_json is required"
+        data = json.loads(gate_review_json)
+        if not isinstance(data, dict):
+            return "Error: gate_review_json must be a JSON object"
+        if data.get("type") != "research_evidence_gate_review":
+            return "Error: gate_review_json type must be research_evidence_gate_review"
+
+        decision_labels = {
+            "go": "通过",
+            "conditional-go": "有条件通过",
+            "no-go": "不建议继续",
+        }
+        checklist = data.get("checklist") if isinstance(data.get("checklist"), list) else []
+        failed_rows: list[list[object]] = []
+        passed_rows: list[list[object]] = []
+        for item in checklist:
+            if not isinstance(item, dict):
+                continue
+            row = [
+                item.get("item", "检查项"),
+                "通过" if item.get("passed") else "未通过",
+                item.get("evidence", "缺少证据"),
+            ]
+            if item.get("passed"):
+                passed_rows.append(row)
+            else:
+                failed_rows.append(row)
+
+        decision = str(data.get("decision") or "").strip()
+        sections = [
+            "## Research 证据门禁审查",
+            f"- 结论：{decision_labels.get(decision, decision or '待判断')}",
+            f"- 审查对象：{data.get('review_target') or '未命名证据包'}",
+            f"- 证据质量：{data.get('evidence_quality') or 'missing'}",
+            f"- 来源数量：{data.get('source_count', 0)}",
+            f"- 一手来源：{data.get('primary_source_count', 0)}",
+            f"- 边界：{data.get('note') or '这是证据复用前门禁，不代表事实永久有效。'}",
+            "",
+            "## 未通过项",
+            _markdown_table(["检查项", "状态", "依据"], failed_rows),
+            "",
+            "## 下一步",
+            _markdown_bullets(data.get("next_actions") if isinstance(data.get("next_actions"), list) else []),
+        ]
+        risks = _clean_strings(data.get("risks") if isinstance(data.get("risks"), list) else [])
+        if risks:
+            sections.extend(["", "## 不确定点和风险", _markdown_bullets(risks)])
+        if include_passed_items:
+            sections.extend(["", "## 已通过项", _markdown_table(["检查项", "状态", "依据"], passed_rows)])
+        return "\n".join(sections).strip()
+
     def review_research_option_comparison_gate(
         comparison_json: str = "",
         review_target: str = "",
@@ -6913,6 +6971,31 @@ def register_builtin_tools(
             },
             handler=review_research_evidence_gate,
             tags=("review", "research", "evidence", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_research_evidence_gate_review",
+            description=(
+                "Format a research_evidence_gate_review JSON object into a concise Chinese "
+                "reviewer response with decision, evidence quality, source counts, failed checks, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["gate_review_json"],
+                "properties": {
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "JSON string returned by review_research_evidence_gate.",
+                    },
+                    "include_passed_items": {
+                        "type": "boolean",
+                        "description": "Whether to include passed checklist items in the summary.",
+                    },
+                },
+            },
+            handler=format_research_evidence_gate_review,
+            tags=("review", "research", "evidence", "gate", "format", "user-facing"),
         )
     )
     registry.register(
