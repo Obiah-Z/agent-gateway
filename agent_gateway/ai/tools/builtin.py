@@ -4287,6 +4287,7 @@ def register_builtin_tools(
         handoff_prompt = ""
         capability_catalog_json = ""
         capability_match_json = ""
+        capability_handoff_package_json = ""
         capability_response = ""
         if classification.get("requires_collaboration"):
             collaboration_plan_json = plan_agent_collaboration(
@@ -4318,6 +4319,20 @@ def register_builtin_tools(
                 capability_response = format_agent_capability_match(
                     match_json=capability_match_json,
                     include_alternatives=True,
+                )
+                capability_handoff_package_json = compose_agent_handoff_package(
+                    user_goal=goal,
+                    match_json=capability_match_json,
+                    context_summary=context_hint,
+                    constraints=constraints_clean,
+                    expected_output=expected_output,
+                    source_platform=source_platform,
+                    should_persist=should_persist,
+                    known_inputs=[context_hint] if context_hint.strip() else [],
+                )
+                capability_response = format_agent_handoff_package(
+                    package_json=capability_handoff_package_json,
+                    include_prompt=True,
                 )
             else:
                 capability_response = format_agent_capability_catalog(
@@ -4366,6 +4381,9 @@ def register_builtin_tools(
                 "collaboration_plan": json.loads(collaboration_plan_json) if collaboration_plan_json else None,
                 "capability_catalog": json.loads(capability_catalog_json) if capability_catalog_json else None,
                 "capability_match": json.loads(capability_match_json) if capability_match_json else None,
+                "capability_handoff_package": (
+                    json.loads(capability_handoff_package_json) if capability_handoff_package_json else None
+                ),
                 "route_explanation": json.loads(route_explanation_json),
                 "handoff_prompt": handoff_prompt,
                 "formatted_response": formatted_response,

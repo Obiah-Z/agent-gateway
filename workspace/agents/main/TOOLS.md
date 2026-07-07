@@ -28,7 +28,7 @@
 
 - 当用户提出复杂目标，而你只需要给出稳定的入口判断、协作路线和下一步说明时优先使用。
 - 它会内部完成分类、必要的协作路线、路由解释和格式化回复。
-- 用户询问 Agent 能力目录或某个任务该交给谁时，它会返回 `capability_catalog`、可选 `capability_match` 和中文说明。
+- 用户询问 Agent 能力目录或某个任务该交给谁时，它会返回 `capability_catalog`、可选 `capability_match`、可选 `capability_handoff_package` 和中文说明。
 - 该工具不执行任何目标 Agent；输出中的 `formatted_response` 可直接给用户。
 
 ## `list_agent_capabilities` / `format_agent_capability_catalog`

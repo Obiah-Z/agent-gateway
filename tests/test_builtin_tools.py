@@ -2328,8 +2328,10 @@ def test_prepare_entry_route_response_matches_agent_capability(
     assert data["classification"]["intent"] == "agent-capabilities"
     assert data["capability_catalog"]["count"] == 2
     assert data["capability_match"]["recommended_agent_id"] == "doc-writer"
-    assert "# Agent 推荐" in data["formatted_response"]
-    assert "推荐 Agent：`doc-writer`" in data["formatted_response"]
+    assert data["capability_handoff_package"]["target_agent_id"] == "doc-writer"
+    assert "# Agent 交接包" in data["formatted_response"]
+    assert "目标 Agent：`doc-writer`" in data["formatted_response"]
+    assert "```text" in data["formatted_response"]
     assert "不代表目标 Agent 已经自动执行" in data["formatted_response"]
 
 
