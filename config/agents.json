@@ -300,6 +300,7 @@
           "list_directory",
           "write_file",
           "structure_task_breakdown",
+          "plan_execution_stage",
           "save_task_plan",
           "save_markdown_report",
           "get_current_time",

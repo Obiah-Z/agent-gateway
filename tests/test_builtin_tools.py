@@ -151,6 +151,49 @@ def test_structure_task_breakdown_reports_gaps_and_next_steps(tmp_path: Path) ->
     assert data["next_steps"][0] == "先执行「阶段一」：补结构化工具"
 
 
+def test_plan_execution_stage_outputs_engineering_plan(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "plan_execution_stage",
+        {
+            "objective": "增强 repo-analyzer 的报告产出能力",
+            "current_state": "已有 summary 和 fit 工具",
+            "scope": "只新增结构化分析工具，不做自动多 Agent 调度",
+            "dependencies": ["github_repo_summary", "github_repo_gateway_fit"],
+            "risks": ["输出结构过宽导致 Agent 难以落盘"],
+            "acceptance_checks": ["pytest tests/test_github_repo_tools.py -q"],
+            "next_actions": ["新增工具", "更新提示词", "运行测试并提交"],
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "execution_stage_plan"
+    assert data["objective"] == "增强 repo-analyzer 的报告产出能力"
+    assert data["readiness"] == "ready"
+    assert data["dependencies"] == ["github_repo_summary", "github_repo_gateway_fit"]
+    assert data["acceptance_checks"] == ["pytest tests/test_github_repo_tools.py -q"]
+    assert data["commit_strategy"] == "每完成一个可验证小阶段提交一次"
+    assert data["next_actions"][0] == "新增工具"
+
+
+def test_plan_execution_stage_reports_missing_acceptance_checks(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "plan_execution_stage",
+            {"objective": "整理 Agent 能力边界"},
+        )
+    )
+
+    assert data["readiness"] == "needs_refinement"
+    assert "缺少 acceptance_checks。" in data["gaps"]
+    assert data["acceptance_checks"] == ["补充可执行测试或人工验收标准。"]
+
+
 def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

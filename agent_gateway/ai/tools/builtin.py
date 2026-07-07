@@ -384,6 +384,55 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def plan_execution_stage(
+        objective: str,
+        current_state: str = "",
+        scope: str = "",
+        dependencies: list[str] | None = None,
+        risks: list[str] | None = None,
+        acceptance_checks: list[str] | None = None,
+        commit_strategy: str = "每完成一个可验证小阶段提交一次",
+        next_actions: list[str] | None = None,
+    ) -> str:
+        """生成工程小阶段执行计划，补齐依赖、风险、验收和提交节奏。"""
+
+        objective = objective.strip()
+        deps = _clean_strings(dependencies)
+        risk_items = _clean_strings(risks)
+        checks = _clean_strings(acceptance_checks)
+        actions = _clean_strings(next_actions)
+
+        readiness = "ready"
+        gaps = []
+        if not objective:
+            readiness = "blocked"
+            gaps.append("缺少 objective。")
+        if not checks:
+            readiness = "needs_refinement" if readiness != "blocked" else readiness
+            gaps.append("缺少 acceptance_checks。")
+            checks = ["补充可执行测试或人工验收标准。"]
+        if not actions:
+            actions = ["确认目标和边界。", "实现最小可验证改动。", "运行相关测试并提交。"]
+
+        return json.dumps(
+            {
+                "type": "execution_stage_plan",
+                "objective": objective,
+                "current_state": current_state.strip(),
+                "scope": scope.strip() or "待明确",
+                "dependencies": deps,
+                "risks": risk_items,
+                "acceptance_checks": checks,
+                "commit_strategy": commit_strategy.strip()
+                or "每完成一个可验证小阶段提交一次",
+                "readiness": readiness,
+                "gaps": gaps,
+                "next_actions": actions[:6],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_review_report(
         title: str,
         conclusion: str,
@@ -1256,6 +1305,32 @@ def register_builtin_tools(
             },
             handler=structure_task_breakdown,
             tags=("plan", "structure", "task"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="plan_execution_stage",
+            description=(
+                "Create a focused engineering execution-stage plan with objective, "
+                "scope, dependencies, risks, acceptance checks, commit strategy, "
+                "readiness, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["objective"],
+                "properties": {
+                    "objective": {"type": "string"},
+                    "current_state": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "dependencies": {"type": "array", "items": {"type": "string"}},
+                    "risks": {"type": "array", "items": {"type": "string"}},
+                    "acceptance_checks": {"type": "array", "items": {"type": "string"}},
+                    "commit_strategy": {"type": "string"},
+                    "next_actions": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=plan_execution_stage,
+            tags=("plan", "execution", "engineering"),
         )
     )
     registry.register(
