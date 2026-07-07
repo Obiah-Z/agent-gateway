@@ -59,6 +59,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_entry_response" in tools
     assert "build_agent_handoff_prompt" in tools
     assert "build_collaboration_stage_handoff" in tools
+    assert "summarize_collaboration_progress" in tools
     assert "list_agent_collaboration_routes" in tools
     assert "plan_agent_collaboration" in tools
     assert "explain_agent_route" in tools
@@ -76,6 +77,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_entry_response" in combined_prompt
     assert "build_agent_handoff_prompt" in combined_prompt
     assert "build_collaboration_stage_handoff" in combined_prompt
+    assert "summarize_collaboration_progress" in combined_prompt
     assert "list_agent_collaboration_routes" in combined_prompt
     assert "plan_agent_collaboration" in combined_prompt
     assert "explain_agent_route" in combined_prompt
@@ -104,6 +106,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "suggest_agent_delegation" in tools
         assert "build_agent_handoff_prompt" in tools
         assert "build_collaboration_stage_handoff" in tools
+        assert "summarize_collaboration_progress" in tools
         assert "plan_agent_collaboration" in tools
         assert "explain_agent_route" in tools
         assert "prepare_entry_route_response" in tools
@@ -113,6 +116,8 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "build_agent_handoff_prompt" in soul
         assert "build_collaboration_stage_handoff" in identity
         assert "build_collaboration_stage_handoff" in soul
+        assert "summarize_collaboration_progress" in identity
+        assert "summarize_collaboration_progress" in soul
         assert "list_agent_collaboration_routes" in identity
         assert "list_agent_collaboration_routes" in soul
         assert "plan_agent_collaboration" in identity
@@ -126,6 +131,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "classify_task_intent" in tools_md
         assert "build_agent_handoff_prompt" in tools_md
         assert "build_collaboration_stage_handoff" in tools_md
+        assert "summarize_collaboration_progress" in tools_md
         assert "list_agent_collaboration_routes" in tools_md
         assert "plan_agent_collaboration" in tools_md
         assert "explain_agent_route" in tools_md
@@ -549,6 +555,8 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "build_agent_handoff_prompt" in tools["wework-entry"]
     assert "build_collaboration_stage_handoff" in tools["feishu-entry"]
     assert "build_collaboration_stage_handoff" in tools["wework-entry"]
+    assert "summarize_collaboration_progress" in tools["feishu-entry"]
+    assert "summarize_collaboration_progress" in tools["wework-entry"]
     assert "plan_agent_collaboration" in tools["feishu-entry"]
     assert "plan_agent_collaboration" in tools["wework-entry"]
     assert "explain_agent_route" in tools["feishu-entry"]
@@ -568,6 +576,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "list_agent_collaboration_routes" not in tools[agent_id]
         assert "build_agent_handoff_prompt" not in tools[agent_id]
         assert "build_collaboration_stage_handoff" not in tools[agent_id]
+        assert "summarize_collaboration_progress" not in tools[agent_id]
         assert "plan_agent_collaboration" not in tools[agent_id]
         assert "explain_agent_route" not in tools[agent_id]
         assert "prepare_entry_route_response" not in tools[agent_id]
@@ -597,6 +606,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "diet_day_review_plan_generate",
         "build_agent_handoff_prompt",
         "build_collaboration_stage_handoff",
+        "summarize_collaboration_progress",
         "list_agent_collaboration_routes",
         "plan_agent_collaboration",
         "research-option-validation",

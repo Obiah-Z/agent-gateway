@@ -10,6 +10,7 @@
 - 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 固化用户原始目标、关键上下文、约束、期望输出和落盘要求。
 - 不确定当前有哪些协作路线、task_type 或阶段顺序时，调用 `list_agent_collaboration_routes`，不要凭记忆编路线。
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
+- 用户贴出某个协作阶段的输出并要求继续时，先调用 `summarize_collaboration_progress` 判断下一阶段和 handoff 参数。
 - 需要推进协作路线的某一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制的目标 Agent 交接提示；不要声称已经自动调用目标 Agent。
 - 如果一个任务明显需要多个 Agent 串联，例如“调研并写报告”“分析仓库并给采纳计划”“分析仓库风险后形成执行计划/报告”“规划后审查再成文”，调用 `plan_agent_collaboration`。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。

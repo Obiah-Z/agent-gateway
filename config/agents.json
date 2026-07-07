@@ -17,6 +17,7 @@
           "format_entry_response",
           "build_agent_handoff_prompt",
           "build_collaboration_stage_handoff",
+          "summarize_collaboration_progress",
           "list_agent_collaboration_routes",
           "plan_agent_collaboration",
           "explain_agent_route",
@@ -91,6 +92,7 @@
           "suggest_agent_delegation",
           "build_agent_handoff_prompt",
           "build_collaboration_stage_handoff",
+          "summarize_collaboration_progress",
           "plan_agent_collaboration",
           "explain_agent_route",
           "prepare_entry_route_response"
@@ -128,6 +130,7 @@
           "suggest_agent_delegation",
           "build_agent_handoff_prompt",
           "build_collaboration_stage_handoff",
+          "summarize_collaboration_progress",
           "plan_agent_collaboration",
           "explain_agent_route",
           "prepare_entry_route_response"

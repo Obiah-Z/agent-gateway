@@ -6,6 +6,7 @@
 - 复杂任务先调用 `classify_task_intent` 判断类型和推荐 Agent。
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
 - 不确定当前有哪些协作路线、task_type 或阶段顺序时，调用 `list_agent_collaboration_routes`，不要凭记忆编路线。
+- 用户贴出某个协作阶段的输出并要求继续时，先调用 `summarize_collaboration_progress` 判断下一阶段和 handoff 参数。
 - 需要推进协作路线的某一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制的目标 Agent 交接提示；不要声称已经自动调用目标 Agent。
 - 如果任务需要 research、repo-analyzer、planner、reviewer、doc-writer 等多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。

@@ -2585,6 +2585,112 @@ def register_builtin_tools(
         ]
         return "\n".join(sections).strip()
 
+    def summarize_collaboration_progress(
+        collaboration_plan_json: str,
+        completed_stage_outputs: list[dict[str, Any]] | None = None,
+        current_stage: int = 0,
+    ) -> str:
+        """汇总多 Agent 协作路线进度，并给出下一阶段交接参数。"""
+
+        if not collaboration_plan_json.strip():
+            return "Error: collaboration_plan_json is required"
+        plan = json.loads(collaboration_plan_json)
+        if not isinstance(plan, dict):
+            return "Error: collaboration_plan_json must be a JSON object"
+        if plan.get("type") != "agent_collaboration_plan":
+            return "Error: collaboration_plan_json type must be agent_collaboration_plan"
+        handoffs = [item for item in plan.get("handoff_sequence") or [] if isinstance(item, dict)]
+        if not handoffs:
+            return "Error: collaboration_plan_json has no handoff_sequence"
+
+        outputs = [item for item in completed_stage_outputs or [] if isinstance(item, dict)]
+        completed_by_step: dict[int, dict[str, Any]] = {}
+        for item in outputs:
+            try:
+                step = int(item.get("step") or item.get("stage") or 0)
+            except (TypeError, ValueError):
+                step = 0
+            if 1 <= step <= len(handoffs):
+                completed_by_step[step] = item
+        completed_count = max(completed_by_step.keys(), default=0)
+        if current_stage > 0:
+            completed_count = min(max(0, current_stage - 1), len(handoffs))
+        next_stage = completed_count + 1 if completed_count < len(handoffs) else None
+        status = "completed" if next_stage is None else ("not-started" if completed_count == 0 else "in-progress")
+
+        stage_rows = []
+        for index, stage in enumerate(handoffs, start=1):
+            output = completed_by_step.get(index, {})
+            stage_rows.append(
+                {
+                    "step": index,
+                    "agent_id": stage.get("agent_id") or "unknown",
+                    "expected_output": stage.get("expected_output") or "结构化结果",
+                    "status": "completed" if index <= completed_count else ("next" if index == next_stage else "pending"),
+                    "output_summary": str(output.get("summary") or output.get("output_summary") or "").strip(),
+                }
+            )
+
+        latest_output = completed_by_step.get(completed_count, {}) if completed_count else {}
+        upstream_summary = str(
+            latest_output.get("summary")
+            or latest_output.get("output_summary")
+            or latest_output.get("result")
+            or ""
+        ).strip()
+        upstream_json = ""
+        if latest_output:
+            raw_payload = latest_output.get("json") or latest_output.get("payload")
+            if raw_payload is not None:
+                upstream_json = (
+                    raw_payload
+                    if isinstance(raw_payload, str)
+                    else json.dumps(raw_payload, ensure_ascii=False, indent=2)
+                )
+
+        next_stage_data = handoffs[next_stage - 1] if next_stage is not None else {}
+        next_handoff_args = None
+        if next_stage is not None:
+            next_handoff_args = {
+                "collaboration_plan_json": collaboration_plan_json,
+                "stage": next_stage,
+                "upstream_result_summary": upstream_summary,
+                "upstream_result_json": upstream_json,
+            }
+
+        return json.dumps(
+            {
+                "type": "agent_collaboration_progress",
+                "task_type": plan.get("task_type") or "unknown",
+                "status": status,
+                "completed_stage_count": completed_count,
+                "total_stage_count": len(handoffs),
+                "next_stage": (
+                    {
+                        "step": next_stage,
+                        "agent_id": next_stage_data.get("agent_id") or "unknown",
+                        "purpose": next_stage_data.get("purpose") or "按职责处理",
+                        "expected_output": next_stage_data.get("expected_output") or "结构化结果",
+                    }
+                    if next_stage is not None
+                    else None
+                ),
+                "stages": stage_rows,
+                "next_handoff_args": next_handoff_args,
+                "next_actions": (
+                    ["协作路线已完成，可交给 doc-writer 汇总或向用户报告结果。"]
+                    if next_stage is None
+                    else [
+                        f"调用 build_collaboration_stage_handoff 生成第 {next_stage} 阶段交接提示。",
+                        "把上一阶段结构化输出作为 upstream_result_summary 或 upstream_result_json。",
+                    ]
+                ),
+                "boundary": "这是协作进度摘要，不代表任何 Agent 已经自动执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def _agent_collaboration_route_templates() -> dict[str, list[dict[str, str]]]:
         """返回入口层可规划的多 Agent 协作路线模板。"""
 
@@ -5106,6 +5212,36 @@ def register_builtin_tools(
             },
             handler=build_collaboration_stage_handoff,
             tags=("agent", "collaboration", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="summarize_collaboration_progress",
+            description=(
+                "Summarize progress for an agent_collaboration_plan and return the "
+                "next stage plus ready-to-use build_collaboration_stage_handoff args."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["collaboration_plan_json"],
+                "properties": {
+                    "collaboration_plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_agent_collaboration.",
+                    },
+                    "completed_stage_outputs": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Completed stage summaries with step/stage and summary/output payload.",
+                    },
+                    "current_stage": {
+                        "type": "integer",
+                        "description": "Optional 1-based current stage; completed count is current_stage - 1.",
+                    },
+                },
+            },
+            handler=summarize_collaboration_progress,
+            tags=("agent", "collaboration", "progress", "handoff"),
         )
     )
     registry.register(

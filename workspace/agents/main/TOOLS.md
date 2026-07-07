@@ -74,10 +74,22 @@
 
 使用规则：
 
+- 如果用户贴出了上一阶段输出并询问下一步，先调用 `summarize_collaboration_progress` 得到下一阶段和 handoff 参数。
 - 已经有协作路线，并且用户要开始某一阶段或进入下一阶段时使用。
 - `stage` 使用从 1 开始的阶段号。
 - 如果已有上一阶段结果，放入 `upstream_result_summary` 或 `upstream_result_json`。
 - 输出只是交接提示，不代表目标 Agent 已经执行。
+
+## `summarize_collaboration_progress`
+
+用于根据 `agent_collaboration_plan` 和已完成阶段输出判断当前协作进度。
+
+使用规则：
+
+- 用户说“上一阶段完成了 / 继续下一步 / 接下来交给谁”时使用。
+- `completed_stage_outputs` 里每项至少包含 `step` 或 `stage`，以及 `summary`、`output_summary`、`result`、`json` 或 `payload`。
+- 工具会返回 `next_stage` 和可直接传给 `build_collaboration_stage_handoff` 的 `next_handoff_args`。
+- 输出只是进度摘要，不代表任何 Agent 已经执行。
 
 ## `explain_agent_route`
 

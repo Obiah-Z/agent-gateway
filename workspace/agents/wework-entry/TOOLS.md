@@ -12,6 +12,8 @@
 
 需要开始协作路线的某一阶段，或把上一阶段结果交给下一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制交接提示。该工具不会自动调用目标 Agent。
 
+用户贴出上一阶段输出并询问下一步时，先调用 `summarize_collaboration_progress` 判断进度、下一阶段和可用 handoff 参数。该工具不会自动调用目标 Agent。
+
 复杂技术选型、方案对比或中间件取舍任务如果还要求验证计划、风险审查、落地计划或正式报告，`task_type` 使用 `research-option-validation`。
 
 用户追问为什么这样路由、为什么需要多个 Agent 或下一步先交给谁时，调用 `explain_agent_route`。该工具只解释路线，不会自动执行目标 Agent。

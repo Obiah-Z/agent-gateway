@@ -1483,6 +1483,59 @@ def test_build_collaboration_stage_handoff_uses_upstream_result(tmp_path: Path) 
     assert "不代表目标 Agent 已经执行" in handoff
 
 
+def test_summarize_collaboration_progress_returns_next_handoff_args(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = json.loads(
+        registry.dispatch(
+            "plan_agent_collaboration",
+            {
+                "user_goal": "对比 RabbitMQ、Redis、Kafka，并形成 Gateway 入站队列验证计划。",
+                "task_type": "research-option-validation",
+                "constraints": ["只做验证计划，不直接改生产配置"],
+            },
+        )
+    )
+
+    data = json.loads(
+        registry.dispatch(
+            "summarize_collaboration_progress",
+            {
+                "collaboration_plan_json": json.dumps(plan, ensure_ascii=False),
+                "completed_stage_outputs": [
+                    {
+                        "step": 1,
+                        "summary": "research 已输出 research_option_comparison。",
+                        "payload": {"type": "research_option_comparison"},
+                    },
+                    {
+                        "step": 2,
+                        "summary": "reviewer 已给出 conditional-go。",
+                        "payload": {"type": "research_option_comparison_gate_review"},
+                    },
+                ],
+            },
+        )
+    )
+
+    assert data["type"] == "agent_collaboration_progress"
+    assert data["status"] == "in-progress"
+    assert data["completed_stage_count"] == 2
+    assert data["total_stage_count"] == 5
+    assert data["next_stage"]["step"] == 3
+    assert data["next_stage"]["agent_id"] == "planner"
+    assert data["stages"][0]["status"] == "completed"
+    assert data["stages"][2]["status"] == "next"
+    assert data["next_handoff_args"]["stage"] == 3
+    assert "reviewer 已给出 conditional-go" in data["next_handoff_args"][
+        "upstream_result_summary"
+    ]
+    assert "build_collaboration_stage_handoff" in data["next_actions"][0]
+    assert "不代表任何 Agent 已经自动执行" in data["boundary"]
+
+
 def test_plan_agent_collaboration_builds_research_option_validation_route(
     tmp_path: Path,
 ) -> None:
