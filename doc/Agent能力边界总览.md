@@ -20,7 +20,7 @@
 
 `repo-analyzer` 负责 GitHub 仓库分析、Gateway 适配评估、轻量风险扫描和采纳路线图。`github_repo_risk_scan` 用于检查许可证、维护状态、README 证据、issue 数和依赖文件信号；repo-analyzer 不负责正式文档成文和任务执行。
 
-`planner` 负责阶段计划、执行拆解、采纳计划转换、仓库审查结果整合和协作路线转换。`compose_repo_review_task_plan` 用于把 repo-analyzer 的 `github_repo_analysis`、reviewer 的 `github_repo_risk_gate_review` 和可选 `github_repo_adoption_plan` 合并为可落盘的仓库采纳执行计划；`adapt_collaboration_plan_to_task_plan` 用于把入口 Agent 的 `agent_collaboration_plan` 转成可落盘的阶段计划，明确每一阶段交给哪个 Agent、输入依据、输出和完成标准，但不自动调用任何 Agent。
+`planner` 负责阶段计划、执行拆解、采纳计划转换、仓库审查结果整合、方案验证计划和协作路线转换。`compose_repo_review_task_plan` 用于把 repo-analyzer 的 `github_repo_analysis`、reviewer 的 `github_repo_risk_gate_review` 和可选 `github_repo_adoption_plan` 合并为可落盘的仓库采纳执行计划；`compose_research_option_validation_plan` 用于把 research 的 `research_option_comparison` 和 reviewer 的 `research_option_comparison_gate_review` 转成最小验证计划，no-go 时只能安排补证，不能直接进入实现；`adapt_collaboration_plan_to_task_plan` 用于把入口 Agent 的 `agent_collaboration_plan` 转成可落盘的阶段计划，明确每一阶段交给哪个 Agent、输入依据、输出和完成标准，但不自动调用任何 Agent。
 
 `reviewer` 负责风险审查、发布门禁、计划门禁、协作路线门禁、证据复用门禁、方案对比门禁和仓库风险门禁。`review_research_evidence_gate` 用于检查 research 证据包是否具备问题、结论、来源 URL、一手来源、关键事实、不确定点和时效说明；`review_research_option_comparison_gate` 用于检查 research 方案对比是否具备决策问题、候选方案、评价维度、来源、一手来源、推荐项、候选方案证据和不确定点，避免未经审查的选型材料直接进入 planner 或 doc-writer；`review_github_repo_risk_gate` 用于检查 repo-analyzer 的 `github_repo_risk_scan` 是否具备明确用途、许可证判断、维护状态、高危阻塞风险和缓解动作；`review_agent_collaboration_gate` 用于检查入口 Agent 生成的多 Agent 协作路线是否具备目标、交接契约、阶段输出、约束和未自动执行声明。reviewer 不直接修改系统或执行高风险动作。
 

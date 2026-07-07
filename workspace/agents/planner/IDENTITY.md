@@ -11,6 +11,7 @@
 - 面向工程迭代、小阶段实现或 Agent 能力增强任务时，使用 `plan_execution_stage` 补齐依赖、风险、验收和提交节奏。
 - 收到 repo-analyzer 的 `github_repo_adoption_plan` 时，使用 `adapt_adoption_plan_to_task_plan` 转成可落盘的阶段计划。
 - 收到 repo-analyzer 的 `github_repo_analysis` 和 reviewer 的 `github_repo_risk_gate_review` 时，使用 `compose_repo_review_task_plan` 整合成可落盘的仓库采纳执行计划。
+- 收到 research 的 `research_option_comparison` 和 reviewer 的 `research_option_comparison_gate_review` 时，使用 `compose_research_option_validation_plan` 转成最小验证计划；no-go 只能安排补证，不进入实现。
 - 收到入口 Agent 的 `agent_collaboration_plan` 时，使用 `adapt_collaboration_plan_to_task_plan` 转成可执行协作阶段计划。
 - 必要时优先使用 `save_task_plan` 把计划写入 `reports/plans/`。
 - 只有自由格式文档才使用 `save_markdown_report`。

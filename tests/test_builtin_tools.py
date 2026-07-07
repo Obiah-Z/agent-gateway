@@ -292,6 +292,47 @@ def test_compose_repo_review_task_plan_blocks_no_go_risk_gate(tmp_path: Path) ->
     assert "阻塞项处理" in content
 
 
+def test_compose_research_option_validation_plan_uses_gate_decision(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    comparison = {
+        "type": "research_option_comparison",
+        "topic": "入站队列中间件选型",
+        "decision_question": "Gateway 分布式入站削峰优先选择 RabbitMQ 还是 Redis？",
+        "criteria": ["可靠投递", "削峰能力", "会话串行协同"],
+        "recommended_option": "RabbitMQ",
+        "options": [{"name": "RabbitMQ"}, {"name": "Redis"}],
+        "next_actions": ["用压测验证 RabbitMQ 入站削峰能力。"],
+        "uncertainty": ["热点 session 仍需 Redis 协调。"],
+    }
+    gate = {
+        "type": "research_option_comparison_gate_review",
+        "decision": "conditional-go",
+        "next_actions": ["只进入最小验证，不直接生产化。"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "compose_research_option_validation_plan",
+            {
+                "comparison_json": json.dumps(comparison, ensure_ascii=False),
+                "gate_review_json": json.dumps(gate, ensure_ascii=False),
+            },
+        )
+    )
+
+    assert data["type"] == "task_plan_from_research_option_comparison"
+    assert data["decision"]["recommended_option"] == "RabbitMQ"
+    assert data["decision"]["recommended_action"] == "pilot"
+    assert data["decision"]["gate"] == "conditional-go"
+    assert data["phases"][1]["name"] == "最小验证设计"
+    assert data["save_task_plan_args"]["phases"][1]["name"] == "最小验证设计"
+    assert "只进入最小验证，不直接做生产化改造。" in data["next_steps"]
+    assert "热点 session 仍需 Redis 协调。" in data["risks"]
+
+
 def test_adapt_collaboration_plan_to_task_plan_outputs_staged_handoffs(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

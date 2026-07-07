@@ -252,6 +252,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "plan_execution_stage" in tools["planner"]
     assert "adapt_adoption_plan_to_task_plan" in tools["planner"]
     assert "compose_repo_review_task_plan" in tools["planner"]
+    assert "compose_research_option_validation_plan" in tools["planner"]
     assert "adapt_collaboration_plan_to_task_plan" in tools["planner"]
     assert {"read_file", "list_directory", "save_markdown_report"}.issubset(
         tools["reviewer"]
@@ -323,6 +324,10 @@ def test_planner_has_task_breakdown_tool_and_safety_prompt() -> None:
     assert "compose_repo_review_task_plan" in soul
     assert "compose_repo_review_task_plan" in tools_md
     assert "task_plan_from_repo_review" in tools_md
+    assert "compose_research_option_validation_plan" in identity
+    assert "compose_research_option_validation_plan" in soul
+    assert "compose_research_option_validation_plan" in tools_md
+    assert "最小验证" in soul
     assert "adapt_collaboration_plan_to_task_plan" in identity
     assert "adapt_collaboration_plan_to_task_plan" in soul
     assert "adapt_collaboration_plan_to_task_plan" in tools_md
@@ -542,6 +547,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_github_repo_risk_markdown",
         "review_github_repo_risk_gate",
         "compose_repo_review_task_plan",
+        "compose_research_option_validation_plan",
         "render_research_evidence_markdown",
         "render_research_option_comparison_markdown",
         "review_research_evidence_gate",

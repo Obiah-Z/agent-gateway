@@ -699,6 +699,145 @@ def register_builtin_tools(
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
 
+    def compose_research_option_validation_plan(
+        comparison_json: str,
+        gate_review_json: str = "",
+        title: str = "",
+        scope: str = "",
+    ) -> str:
+        """把 research 方案对比和 reviewer 门禁转换成最小验证计划。"""
+
+        if not comparison_json.strip():
+            return "Error: comparison_json is required"
+        comparison = json.loads(comparison_json)
+        if not isinstance(comparison, dict):
+            return "Error: comparison_json must be a JSON object"
+        if comparison.get("type") != "research_option_comparison":
+            return "Error: comparison_json type must be research_option_comparison"
+
+        gate_review: dict[str, Any] = {}
+        if gate_review_json.strip():
+            parsed_gate = json.loads(gate_review_json)
+            if not isinstance(parsed_gate, dict):
+                return "Error: gate_review_json must be a JSON object"
+            if parsed_gate.get("type") != "research_option_comparison_gate_review":
+                return "Error: gate_review_json type must be research_option_comparison_gate_review"
+            gate_review = parsed_gate
+
+        decision_question = str(comparison.get("decision_question") or comparison.get("topic") or "").strip()
+        recommended_option = str(comparison.get("recommended_option") or "").strip()
+        criteria = _clean_strings(comparison.get("criteria") if isinstance(comparison.get("criteria"), list) else [])
+        uncertainty = _clean_strings(
+            comparison.get("uncertainty") if isinstance(comparison.get("uncertainty"), list) else []
+        )
+        next_actions = _clean_strings(
+            comparison.get("next_actions") if isinstance(comparison.get("next_actions"), list) else []
+        )
+        gate_actions = _clean_strings(
+            gate_review.get("next_actions") if isinstance(gate_review.get("next_actions"), list) else []
+        )
+        gate_decision = str(gate_review.get("decision") or "missing").strip()
+        options = [item for item in comparison.get("options") or [] if isinstance(item, dict)]
+        option_names = [str(item.get("name") or "").strip() for item in options if str(item.get("name") or "").strip()]
+        recommended = recommended_option or (option_names[0] if option_names else "待确认方案")
+
+        risks = []
+        risks.extend(uncertainty[:6])
+        risks.extend(gate_actions[:4])
+        if gate_decision == "missing":
+            risks.append("缺少 reviewer 方案对比门禁，进入实现前需先完成审查。")
+        elif gate_decision == "no-go":
+            risks.append("方案对比门禁未通过，不能直接进入实现或生产落地。")
+        if not criteria:
+            risks.append("缺少评价维度，验证计划可能无法判断优劣。")
+
+        phases = [
+            {
+                "name": "证据与门禁复核",
+                "task": "复核方案对比、评价维度、来源依据和 reviewer 门禁结论。",
+                "output": "可追溯的选型输入、门禁状态和未决问题清单。",
+                "done": "方案对比 JSON、门禁结论和阻塞项均已确认；no-go 项未关闭前不进入实现。",
+            }
+        ]
+        if gate_decision == "no-go":
+            phases.append(
+                {
+                    "name": "阻塞项补证",
+                    "task": "按门禁 next_actions 补充候选方案、来源、一手资料、推荐理由或不确定点说明。",
+                    "output": "补证后的 research_option_comparison 和重新审查结果。",
+                    "done": "重新运行 review_research_option_comparison_gate 后至少达到 conditional-go。",
+                }
+            )
+            recommended_action = "hold"
+        else:
+            verification_focus = "、".join(criteria[:3]) if criteria else "可靠性、成本和复杂度"
+            phases.extend(
+                [
+                    {
+                        "name": "最小验证设计",
+                        "task": f"围绕推荐方案「{recommended}」设计最小可回滚实验，并覆盖 {verification_focus}。",
+                        "output": "实验范围、对照方案、测试指标、回滚方式和预期结论。",
+                        "done": "实验能在不影响生产数据的前提下独立验证推荐方案的关键假设。",
+                    },
+                    {
+                        "name": "实验实现与记录",
+                        "task": "实现最小实验，补齐聚焦测试、压测或人工验收记录。",
+                        "output": "代码/配置改动、测试结果、性能或稳定性观察记录。",
+                        "done": "实验结果可复现，失败时可回滚，相关变更已按阶段提交。",
+                    },
+                    {
+                        "name": "采纳决策沉淀",
+                        "task": "根据实验结果决定采纳、暂缓或换方案，并交给 doc-writer 成文。",
+                        "output": "最终选型结论、残余风险、后续实施计划或暂缓原因。",
+                        "done": "结论已落盘，后续动作明确到下一阶段任务。",
+                    },
+                ]
+            )
+            recommended_action = "pilot" if gate_decision in {"go", "conditional-go"} else "review-first"
+
+        plan_next_steps = []
+        if gate_decision == "missing":
+            plan_next_steps.append("先让 reviewer 使用 review_research_option_comparison_gate 审查方案对比。")
+        elif gate_decision == "no-go":
+            plan_next_steps.append("先处理门禁未通过项，不进入实现。")
+        elif gate_decision == "conditional-go":
+            plan_next_steps.append("只进入最小验证，不直接做生产化改造。")
+        elif gate_decision == "go":
+            plan_next_steps.append("进入最小验证设计，保留对照和回滚路径。")
+        plan_next_steps.extend(gate_actions[:3])
+        plan_next_steps.extend(next_actions[:3])
+        if not plan_next_steps:
+            plan_next_steps.append("把计划落盘后执行第一阶段证据复核。")
+
+        plan_title = title.strip() or f"{recommended} 方案验证计划"
+        plan_scope = scope.strip() or "只把已调研和已审查的方案对比转成最小验证计划，不直接进行生产落地。"
+        result = {
+            "type": "task_plan_from_research_option_comparison",
+            "title": plan_title,
+            "goal": f"验证「{recommended}」是否能解决：{decision_question or '当前选型问题'}。",
+            "scope": plan_scope,
+            "decision": {
+                "gate": gate_decision,
+                "recommended_option": recommended,
+                "recommended_action": recommended_action,
+            },
+            "criteria": criteria,
+            "candidate_options": option_names,
+            "phases": phases[:6],
+            "risks": list(dict.fromkeys(risks))[:8],
+            "next_steps": list(dict.fromkeys(plan_next_steps))[:6],
+            "save_task_plan_args": {
+                "title": plan_title,
+                "goal": f"验证「{recommended}」是否能解决：{decision_question or '当前选型问题'}。",
+                "scope": plan_scope,
+                "phases": phases[:6],
+                "risks": list(dict.fromkeys(risks))[:8],
+                "next_steps": list(dict.fromkeys(plan_next_steps))[:6],
+            },
+            "note": "这是 planner 基于 research/reviewer 结构化结果生成的验证计划草案，不代表已经开始实施。",
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
     def adapt_collaboration_plan_to_task_plan(
         collaboration_json: str,
         title: str = "",
@@ -4006,6 +4145,34 @@ def register_builtin_tools(
             },
             handler=compose_repo_review_task_plan,
             tags=("plan", "repository", "review", "adoption"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_research_option_validation_plan",
+            description=(
+                "Compose a planner validation task plan from a research_option_comparison "
+                "and optional research_option_comparison_gate_review. Produces phases, "
+                "risks, next steps, decision, and save_task_plan args."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["comparison_json"],
+                "properties": {
+                    "comparison_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_option_comparison.",
+                    },
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by review_research_option_comparison_gate.",
+                    },
+                    "title": {"type": "string"},
+                    "scope": {"type": "string"},
+                },
+            },
+            handler=compose_research_option_validation_plan,
+            tags=("plan", "research", "comparison", "validation"),
         )
     )
     registry.register(
