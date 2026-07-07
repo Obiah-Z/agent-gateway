@@ -21,6 +21,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "diet_coach_briefing" in agent["tool_policy"]["tool_names"]
     assert "diet_daily_loop_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_day_review_plan_generate" in agent["tool_policy"]["tool_names"]
+    assert "diet_weekly_plan_generate" in agent["tool_policy"]["tool_names"]
     assert not any(row["agent_id"] == AGENT_ID and row["match_key"] == "peer_id" for row in bindings)
     assert secretary_binding["tier"] == 1
     assert secretary_binding["match_key"] == "peer_id"
@@ -184,6 +185,7 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "diet_coach_briefing" in tools_md
     assert "diet_daily_loop_generate" in tools_md
     assert "diet_day_review_plan_generate" in tools_md
+    assert "diet_weekly_plan_generate" in tools_md
 
 
 def test_shared_capability_agents_are_configured_without_entry_bindings() -> None:

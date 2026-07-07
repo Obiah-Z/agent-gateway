@@ -18,6 +18,7 @@
 - 记录体重时，使用 `weight_log_add`。
 - 用户询问“今天怎么吃 / 今天还缺什么 / 饮食闭环 / 晚间收口 / 今日执行情况”时，优先使用 `diet_daily_loop_generate`。
 - 用户询问“今日总结 / 晚间总结 / 明天怎么吃 / 明日饮食建议”时，使用 `diet_day_review_plan_generate` 生成总结和明日建议草稿。
+- 用户询问“本周怎么吃 / 周饮食计划 / 本周减脂安排 / 这周饮食重点”时，使用 `diet_weekly_plan_generate` 生成周计划草稿。
 - 用户询问“最近趋势 / 周总结 / 减脂进展 / 下一步怎么调整”时，优先使用 `diet_coach_briefing`。
 - 只有长期稳定偏好才写入 `memory_write`。
 

@@ -512,6 +512,96 @@ class DietStore:
             "note": "这是饮食日总结和明日建议草稿，不会自动生成计划、写入体重或补记餐食。",
         }
 
+    def generate_weekly_plan(
+        self,
+        user_scope: str,
+        *,
+        week_goal: str = "",
+        days: int = 7,
+        focus_areas: list[str] | None = None,
+        constraints: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """生成饮食周计划草稿，不自动写入每日计划或体重记录。"""
+
+        scope = self._require_scope(user_scope)
+        safe_days = max(1, min(int(days or 7), 30))
+        profile = self.get_profile(scope) or {}
+        briefing = self.coach_briefing(scope, days=safe_days)
+        progress = self.progress_summary(scope, days=safe_days)
+        target_calories = self._target_calories(profile)
+        risk_flags = list(briefing.get("risk_flags", []))
+        focus_items = [str(item).strip() for item in (focus_areas or []) if str(item).strip()]
+        constraint_items = [str(item).strip() for item in (constraints or []) if str(item).strip()]
+
+        if not focus_items:
+            if "meal_logging_incomplete" in risk_flags:
+                focus_items.append("先把三餐记录闭环做稳定。")
+            if "protein_low" in risk_flags:
+                focus_items.append("每餐优先保证一掌蛋白质。")
+            if "calories_over_target" in risk_flags:
+                focus_items.append("控制晚餐油脂、重酱汁和含糖饮料。")
+            if "calories_too_low" in risk_flags:
+                focus_items.append("避免极端低热量，先补足蛋白质和蔬菜。")
+        if not focus_items:
+            focus_items.append("保持当前记录节奏，稳定执行三餐。")
+
+        weekly_actions = []
+        weekly_actions.extend(str(item).strip() for item in briefing.get("suggested_actions", []) if str(item).strip())
+        for item in focus_items:
+            action = f"围绕「{item}」设置一个可执行动作。"
+            if action not in weekly_actions:
+                weekly_actions.append(action)
+        if not weekly_actions:
+            weekly_actions.append("每天晚餐后完成一次简短饮食记录闭环。")
+
+        daily_guidelines = [
+            f"每日目标热量参考约 {target_calories:.0f} kcal，按实际饥饿感和运动量微调。",
+            "早餐固定一个容易执行的组合，降低漏记和漏吃概率。",
+            "午餐保留主食，但优先选择清晰可估算的蛋白质来源。",
+            "晚餐减少油炸、重酱汁和含糖饮料，优先清淡蛋白质和蔬菜。",
+        ]
+        if "protein_low" in risk_flags:
+            daily_guidelines.insert(1, "每餐先确认蛋白质来源，再考虑主食和零食。")
+        if "meal_logging_incomplete" in risk_flags:
+            daily_guidelines.insert(0, "本周第一目标是连续记录早餐、午餐、晚餐。")
+
+        confirmations = []
+        if not self._profile_complete(profile):
+            confirmations.append("是否补充身高、当前体重、目标体重和活动水平？")
+        if not week_goal.strip():
+            confirmations.append("本周饮食最重要目标是什么？")
+        if constraint_items:
+            confirmations.append("这些限制是否需要转成具体避坑规则？")
+        if not progress.get("weight_logs"):
+            confirmations.append("是否本周固定 2 到 3 次晨起体重记录？")
+
+        return {
+            "type": "diet_weekly_plan",
+            "user_scope": scope,
+            "days": safe_days,
+            "week_goal": week_goal.strip() or "稳定记录三餐，按趋势小幅调整饮食。",
+            "target_calories": target_calories,
+            "focus_areas": focus_items[:5],
+            "trend": {
+                "weight_change_kg": briefing.get("weight_change_kg", 0.0),
+                "average_calories": briefing.get("average_calories", 0.0),
+                "average_protein_g": briefing.get("average_protein_g", 0.0),
+                "missing_meal_days": briefing.get("missing_meal_days", 0),
+                "meal_count": briefing.get("meal_count", 0),
+            },
+            "risk_flags": risk_flags,
+            "weekly_actions": weekly_actions[:6],
+            "daily_guidelines": daily_guidelines[:6],
+            "constraints": constraint_items,
+            "needs_confirmation": confirmations,
+            "next_actions": [
+                "确认后可按某一天调用 diet_plan_generate 生成具体日计划。",
+                "执行中继续用 meal_log_add 记录餐食，用 weight_log_add 记录体重。",
+                "周末可用 diet_coach_briefing 或 diet_day_review_plan_generate 做复盘。",
+            ],
+            "note": "这是饮食周计划草稿，不会自动生成每日计划、写入体重或补记餐食。",
+        }
+
     def _target_calories(self, profile: dict[str, Any]) -> float:
         current = _as_float(profile.get("current_weight_kg"))
         target = _as_float(profile.get("target_weight_kg"))
@@ -1050,6 +1140,29 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             }
         )
 
+    def diet_weekly_plan_generate(
+        *,
+        week_goal: str = "",
+        days: int = 7,
+        focus_areas: list[str] | None = None,
+        constraints: list[str] | None = None,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json(
+            {
+                "status": "ok",
+                "weekly_plan": diet_store.generate_weekly_plan(
+                    scope,
+                    week_goal=week_goal,
+                    days=days,
+                    focus_areas=focus_areas or [],
+                    constraints=constraints or [],
+                ),
+            }
+        )
+
     registry.register(
         RegisteredTool(
             name="profile_get",
@@ -1235,5 +1348,26 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_day_review_plan_generate,
             tags=("diet", "review", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_weekly_plan_generate",
+            description=(
+                "Generate a diet weekly plan draft from recent meals, weight trend, "
+                "optional week goal, focus areas, and constraints without writing meals, weight, or daily plans."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "week_goal": {"type": "string"},
+                    "days": {"type": "integer"},
+                    "focus_areas": {"type": "array", "items": {"type": "string"}},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_weekly_plan_generate,
+            tags=("diet", "weekly", "planning", "read"),
         )
     )

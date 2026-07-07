@@ -390,3 +390,58 @@ def test_diet_day_review_plan_generates_tomorrow_strategy_without_writing(tmp_pa
     assert "是否生成明日饮食计划？" in review_plan["needs_confirmation"]
     assert store.get_plan("user:wework:diet", plan_date="2026-07-06") is None
     assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
+
+
+def test_diet_weekly_plan_generates_draft_without_writing(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 82.0, recorded_at=100.0)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=200.0)
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-05",
+        meal_type="lunch",
+        raw_text="炸鸡饭和奶茶",
+        estimated_calories=1200,
+        protein_g=20,
+    )
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="dinner",
+        raw_text="炒饭",
+        estimated_calories=900,
+        protein_g=15,
+    )
+
+    weekly = json.loads(
+        registry.dispatch(
+            "diet_weekly_plan_generate",
+            {
+                "week_goal": "本周把三餐记录稳定下来",
+                "focus_areas": ["补早餐记录", "提高蛋白质"],
+                "constraints": ["工作日只能吃外卖"],
+                "days": 7,
+            },
+            runtime_context=context,
+        )
+    )["weekly_plan"]
+
+    assert weekly["type"] == "diet_weekly_plan"
+    assert weekly["user_scope"] == "user:wework:diet"
+    assert weekly["week_goal"] == "本周把三餐记录稳定下来"
+    assert weekly["target_calories"] == 1550
+    assert weekly["focus_areas"] == ["补早餐记录", "提高蛋白质"]
+    assert weekly["trend"]["meal_count"] == 2
+    assert "meal_logging_incomplete" in weekly["risk_flags"]
+    assert "protein_low" in weekly["risk_flags"]
+    assert any("补齐早餐、午餐、晚餐" in action for action in weekly["weekly_actions"])
+    assert any("每日目标热量参考约 1550 kcal" in item for item in weekly["daily_guidelines"])
+    assert weekly["constraints"] == ["工作日只能吃外卖"]
+    assert "这些限制是否需要转成具体避坑规则？" in weekly["needs_confirmation"]
+    assert store.get_plan("user:wework:diet", plan_date="2026-07-06") is None
+    assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
