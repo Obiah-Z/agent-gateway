@@ -169,6 +169,7 @@
           "diet_plan_generate",
           "weight_log_add",
           "progress_summary",
+          "diet_coach_briefing",
           "memory_search",
           "memory_write"
         ]

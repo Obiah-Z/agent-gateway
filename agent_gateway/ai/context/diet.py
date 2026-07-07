@@ -326,6 +326,32 @@ class DietStore:
             "missing_meal_days": missing_meal_days,
         }
 
+    def coach_briefing(self, user_scope: str, *, days: int = 7) -> dict[str, Any]:
+        """生成适合聊天回复使用的饮食趋势简报。"""
+
+        scope = self._require_scope(user_scope)
+        progress = self.progress_summary(scope, days=days)
+        profile = self.get_profile(scope) or {}
+        target_calories = self._target_calories(profile)
+        risks = self._coach_risk_flags(progress, target_calories)
+        highlights = self._coach_highlights(progress)
+        actions = self._coach_actions(progress, risks, profile)
+        return {
+            "user_scope": scope,
+            "days": progress["days"],
+            "target_calories": target_calories,
+            "weight_change_kg": progress["weight_change_kg"],
+            "average_calories": progress["average_calories"],
+            "average_protein_g": progress["average_protein_g"],
+            "missing_meal_days": progress["missing_meal_days"],
+            "meal_count": progress["meal_count"],
+            "risk_flags": risks,
+            "highlights": highlights,
+            "suggested_actions": actions,
+            "recent_daily": progress["daily"][: min(5, len(progress["daily"]))],
+            "latest_weight": progress["weight_logs"][0] if progress["weight_logs"] else None,
+        }
+
     def today_status(self, user_scope: str, *, date: str = "") -> dict[str, Any]:
         """汇总某个用户当天饮食状态，供 Dashboard 和个人状态卡使用。"""
 
@@ -509,6 +535,59 @@ class DietStore:
         if missing:
             flags.append("missing_meals")
         return sorted(set(flags))
+
+    @staticmethod
+    def _coach_risk_flags(progress: dict[str, Any], target_calories: float) -> list[str]:
+        flags: list[str] = []
+        average_calories = _as_float(progress.get("average_calories"))
+        average_protein = _as_float(progress.get("average_protein_g"))
+        missing_meal_days = _as_int(progress.get("missing_meal_days"))
+        days = _as_int(progress.get("days"), 1)
+        if missing_meal_days >= max(2, days // 3):
+            flags.append("meal_logging_incomplete")
+        if target_calories and average_calories > target_calories + 300:
+            flags.append("calories_over_target")
+        if target_calories and 0 < average_calories < target_calories - 600:
+            flags.append("calories_too_low")
+        if average_protein and average_protein < 60:
+            flags.append("protein_low")
+        return flags
+
+    @staticmethod
+    def _coach_highlights(progress: dict[str, Any]) -> list[str]:
+        highlights: list[str] = []
+        weight_change = _as_float(progress.get("weight_change_kg"))
+        meal_count = _as_int(progress.get("meal_count"))
+        if weight_change < 0:
+            highlights.append(f"体重较最近记录下降 {abs(weight_change):.1f} kg。")
+        elif weight_change > 0:
+            highlights.append(f"体重较最近记录上升 {weight_change:.1f} kg，需要观察是否是短期波动。")
+        if meal_count:
+            highlights.append(f"最近共记录 {meal_count} 餐，已有基础数据可用于调整。")
+        if not highlights:
+            highlights.append("当前记录偏少，先把餐食和体重记录稳定下来。")
+        return highlights
+
+    @staticmethod
+    def _coach_actions(
+        progress: dict[str, Any],
+        risks: list[str],
+        profile: dict[str, Any],
+    ) -> list[str]:
+        actions: list[str] = []
+        if "meal_logging_incomplete" in risks:
+            actions.append("先补齐早餐、午餐、晚餐三餐记录，至少连续记录 3 天。")
+        if "protein_low" in risks:
+            actions.append("每餐优先保证一掌蛋白质，例如鸡蛋、牛肉、鱼虾、鸡胸或豆制品。")
+        if "calories_over_target" in risks:
+            actions.append("下一餐减少油炸、重酱汁和含糖饮料，主食先减到半拳到一拳。")
+        if "calories_too_low" in risks:
+            actions.append("不要继续极端压低热量，优先补足蛋白质和蔬菜，避免反弹。")
+        if not DietStore._profile_complete(profile):
+            actions.append("补充身高、当前体重、目标体重和活动水平，让建议更准确。")
+        if not actions:
+            actions.append("保持当前记录节奏，下一步关注晚餐油脂和每日蛋白质是否稳定。")
+        return actions[:5]
 
     def _backend_get(self, table: str, key: str) -> dict[str, Any] | None:
         backend = self.read_backend
@@ -721,6 +800,15 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "progress": diet_store.progress_summary(scope, days=days)})
 
+    def diet_coach_briefing(
+        *,
+        days: int = 7,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json({"status": "ok", "briefing": diet_store.coach_briefing(scope, days=days)})
+
     registry.register(
         RegisteredTool(
             name="profile_get",
@@ -859,5 +947,17 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=progress_summary,
             tags=("diet", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_coach_briefing",
+            description="Generate a user-facing diet coach briefing from recent meals and weight trends.",
+            input_schema={
+                "type": "object",
+                "properties": {"days": {"type": "integer"}, "user_scope": {"type": "string"}},
+            },
+            handler=diet_coach_briefing,
+            tags=("diet", "briefing", "summary", "read"),
         )
     )

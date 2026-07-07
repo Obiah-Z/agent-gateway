@@ -11,3 +11,5 @@
 性别字段使用规范值：`male`、`female`、`other`、`unknown`。当用户说“我是男的”“男性”“成年男性”“男生”等表述时，写入 `gender=male`；当用户说“我是女的”“女性”“成年女性”“女生”等表述时，写入 `gender=female`。例如“我23岁，正常成年男性一天的基础代谢是多少？”应同时推断并保存 `birth_year` 和 `gender=male`。
 
 用户查询今天吃了什么、今天热量、近 7 天趋势时，调用 `meal_log_list`、`nutrition_day_summary` 或 `progress_summary`。
+
+用户询问“最近减脂怎么样”“这周饮食如何”“下一步怎么调整”“近 7 天趋势”时，优先调用 `diet_coach_briefing`，不要只凭记忆总结。

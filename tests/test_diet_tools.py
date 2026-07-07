@@ -237,3 +237,58 @@ def test_diet_progress_summary_reports_daily_trends(tmp_path: Path) -> None:
     assert progress["missing_meal_days"] == 2
     assert progress["daily"][0]["date"] == "2026-07-06"
     assert progress["daily"][0]["missing_meals"] == ["breakfast", "lunch"]
+
+
+def test_diet_coach_briefing_reports_risks_and_actions(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    registry.dispatch(
+        "profile_update",
+        {"height_cm": 178, "current_weight_kg": 82, "target_weight_kg": 75},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "weight_log_add",
+        {"weight_kg": 82.0},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-05",
+            "meal_type": "lunch",
+            "raw_text": "炸鸡饭和奶茶",
+            "estimated_calories": 1200,
+            "protein_g": 20,
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-06",
+            "meal_type": "dinner",
+            "raw_text": "炒饭",
+            "estimated_calories": 900,
+            "protein_g": 15,
+        },
+        runtime_context=context,
+    )
+
+    briefing = json.loads(
+        registry.dispatch(
+            "diet_coach_briefing",
+            {"days": 7},
+            runtime_context=context,
+        )
+    )["briefing"]
+
+    assert briefing["meal_count"] == 2
+    assert "meal_logging_incomplete" in briefing["risk_flags"]
+    assert "protein_low" in briefing["risk_flags"]
+    assert any("补齐早餐、午餐、晚餐" in action for action in briefing["suggested_actions"])
+    assert any("一掌蛋白质" in action for action in briefing["suggested_actions"])
+    assert briefing["recent_daily"][0]["date"] == "2026-07-06"
