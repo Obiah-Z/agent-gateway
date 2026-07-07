@@ -5,22 +5,57 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 USER_PEER_ID = "ZhangHaiBo"
 USER_SCOPE = "user:wework:wework-main:direct:zhanghaibo"
-AGENT_ID = "diet-assistant-dd5bf625"
+AGENT_ID = "diet-assistant-zhanghaibo"
+SECRETARY_AGENT_ID = "personal-secretary-zhanghaibo"
 
 
-def test_diet_agent_config_targets_single_wework_user() -> None:
+def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
 
     agent = next(row for row in agents if row["id"] == AGENT_ID)
-    binding = next(row for row in bindings if row["agent_id"] == AGENT_ID)
+    secretary_binding = next(row for row in bindings if row["agent_id"] == SECRETARY_AGENT_ID)
 
     assert agent["prompt_policy"]["prompt_dir"] == f"agents/{AGENT_ID}"
     assert "meal_log_add" in agent["tool_policy"]["tool_names"]
-    assert binding["tier"] == 1
-    assert binding["match_key"] == "peer_id"
-    assert binding["match_value"] == USER_PEER_ID
-    assert binding["priority"] > 50
+    assert not any(row["agent_id"] == AGENT_ID and row["match_key"] == "peer_id" for row in bindings)
+    assert secretary_binding["tier"] == 1
+    assert secretary_binding["match_key"] == "peer_id"
+    assert secretary_binding["match_value"] == USER_PEER_ID
+    assert secretary_binding["priority"] > 50
+
+
+def test_platform_entries_and_personal_secretary_are_separated() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
+
+    agent_ids = {row["id"] for row in agents}
+    assert {"feishu-entry", "wework-entry", SECRETARY_AGENT_ID, AGENT_ID}.issubset(agent_ids)
+    assert any(
+        row["agent_id"] == "wework-entry"
+        and row["match_key"] == "account_id"
+        and row["match_value"] == "wework-main"
+        for row in bindings
+    )
+    assert any(
+        row["agent_id"] == "feishu-entry"
+        and row["match_key"] == "account_id"
+        and row["match_value"] == "feishu-secondary"
+        for row in bindings
+    )
+
+
+def test_personal_secretary_cron_targets_single_wework_peer() -> None:
+    cron = json.loads(
+        (ROOT / "workspace" / "agents" / SECRETARY_AGENT_ID / "CRON.json").read_text(encoding="utf-8")
+    )
+
+    for job in cron["jobs"]:
+        target = job["target"]
+        assert target["channel"] == "wework"
+        assert target["account_id"] == "wework-main"
+        assert target["peer_id"] == USER_PEER_ID
+        assert target["agent_id"] == SECRETARY_AGENT_ID
 
 
 def test_diet_agent_cron_targets_single_wework_peer() -> None:
@@ -29,7 +64,10 @@ def test_diet_agent_cron_targets_single_wework_peer() -> None:
     )
 
     enabled_jobs = [job for job in cron["jobs"] if job["enabled"]]
-    assert {job["id"] for job in enabled_jobs} == {"daily-diet-plan", "daily-nutrition-summary"}
+    assert {"daily-diet-plan", "daily-nutrition-summary"}.issubset(
+        {job["id"] for job in enabled_jobs}
+    )
+    assert all(job["id"].endswith("reminder") or job["id"].startswith("daily-") for job in cron["jobs"])
     for job in cron["jobs"]:
         target = job["target"]
         assert target["channel"] == "wework"
@@ -50,3 +88,17 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "gender=male" in tools_md
     assert "成年男性" in tools_md
     assert "profile_update" in tools_md
+
+
+def test_shared_capability_agents_are_configured_without_entry_bindings() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
+
+    capability_ids = {"repo-analyzer", "doc-writer", "planner", "reviewer"}
+    by_id = {row["id"]: row for row in agents}
+    assert capability_ids.issubset(by_id)
+    for agent_id in capability_ids:
+        prompt_dir = by_id[agent_id]["prompt_policy"]["prompt_dir"]
+        assert (ROOT / "workspace" / prompt_dir / "IDENTITY.md").exists()
+        assert (ROOT / "workspace" / prompt_dir / "SOUL.md").exists()
+        assert not any(row["agent_id"] == agent_id for row in bindings)

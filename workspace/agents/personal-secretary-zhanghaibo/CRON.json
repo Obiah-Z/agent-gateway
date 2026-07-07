@@ -13,7 +13,7 @@
         "channel": "wework",
         "account_id": "wework-main",
         "peer_id": "ZhangHaiBo",
-        "agent_id": "wework-main"
+        "agent_id": "personal-secretary-zhanghaibo"
       },
       "payload": {
         "kind": "agent_turn",
@@ -34,7 +34,7 @@
         "channel": "wework",
         "account_id": "wework-main",
         "peer_id": "ZhangHaiBo",
-        "agent_id": "wework-main"
+        "agent_id": "personal-secretary-zhanghaibo"
       },
       "payload": {
         "kind": "agent_turn",
@@ -55,7 +55,7 @@
         "channel": "wework",
         "account_id": "wework-main",
         "peer_id": "ZhangHaiBo",
-        "agent_id": "wework-main"
+        "agent_id": "personal-secretary-zhanghaibo"
       },
       "payload": {
         "kind": "agent_turn",
@@ -76,7 +76,7 @@
         "channel": "wework",
         "account_id": "wework-main",
         "peer_id": "ZhangHaiBo",
-        "agent_id": "wework-main"
+        "agent_id": "personal-secretary-zhanghaibo"
       },
       "payload": {
         "kind": "agent_turn",
@@ -97,7 +97,7 @@
         "channel": "wework",
         "account_id": "wework-main",
         "peer_id": "ZhangHaiBo",
-        "agent_id": "wework-main"
+        "agent_id": "personal-secretary-zhanghaibo"
       },
       "payload": {
         "kind": "agent_turn",
@@ -118,7 +118,7 @@
         "channel": "wework",
         "account_id": "wework-main",
         "peer_id": "ZhangHaiBo",
-        "agent_id": "wework-main"
+        "agent_id": "personal-secretary-zhanghaibo"
       },
       "payload": {
         "kind": "agent_turn",
