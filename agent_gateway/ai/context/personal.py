@@ -198,6 +198,65 @@ class PersonalStore:
             "note": "这是基于未完成待办生成的建议时间块，不会自动修改待办状态。",
         }
 
+    def generate_daily_workflow(
+        self,
+        *,
+        user_scope: str = "",
+        todo_limit: int = 9,
+        review_limit: int = 3,
+    ) -> dict[str, Any]:
+        """组合待办、复盘和时间块，生成个人每日工作流。"""
+
+        briefing = self.generate_briefing(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        time_blocks = self.generate_time_blocks(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+        )
+        recent_reviews = briefing.get("recent_reviews", [])
+        review_reminders = []
+        for review in recent_reviews:
+            next_step = str(review.get("next_step", "")).strip()
+            if next_step:
+                review_reminders.append(next_step)
+        if not review_reminders and recent_reviews:
+            review_reminders.append(str(recent_reviews[0].get("summary", "")).strip())
+
+        open_todos = briefing.get("open_todos", [])
+        urgent_todos = briefing.get("urgent_todos", [])
+        needs_confirmation = []
+        if not open_todos:
+            needs_confirmation.append("今天最重要的一件事是什么？")
+        if not review_reminders:
+            needs_confirmation.append("是否需要补一次昨日/今日复盘？")
+
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "current_focus": briefing.get("suggested_focus", ""),
+            "today_priorities": [
+                {
+                    "title": str(todo.get("title", "")),
+                    "priority": str(todo.get("priority", "")),
+                    "due_at": str(todo.get("due_at", "")),
+                }
+                for todo in (urgent_todos or open_todos)[:5]
+            ],
+            "time_blocks": time_blocks.get("blocks", []),
+            "first_action": time_blocks.get("first_action", ""),
+            "review_reminders": review_reminders[:5],
+            "needs_confirmation": needs_confirmation,
+            "source": {
+                "open_todo_count": len(open_todos),
+                "urgent_todo_count": len(urgent_todos),
+                "recent_review_count": len(recent_reviews),
+            },
+            "note": "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。",
+        }
+
     def _scope_dir(self, user_scope: str) -> Path:
         scope = MemoryStore.normalize_scope(user_scope)
         name = MemoryStore._scope_dir_name(scope) if scope else "global"
@@ -413,6 +472,20 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(plan, ensure_ascii=False, indent=2)
 
+    def personal_daily_workflow_generate(
+        todo_limit: int = 9,
+        review_limit: int = 3,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        workflow = personal_store.generate_daily_workflow(
+            user_scope=_scope(__runtime_context, user_scope),
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        return json.dumps(workflow, ensure_ascii=False, indent=2)
+
     registry.register(
         RegisteredTool(
             name="personal_todo_add",
@@ -522,5 +595,23 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_time_blocks_generate,
             tags=("personal", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_daily_workflow_generate",
+            description=(
+                "Generate a daily personal workflow by combining open todos, "
+                "recent reviews, priorities, time blocks, first action, and confirmations."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "todo_limit": {"type": "integer"},
+                    "review_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_daily_workflow_generate,
+            tags=("personal", "workflow", "planning", "read"),
         )
     )

@@ -163,3 +163,56 @@ def test_personal_time_blocks_generate_orders_open_todos_by_priority(tmp_path: P
     assert plan["blocks"][2]["items"][0]["title"] == "整理简历"
     assert plan["first_action"] == "先处理「准备面试项目」。"
     assert plan["note"] == "这是基于未完成待办生成的建议时间块，不会自动修改待办状态。"
+
+
+def test_personal_daily_workflow_combines_todos_reviews_and_time_blocks(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "复习项目难点", "priority": "urgent", "due_at": "2026-07-08"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理自我介绍", "priority": "normal"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "昨天完成 Redis 复盘",
+            "completed": ["Redis 面试表达"],
+            "next_step": "今天练 RabbitMQ 选型",
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "其他人的待办", "priority": "urgent"},
+        runtime_context={"memory_user_scope": "user:bob"},
+    )
+
+    workflow = json.loads(
+        registry.dispatch(
+            "personal_daily_workflow_generate",
+            {"todo_limit": 6, "review_limit": 2},
+            runtime_context=context,
+        )
+    )
+
+    assert workflow["user_scope"] == "user:alice"
+    assert workflow["current_focus"] == "复习项目难点"
+    assert workflow["today_priorities"][0]["title"] == "复习项目难点"
+    assert workflow["time_blocks"][0]["items"][0]["title"] == "复习项目难点"
+    assert workflow["first_action"] == "先处理「复习项目难点」。"
+    assert workflow["review_reminders"] == ["今天练 RabbitMQ 选型"]
+    assert workflow["source"] == {
+        "open_todo_count": 2,
+        "urgent_todo_count": 1,
+        "recent_review_count": 1,
+    }
+    assert workflow["note"] == "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。"

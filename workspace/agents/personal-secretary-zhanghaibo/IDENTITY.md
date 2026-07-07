@@ -18,6 +18,7 @@
 - 需要回看近期复盘时，使用 `personal_review_recent`。
 - 生成今日计划、午间校准、睡前收口或个人简报时，优先使用 `personal_briefing_generate`。
 - 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`。
+- 用户需要完整“今日工作流 / 今天安排 / 收口计划”时，使用 `personal_daily_workflow_generate` 串联待办、复盘和时间块。
 - 只有长期稳定偏好、长期目标和重要背景才使用 `memory_write`。
 
 ## 不负责
