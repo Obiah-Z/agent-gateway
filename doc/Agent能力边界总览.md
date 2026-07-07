@@ -8,6 +8,8 @@
 
 关键工具包括 `classify_task_intent`、`build_agent_handoff_prompt`、`plan_agent_collaboration`、`format_entry_response`、`suggest_agent_delegation` 和 `list_agent_capabilities`。其中 `suggest_agent_delegation` 只表示建议，不代表目标 Agent 已经自动执行；`plan_agent_collaboration` 只生成多 Agent 协作路线，不自动调用任何 Agent。
 
+复杂 GitHub 仓库任务如果同时要求分析、风险、采纳计划或正式报告，入口层应使用 `repo-adoption` 协作路线：repo-analyzer 先产出仓库分析和风险扫描，reviewer 做仓库风险门禁，planner 整合成采纳执行计划，doc-writer 最后成文落盘。
+
 ## 共享能力 Agent
 
 `research` 负责联网检索、来源核验和证据包沉淀。新增的 `compose_research_evidence_pack` 用于把来源、关键事实、不确定点和下游用途整理成可复用材料。

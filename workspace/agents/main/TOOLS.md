@@ -48,7 +48,8 @@
 
 使用规则：
 
-- 任务需要两个以上 Agent 串联时使用，例如仓库分析后生成计划、计划审查后写文档、调研后成文。
+- 任务需要两个以上 Agent 串联时使用，例如仓库分析后生成计划、仓库风险审查后形成执行报告、计划审查后写文档、调研后成文。
+- 用户要求“分析 GitHub 仓库并给出风险、采纳计划或正式报告”时，`task_type` 使用 `repo-adoption`，让路线按 repo-analyzer → reviewer → planner → doc-writer 展开。
 - 该工具只输出 `handoff_sequence`，不会自动调用任何 Agent。
 - 每个阶段完成后，上一阶段结构化输出应作为下一阶段 `upstream_result`。
 - 给用户说明时必须强调这是协作路线，不代表已经执行。

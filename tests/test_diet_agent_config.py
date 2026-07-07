@@ -443,6 +443,25 @@ def test_entry_agents_require_structured_handoff_prompt() -> None:
         assert "不要声称目标 Agent 已经自动执行完成" in tools_md
 
 
+def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
+    main_soul = (ROOT / "workspace" / "agents" / "main" / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    main_tools = (ROOT / "workspace" / "agents" / "main" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+    assert "repo-adoption" in main_soul
+    assert "repo-analyzer、reviewer、planner、doc-writer" in main_soul
+    assert "repo-analyzer → reviewer → planner → doc-writer" in main_tools
+
+    for agent_id in ("feishu-entry", "wework-entry"):
+        soul = (ROOT / "workspace" / "agents" / agent_id / "SOUL.md").read_text(
+            encoding="utf-8"
+        )
+        assert "repo-adoption" in soul
+        assert "repo-analyzer、reviewer、planner、doc-writer" in soul
+
+
 def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}

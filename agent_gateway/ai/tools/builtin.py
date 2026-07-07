@@ -2055,22 +2055,22 @@ def register_builtin_tools(
             "repo-adoption": [
                 {
                     "agent_id": "repo-analyzer",
-                    "purpose": "分析仓库用途、结构、质量、风险和 Gateway 可借鉴点。",
-                    "expected_output": "github_repo_analysis 或 github_repo_adoption_plan JSON。",
-                },
-                {
-                    "agent_id": "planner",
-                    "purpose": "把采纳路线图转换为阶段计划、验收标准和提交策略。",
-                    "expected_output": "task_plan_from_adoption 或 execution_stage_plan JSON。",
+                    "purpose": "分析仓库用途、结构、质量、Gateway 可借鉴点，并输出仓库分析、风险扫描和可选采纳路线。",
+                    "expected_output": "github_repo_analysis、github_repo_risk_scan 和可选 github_repo_adoption_plan JSON。",
                 },
                 {
                     "agent_id": "reviewer",
-                    "purpose": "审查计划是否具备执行条件，列出风险、缺口和 go/no-go 结论。",
-                    "expected_output": "task_plan_gate_review JSON。",
+                    "purpose": "审查仓库风险扫描是否足够支撑采纳、引用或复用，给出 go / conditional-go / no-go 门禁结论。",
+                    "expected_output": "github_repo_risk_gate_review JSON。",
+                },
+                {
+                    "agent_id": "planner",
+                    "purpose": "把仓库分析、风险门禁和可选采纳路线整合为阶段计划、验收标准和下一步动作。",
+                    "expected_output": "task_plan_from_repo_review JSON。",
                 },
                 {
                     "agent_id": "doc-writer",
-                    "purpose": "把分析、计划和审查结果整理成正式 Markdown 执行记录。",
+                    "purpose": "把仓库分析、风险扫描、门禁结论和阶段计划整理成正式 Markdown 报告或执行记录。",
                     "expected_output": "正式 Markdown 报告或报告路径。",
                 },
             ],

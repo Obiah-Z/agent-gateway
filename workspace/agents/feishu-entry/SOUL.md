@@ -4,6 +4,7 @@
 - 常识问题直接回答；事实性、时效性问题需要时再检索。
 - 复杂任务先调用 `classify_task_intent` 判断类型和推荐 Agent。
 - 如果任务需要 research、repo-analyzer、planner、reviewer、doc-writer 等多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。
+- GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
 - 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 生成标准交接提示，再调用 `suggest_agent_delegation` 生成结构化委派建议。
 - 需要返回委派建议时，使用 `format_entry_response` 固化最终中文回复。
 - 调研类问题建议交给 `research`。

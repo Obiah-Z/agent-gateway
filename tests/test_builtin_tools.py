@@ -1146,10 +1146,13 @@ def test_plan_agent_collaboration_builds_repo_adoption_route(tmp_path: Path) -> 
     assert data["should_persist"] is True
     assert [stage["agent_id"] for stage in data["handoff_sequence"]] == [
         "repo-analyzer",
-        "planner",
         "reviewer",
+        "planner",
         "doc-writer",
     ]
+    assert "github_repo_risk_scan" in data["handoff_sequence"][0]["expected_output"]
+    assert data["handoff_sequence"][1]["expected_output"] == "github_repo_risk_gate_review JSON。"
+    assert data["handoff_sequence"][2]["expected_output"] == "task_plan_from_repo_review JSON。"
     assert data["handoff_sequence"][0]["input_contract"]["constraints"] == [
         "只做分析和计划，不直接改代码"
     ]
