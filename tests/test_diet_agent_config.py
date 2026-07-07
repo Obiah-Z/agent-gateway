@@ -138,6 +138,7 @@ def test_research_agent_has_brief_tool_and_source_prompt() -> None:
     assert "assess_research_confidence" in tools["research"]
     assert "compose_research_brief" in tools["research"]
     assert "compose_research_evidence_pack" in tools["research"]
+    assert "compose_research_option_comparison" in tools["research"]
     assert {"web_search", "fetch_url"}.issubset(tools["research"])
     assert "assess_research_confidence" in identity
     assert "assess_research_confidence" in soul
@@ -148,6 +149,10 @@ def test_research_agent_has_brief_tool_and_source_prompt() -> None:
     assert "compose_research_evidence_pack" in identity
     assert "compose_research_evidence_pack" in soul
     assert "compose_research_evidence_pack" in tools_md
+    assert "compose_research_option_comparison" in identity
+    assert "compose_research_option_comparison" in soul
+    assert "compose_research_option_comparison" in tools_md
+    assert "技术选型" in tools_md
     assert "未经核验" in tools_md
 
 
@@ -523,6 +528,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
 
     for term in [
         "compose_research_evidence_pack",
+        "compose_research_option_comparison",
         "render_github_repo_risk_markdown",
         "review_github_repo_risk_gate",
         "compose_repo_review_task_plan",

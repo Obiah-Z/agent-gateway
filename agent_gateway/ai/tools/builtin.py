@@ -3422,6 +3422,114 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def compose_research_option_comparison(
+        topic: str,
+        decision_question: str,
+        options: list[dict[str, Any]] | None = None,
+        criteria: list[str] | None = None,
+        sources: list[dict[str, str]] | None = None,
+        recommendation: str = "",
+        constraints: list[str] | None = None,
+        uncertainty: list[str] | None = None,
+        freshness: str = "",
+    ) -> str:
+        """把调研证据整理成多方案选型对比，供 planner/reviewer/doc-writer 复用。"""
+
+        criteria_clean = _clean_strings(criteria)
+        constraints_clean = _clean_strings(constraints)
+        uncertainty_clean = _clean_strings(uncertainty)
+        normalized_sources = []
+        primary_count = 0
+        for source in sources or []:
+            title = str(source.get("title", "")).strip()
+            url = str(source.get("url", "")).strip()
+            source_type = str(source.get("source_type", "") or source.get("type", "")).strip().lower()
+            fact = str(source.get("fact", "") or source.get("evidence", "")).strip()
+            if source_type in {"official", "docs", "paper", "primary", "官方", "论文"}:
+                primary_count += 1
+            if title or url or fact:
+                normalized_sources.append(
+                    {
+                        "title": title,
+                        "url": url,
+                        "source_type": source_type or "unknown",
+                        "fact": fact,
+                    }
+                )
+
+        normalized_options = []
+        for option in options or []:
+            name = str(option.get("name", "")).strip()
+            if not name:
+                continue
+            strengths = _clean_strings(option.get("strengths") if isinstance(option.get("strengths"), list) else [])
+            weaknesses = _clean_strings(option.get("weaknesses") if isinstance(option.get("weaknesses"), list) else [])
+            best_for = _clean_strings(option.get("best_for") if isinstance(option.get("best_for"), list) else [])
+            avoid_when = _clean_strings(option.get("avoid_when") if isinstance(option.get("avoid_when"), list) else [])
+            evidence = _clean_strings(option.get("evidence") if isinstance(option.get("evidence"), list) else [])
+            try:
+                score = int(option.get("score", 0))
+            except (TypeError, ValueError):
+                score = 0
+            normalized_options.append(
+                {
+                    "name": name,
+                    "score": max(0, min(score, 100)),
+                    "strengths": strengths,
+                    "weaknesses": weaknesses,
+                    "best_for": best_for,
+                    "avoid_when": avoid_when,
+                    "evidence": evidence,
+                }
+            )
+
+        if normalized_options:
+            winner = max(normalized_options, key=lambda item: item["score"])
+            recommended_option = recommendation.strip() or str(winner["name"])
+        else:
+            recommended_option = recommendation.strip()
+            uncertainty_clean.append("缺少候选方案。")
+        if not normalized_sources:
+            uncertainty_clean.append("缺少可核验来源 URL。")
+        if not criteria_clean:
+            uncertainty_clean.append("缺少评价维度。")
+        evidence_quality = "strong"
+        if not normalized_options or not normalized_sources:
+            evidence_quality = "missing"
+        elif uncertainty_clean:
+            evidence_quality = "limited"
+        elif len(normalized_sources) < 2 or primary_count == 0:
+            evidence_quality = "medium"
+
+        next_actions = []
+        if evidence_quality in {"missing", "limited"}:
+            next_actions.append("补充候选方案、评价维度和一手来源后再进入最终选型。")
+        if recommended_option:
+            next_actions.append(f"把推荐方案「{recommended_option}」交给 planner 拆成验证计划。")
+        next_actions.append("将主要风险交给 reviewer 做门禁审查。")
+
+        return json.dumps(
+            {
+                "type": "research_option_comparison",
+                "topic": topic.strip(),
+                "decision_question": decision_question.strip(),
+                "criteria": criteria_clean,
+                "constraints": constraints_clean,
+                "recommended_option": recommended_option,
+                "evidence_quality": evidence_quality,
+                "source_count": len(normalized_sources),
+                "primary_source_count": primary_count,
+                "options": normalized_options,
+                "sources": normalized_sources,
+                "uncertainty": list(dict.fromkeys(uncertainty_clean)),
+                "freshness": freshness.strip(),
+                "next_actions": list(dict.fromkeys(next_actions))[:6],
+                "downstream_use": "供 planner 拆验证计划、reviewer 做门禁审查、doc-writer 生成选型报告。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -4583,6 +4691,60 @@ def register_builtin_tools(
             },
             handler=compose_research_evidence_pack,
             tags=("research", "evidence", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_research_option_comparison",
+            description=(
+                "Compose a structured option comparison from verified research evidence: "
+                "criteria, candidate options, scores, sources, recommendation, uncertainty, "
+                "and downstream handoff actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["topic", "decision_question"],
+                "properties": {
+                    "topic": {"type": "string"},
+                    "decision_question": {"type": "string"},
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "score": {"type": "integer"},
+                                "strengths": {"type": "array", "items": {"type": "string"}},
+                                "weaknesses": {"type": "array", "items": {"type": "string"}},
+                                "best_for": {"type": "array", "items": {"type": "string"}},
+                                "avoid_when": {"type": "array", "items": {"type": "string"}},
+                                "evidence": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
+                    },
+                    "criteria": {"type": "array", "items": {"type": "string"}},
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "url": {"type": "string"},
+                                "source_type": {"type": "string"},
+                                "type": {"type": "string"},
+                                "fact": {"type": "string"},
+                                "evidence": {"type": "string"},
+                            },
+                        },
+                    },
+                    "recommendation": {"type": "string"},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "uncertainty": {"type": "array", "items": {"type": "string"}},
+                    "freshness": {"type": "string"},
+                },
+            },
+            handler=compose_research_option_comparison,
+            tags=("research", "comparison", "decision", "handoff"),
         )
     )
     registry.register(

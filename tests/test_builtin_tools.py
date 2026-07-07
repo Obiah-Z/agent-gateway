@@ -1803,6 +1803,64 @@ def test_compose_research_evidence_pack_prepares_downstream_payload(tmp_path: Pa
     ]
 
 
+def test_compose_research_option_comparison_selects_recommended_option(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "compose_research_option_comparison",
+        {
+            "topic": "入站队列中间件选型",
+            "decision_question": "Gateway 分布式入站削峰优先选择 RabbitMQ 还是 Redis？",
+            "criteria": ["可靠投递", "削峰能力", "会话串行协同", "运维复杂度"],
+            "options": [
+                {
+                    "name": "RabbitMQ",
+                    "score": 86,
+                    "strengths": ["确认机制和持久化队列成熟", "适合任务削峰"],
+                    "weaknesses": ["会话级串行仍需额外协调层"],
+                    "best_for": ["企业级可靠队列"],
+                    "avoid_when": ["只需要极轻量本地协调"],
+                    "evidence": ["官方文档覆盖 ack、durable queues。"],
+                },
+                {
+                    "name": "Redis",
+                    "score": 72,
+                    "strengths": ["轻量，适合锁和 ready index"],
+                    "weaknesses": ["不适合作为唯一可靠消息主干"],
+                    "best_for": ["会话协调和幂等"],
+                    "avoid_when": ["需要完整消息队列语义"],
+                    "evidence": ["官方文档覆盖分布式锁模式。"],
+                },
+            ],
+            "sources": [
+                {
+                    "title": "RabbitMQ docs",
+                    "url": "https://www.rabbitmq.com/docs",
+                    "source_type": "official",
+                    "fact": "RabbitMQ documents acknowledgements and durable queues.",
+                },
+                {
+                    "title": "Redis distributed locks",
+                    "url": "https://redis.io/docs/latest/develop/use/patterns/distributed-locks/",
+                    "source_type": "docs",
+                    "fact": "Redis documents distributed lock patterns.",
+                },
+            ],
+            "freshness": "2026-07-07 检索",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "research_option_comparison"
+    assert data["recommended_option"] == "RabbitMQ"
+    assert data["evidence_quality"] == "strong"
+    assert data["primary_source_count"] == 2
+    assert data["options"][0]["score"] == 86
+    assert "把推荐方案「RabbitMQ」交给 planner 拆成验证计划。" in data["next_actions"]
+    assert "reviewer" in data["downstream_use"]
+
+
 def test_compose_research_brief_marks_missing_sources(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
