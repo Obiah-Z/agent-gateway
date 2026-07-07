@@ -73,6 +73,15 @@ def _truncate(text: str, limit: int) -> str:
     return text[:limit] + f"\n... [truncated, {len(text)} total chars]"
 
 
+def _slugify_report_name(value: str) -> str:
+    """把模型给出的标题转换为安全文件名，保留中文标题可读性。"""
+
+    name = re.sub(r"[\\/:*?\"<>|\r\n\t]+", "-", value.strip())
+    name = re.sub(r"\s+", "-", name).strip(" .-")
+    name = re.sub(r"-+", "-", name).strip(" .-")
+    return name or "未命名报告"
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -101,6 +110,30 @@ def register_builtin_tools(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return f"Wrote {len(content)} chars to {path.relative_to(workspace_root)}"
+
+    def save_markdown_report(
+        title: str,
+        content: str,
+        category: str = "general",
+        file_name: str = "",
+    ) -> str:
+        """按 Gateway 约定保存 Markdown 报告，并返回可被通道附件逻辑识别的路径。"""
+
+        safe_category = _slugify_report_name(category).lower()
+        safe_file_name = _slugify_report_name(file_name or title)
+        if not safe_file_name.endswith(".md"):
+            safe_file_name += ".md"
+
+        path = _resolve_workspace_path(
+            workspace_root,
+            str(Path("reports") / safe_category / safe_file_name),
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stripped = content.lstrip()
+        document = content if stripped.startswith("# ") else f"# {title}\n\n{content}"
+        path.write_text(document, encoding="utf-8")
+        relative = path.relative_to(workspace_root)
+        return f"报告路径：workspace/{relative}"
 
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
@@ -172,6 +205,33 @@ def register_builtin_tools(
             },
             handler=write_file,
             tags=("filesystem", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="save_markdown_report",
+            description=(
+                "Save a Markdown report under workspace/reports/<category>/ and return "
+                "a report path that messaging channels can attach."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title", "content"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "content": {"type": "string"},
+                    "category": {
+                        "type": "string",
+                        "description": "Report category folder, for example github-repos, plans, reviews.",
+                    },
+                    "file_name": {
+                        "type": "string",
+                        "description": "Optional Markdown filename. Chinese names are supported.",
+                    },
+                },
+            },
+            handler=save_markdown_report,
+            tags=("filesystem", "write", "report"),
         )
     )
     registry.register(
