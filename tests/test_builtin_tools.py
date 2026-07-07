@@ -1743,6 +1743,67 @@ def test_summarize_collaboration_progress_returns_next_handoff_args(
     assert "不代表任何 Agent 已经自动执行" in data["boundary"]
 
 
+def test_compose_collaboration_final_summary_collects_stage_outputs(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = json.loads(
+        registry.dispatch(
+            "plan_agent_collaboration",
+            {
+                "user_goal": "分析一个 GitHub 仓库并给出是否采纳的执行建议。",
+                "task_type": "repo-adoption",
+                "expected_output": "最终采纳建议",
+                "should_persist": True,
+            },
+        )
+    )
+    progress = json.loads(
+        registry.dispatch(
+            "summarize_collaboration_progress",
+            {
+                "collaboration_plan_json": json.dumps(plan, ensure_ascii=False),
+                "completed_stage_outputs": [
+                    {"step": 1, "summary": "repo-analyzer 已完成仓库分析。"},
+                    {"step": 2, "summary": "reviewer 给出 conditional-go。"},
+                    {"step": 3, "summary": "planner 生成三阶段采纳计划。"},
+                    {"step": 4, "summary": "doc-writer 已生成正式 Markdown 报告。"},
+                ],
+            },
+        )
+    )
+
+    data = json.loads(
+        registry.dispatch(
+            "compose_collaboration_final_summary",
+            {
+                "collaboration_plan_json": json.dumps(plan, ensure_ascii=False),
+                "progress_json": json.dumps(progress, ensure_ascii=False),
+                "completed_stage_outputs": [
+                    {"step": 1, "summary": "repo-analyzer 已完成仓库分析。"},
+                    {"step": 2, "summary": "reviewer 给出 conditional-go。"},
+                    {"step": 3, "summary": "planner 生成三阶段采纳计划。"},
+                    {"step": 4, "summary": "doc-writer 已生成正式 Markdown 报告。"},
+                ],
+                "unresolved_items": ["许可证仍需人工复核。"],
+                "next_actions": ["把报告路径发给用户。"],
+            },
+        )
+    )
+
+    assert data["type"] == "agent_collaboration_final_summary"
+    assert data["task_type"] == "repo-adoption"
+    assert data["status"] == "completed"
+    assert data["completed_stage_count"] == 4
+    assert data["total_stage_count"] == 4
+    assert data["final_conclusion"] == "doc-writer 已生成正式 Markdown 报告。"
+    assert data["stage_summaries"][1]["agent_id"] == "reviewer"
+    assert data["unresolved_items"] == ["许可证仍需人工复核。"]
+    assert data["next_actions"] == ["把报告路径发给用户。"]
+    assert "不代表重新执行任何 Agent" in data["boundary"]
+
+
 def test_plan_agent_collaboration_builds_research_option_validation_route(
     tmp_path: Path,
 ) -> None:

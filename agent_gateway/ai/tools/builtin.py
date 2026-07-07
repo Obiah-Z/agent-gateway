@@ -2987,6 +2987,99 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def compose_collaboration_final_summary(
+        collaboration_plan_json: str,
+        completed_stage_outputs: list[dict[str, Any]] | None = None,
+        progress_json: str = "",
+        user_visible_conclusion: str = "",
+        unresolved_items: list[str] | None = None,
+        next_actions: list[str] | None = None,
+    ) -> str:
+        """把多 Agent 协作阶段结果收束成入口层可回复用户的最终摘要。"""
+
+        if not collaboration_plan_json.strip():
+            return "Error: collaboration_plan_json is required"
+        plan = json.loads(collaboration_plan_json)
+        if not isinstance(plan, dict):
+            return "Error: collaboration_plan_json must be a JSON object"
+        if plan.get("type") != "agent_collaboration_plan":
+            return "Error: collaboration_plan_json type must be agent_collaboration_plan"
+        handoffs = [item for item in plan.get("handoff_sequence") or [] if isinstance(item, dict)]
+        if not handoffs:
+            return "Error: collaboration_plan_json has no handoff_sequence"
+
+        progress: dict[str, Any] = {}
+        if progress_json.strip():
+            parsed_progress = json.loads(progress_json)
+            if not isinstance(parsed_progress, dict):
+                return "Error: progress_json must be a JSON object"
+            if parsed_progress.get("type") != "agent_collaboration_progress":
+                return "Error: progress_json type must be agent_collaboration_progress"
+            progress = parsed_progress
+
+        outputs = [item for item in completed_stage_outputs or [] if isinstance(item, dict)]
+        completed_by_step: dict[int, dict[str, Any]] = {}
+        for item in outputs:
+            try:
+                step = int(item.get("step") or item.get("stage") or 0)
+            except (TypeError, ValueError):
+                step = 0
+            if 1 <= step <= len(handoffs):
+                completed_by_step[step] = item
+
+        completed_count = int(progress.get("completed_stage_count") or 0)
+        if not completed_count:
+            completed_count = max(completed_by_step.keys(), default=0)
+        status = str(progress.get("status") or ("completed" if completed_count >= len(handoffs) else "in-progress"))
+        task_type = str(plan.get("task_type") or progress.get("task_type") or "unknown").strip()
+        final_output = completed_by_step.get(completed_count, {}) if completed_count else {}
+        conclusion = (
+            user_visible_conclusion.strip()
+            or str(final_output.get("summary") or final_output.get("output_summary") or final_output.get("result") or "").strip()
+            or "协作阶段结果已收集，但缺少可直接展示给用户的最终结论。"
+        )
+
+        stage_summaries = []
+        for index, stage in enumerate(handoffs, start=1):
+            output = completed_by_step.get(index, {})
+            output_summary = str(output.get("summary") or output.get("output_summary") or output.get("result") or "").strip()
+            stage_summaries.append(
+                {
+                    "step": index,
+                    "agent_id": stage.get("agent_id") or "unknown",
+                    "purpose": stage.get("purpose") or "按职责处理",
+                    "status": "completed" if index <= completed_count else "pending",
+                    "output_summary": output_summary or "暂无阶段输出。",
+                }
+            )
+
+        unresolved = _clean_strings(unresolved_items)
+        actions = _clean_strings(next_actions)
+        if not actions:
+            actions = (
+                ["把最终摘要回复给用户；如用户要求落盘，再交给 doc-writer 生成正式文档。"]
+                if status == "completed"
+                else ["继续执行下一阶段，完成后再生成最终交付摘要。"]
+            )
+
+        return json.dumps(
+            {
+                "type": "agent_collaboration_final_summary",
+                "task_type": task_type,
+                "user_goal": str(plan.get("user_goal") or "待明确").strip(),
+                "status": status,
+                "completed_stage_count": completed_count,
+                "total_stage_count": len(handoffs),
+                "final_conclusion": conclusion,
+                "stage_summaries": stage_summaries,
+                "unresolved_items": unresolved,
+                "next_actions": actions[:8],
+                "boundary": "这是入口层对多 Agent 协作结果的最终摘要，不代表重新执行任何 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def _agent_collaboration_route_templates() -> dict[str, list[dict[str, str]]]:
         """返回入口层可规划的多 Agent 协作路线模板。"""
 
@@ -5623,6 +5716,42 @@ def register_builtin_tools(
             },
             handler=summarize_collaboration_progress,
             tags=("agent", "collaboration", "progress", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_collaboration_final_summary",
+            description=(
+                "Compose a user-visible final summary from an agent_collaboration_plan, "
+                "completed stage outputs, and optional progress JSON. This does not execute agents."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["collaboration_plan_json"],
+                "properties": {
+                    "collaboration_plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_agent_collaboration.",
+                    },
+                    "completed_stage_outputs": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Completed stage summaries with step/stage and summary/output payload.",
+                    },
+                    "progress_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by summarize_collaboration_progress.",
+                    },
+                    "user_visible_conclusion": {
+                        "type": "string",
+                        "description": "Optional final conclusion to show users directly.",
+                    },
+                    "unresolved_items": {"type": "array", "items": {"type": "string"}},
+                    "next_actions": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=compose_collaboration_final_summary,
+            tags=("agent", "collaboration", "summary", "handoff", "entry"),
         )
     )
     registry.register(

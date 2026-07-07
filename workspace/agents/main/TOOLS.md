@@ -91,6 +91,17 @@
 - 工具会返回 `next_stage` 和可直接传给 `build_collaboration_stage_handoff` 的 `next_handoff_args`。
 - 输出只是进度摘要，不代表任何 Agent 已经执行。
 
+## `compose_collaboration_final_summary`
+
+用于在协作路线完成后，把多个阶段的输出收束成可以给用户看的最终摘要。
+
+使用规则：
+
+- 用户要求“总结结果”“给我最终结论”“汇总交付”时使用。
+- 必须传入原始 `agent_collaboration_plan`，并尽量传入 `completed_stage_outputs` 和 `agent_collaboration_progress`。
+- 输出的是 `agent_collaboration_final_summary` JSON，用于稳定表达最终结论、阶段摘要、未决项和下一步。
+- 该工具不会重新执行任何 Agent，也不替代 doc-writer 生成正式文档。
+
 ## `explain_agent_route`
 
 用于解释入口层为什么选择某个 Agent 或某条协作路线。
