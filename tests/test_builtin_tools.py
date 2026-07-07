@@ -850,6 +850,86 @@ def test_review_collaboration_progress_gate_blocks_missing_handoff_context(
     ]
 
 
+def test_review_collaboration_final_summary_gate_allows_complete_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    summary = {
+        "type": "agent_collaboration_final_summary",
+        "task_type": "repo-adoption",
+        "user_goal": "分析仓库并给出采纳建议。",
+        "status": "completed",
+        "completed_stage_count": 2,
+        "total_stage_count": 2,
+        "final_conclusion": "建议有条件采纳，先复核许可证。",
+        "stage_summaries": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "status": "completed",
+                "output_summary": "仓库适配度较高。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "status": "completed",
+                "output_summary": "conditional-go。",
+            },
+        ],
+        "unresolved_items": ["许可证仍需人工确认。"],
+        "next_actions": ["把许可证复核作为实施前置门槛。"],
+        "boundary": "这是入口层对多 Agent 协作结果的最终摘要，不代表重新执行任何 Agent。",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_collaboration_final_summary_gate",
+            {"summary_json": json.dumps(summary, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "collaboration_final_summary_gate_review"
+    assert data["decision"] == "go"
+    assert data["completed_stage_count"] == 2
+    assert data["total_stage_count"] == 2
+    assert all(item["passed"] for item in data["checklist"])
+    assert "doc-writer" in data["next_actions"][0]
+
+
+def test_review_collaboration_final_summary_gate_blocks_incomplete_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    summary = {
+        "type": "agent_collaboration_final_summary",
+        "task_type": "repo-adoption",
+        "status": "in-progress",
+        "completed_stage_count": 1,
+        "total_stage_count": 2,
+        "final_conclusion": "缺少可直接展示给用户的最终结论。",
+        "stage_summaries": [
+            {"step": 1, "agent_id": "repo-analyzer", "status": "completed"}
+        ],
+        "next_actions": [],
+        "boundary": "",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_collaboration_final_summary_gate",
+            {"summary_json": json.dumps(summary, ensure_ascii=False)},
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    failed_items = [item["item"] for item in data["checklist"] if not item["passed"]]
+    assert "最终结论明确" in failed_items
+    assert "完成状态一致" in failed_items
+    assert "未自动执行声明明确" in failed_items
+
+
 def test_review_research_evidence_gate_allows_verified_pack(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

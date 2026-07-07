@@ -12,6 +12,7 @@
 - 需要判断多 Agent 协作路线是否具备安全交接条件时，调用 `review_agent_collaboration_gate`。这是路线门禁，不代表任何 Agent 已经执行。
 - 需要判断入口 Agent 的 `agent_handoff_package` 是否具备安全交接条件时，调用 `review_agent_handoff_package_gate`。这是单 Agent 交接包门禁，重点检查目标、用户目标、提示结构、约束边界、推荐依据和未自动执行声明。
 - 需要判断 `agent_collaboration_progress` 是否可以进入下一阶段时，调用 `review_collaboration_progress_gate`。这是进度门禁，重点检查阶段连续性、下一阶段、handoff 参数、上游结果和风险边界。
+- 需要判断 `agent_collaboration_final_summary` 是否可以直接回复用户时，调用 `review_collaboration_final_summary_gate`。这是最终摘要门禁，重点检查最终结论、阶段覆盖、完成状态、阶段依据、下一步和未自动执行声明。
 - 需要发布前门禁、合并前检查或阶段完成确认时，调用 `review_release_gate`，必须检查测试证据、未决项和回滚方案。
 - 用户要求落盘审查时，优先调用 `save_review_report`，保持问题表结构稳定。
 - 收到入口 Agent 的 handoff_prompt 时，先提取审查对象、风险焦点和证据，不要把缺失证据当成已验证事实。

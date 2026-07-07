@@ -1550,6 +1550,139 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_collaboration_final_summary_gate(
+        summary_json: str = "",
+        review_target: str = "",
+        known_risks: list[str] | None = None,
+    ) -> str:
+        """审查多 Agent 协作最终摘要是否可以直接回复用户。"""
+
+        summary: dict[str, Any] = {}
+        if summary_json.strip():
+            parsed = json.loads(summary_json)
+            if not isinstance(parsed, dict):
+                return "Error: summary_json must be a JSON object"
+            if parsed.get("type") != "agent_collaboration_final_summary":
+                return "Error: summary_json type must be agent_collaboration_final_summary"
+            summary = parsed
+
+        target = review_target.strip() or str(summary.get("task_type") or summary.get("user_goal") or "").strip()
+        status = str(summary.get("status") or "").strip()
+        final_conclusion = str(summary.get("final_conclusion") or "").strip()
+        stages = [item for item in summary.get("stage_summaries") or [] if isinstance(item, dict)]
+        unresolved = _clean_strings(summary.get("unresolved_items"))
+        next_actions = _clean_strings(summary.get("next_actions"))
+        risks = _clean_strings(known_risks)
+        boundary = str(summary.get("boundary") or "").strip()
+        try:
+            completed = int(summary.get("completed_stage_count") or 0)
+        except (TypeError, ValueError):
+            completed = -1
+        try:
+            total = int(summary.get("total_stage_count") or len(stages) or 0)
+        except (TypeError, ValueError):
+            total = -1
+
+        malformed_stages = 0
+        missing_stage_outputs = 0
+        for index, stage in enumerate(stages, start=1):
+            try:
+                step = int(stage.get("step") or index)
+            except (TypeError, ValueError):
+                step = -1
+            if step != index:
+                malformed_stages += 1
+            if not str(stage.get("agent_id") or "").strip():
+                malformed_stages += 1
+            if not str(stage.get("output_summary") or "").strip():
+                missing_stage_outputs += 1
+
+        completed_consistent = status == "completed" and completed == total and total > 0
+        has_stage_coverage = bool(stages) and len(stages) == total and malformed_stages == 0
+        no_auto_execution_declared = "不代表重新执行任何 Agent" in boundary or "不代表任何 Agent 已经执行" in boundary
+
+        checklist = [
+            {
+                "item": "摘要对象有效",
+                "passed": bool(target) and total > 0 and 0 <= completed <= total,
+                "evidence": f"target={target or 'missing'}；completed={completed}；total={total}",
+            },
+            {
+                "item": "最终结论明确",
+                "passed": bool(final_conclusion) and "缺少" not in final_conclusion,
+                "evidence": final_conclusion or "缺少 final_conclusion。",
+            },
+            {
+                "item": "阶段覆盖完整",
+                "passed": has_stage_coverage,
+                "evidence": f"阶段数={len(stages)}；total={total}；异常阶段数={malformed_stages}",
+            },
+            {
+                "item": "阶段输出可追溯",
+                "passed": bool(stages) and missing_stage_outputs == 0,
+                "evidence": "每个阶段都有 output_summary。" if stages and missing_stage_outputs == 0 else f"缺少阶段输出数：{missing_stage_outputs}",
+            },
+            {
+                "item": "完成状态一致",
+                "passed": completed_consistent,
+                "evidence": f"status={status or 'missing'}；completed={completed}；total={total}",
+            },
+            {
+                "item": "后续动作明确",
+                "passed": bool(next_actions),
+                "evidence": "；".join(next_actions[:4]) if next_actions else "缺少 next_actions。",
+            },
+            {
+                "item": "未自动执行声明明确",
+                "passed": no_auto_execution_declared,
+                "evidence": boundary or "缺少最终摘要边界声明。",
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        remediation = []
+        for item in failed:
+            if item["item"] == "摘要对象有效":
+                remediation.append("补充有效的 task_type / user_goal、completed_stage_count 和 total_stage_count。")
+            elif item["item"] == "最终结论明确":
+                remediation.append("补充可直接给用户看的 final_conclusion，不要只写占位说明。")
+            elif item["item"] == "阶段覆盖完整":
+                remediation.append("补齐 stage_summaries，并确保 step 连续且数量等于 total_stage_count。")
+            elif item["item"] == "阶段输出可追溯":
+                remediation.append("为每个阶段补充 output_summary，避免最终结论缺少依据。")
+            elif item["item"] == "完成状态一致":
+                remediation.append("只有所有阶段完成时才能把 status 标为 completed；否则继续使用协作进度摘要。")
+            elif item["item"] == "后续动作明确":
+                remediation.append("补充 next_actions，说明用户接下来应确认、查看或执行什么。")
+            elif item["item"] == "未自动执行声明明确":
+                remediation.append("补充最终摘要边界，明确这是结果整理，不代表重新执行任何 Agent。")
+        if not remediation:
+            remediation.append("最终摘要具备回复用户的条件；如需正式文档，可交给 doc-writer 成文。")
+
+        return json.dumps(
+            {
+                "type": "collaboration_final_summary_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "completed_stage_count": completed,
+                "total_stage_count": total,
+                "unresolved_items": unresolved,
+                "risks": risks[:8],
+                "next_actions": remediation[:6],
+                "note": "这是多 Agent 协作最终摘要门禁审查，不会重新执行任何 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def review_research_evidence_gate(
         evidence_json: str = "",
         review_target: str = "",
@@ -5976,6 +6109,29 @@ def register_builtin_tools(
             },
             handler=review_collaboration_progress_gate,
             tags=("review", "agent", "collaboration", "progress", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_collaboration_final_summary_gate",
+            description=(
+                "Review whether an agent_collaboration_final_summary is complete and "
+                "safe to send to users: final conclusion, stage coverage, completed "
+                "status, next actions, traceability, and non-execution boundary."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_collaboration_final_summary.",
+                    },
+                    "review_target": {"type": "string"},
+                    "known_risks": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=review_collaboration_final_summary_gate,
+            tags=("review", "agent", "collaboration", "summary", "gate", "risk"),
         )
     )
     registry.register(
