@@ -289,6 +289,53 @@ def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> Non
     }
 
 
+def test_classify_task_intent_routes_github_repo_analysis(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {"user_text": "帮我分析一下这个仓库 https://github.com/example/repo"},
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "task_intent_classification"
+    assert data["intent"] == "repo-analysis"
+    assert data["recommended_agent_id"] == "repo-analyzer"
+    assert data["can_answer_directly"] is False
+    assert data["confidence"] >= 0.67
+
+
+def test_classify_task_intent_routes_planning_request(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {"user_text": "帮我规划一下下一阶段任务，拆成阶段和验收标准"},
+    )
+
+    data = json.loads(result)
+    assert data["intent"] == "planning"
+    assert data["recommended_agent_id"] == "planner"
+    assert "planner" in data["suggested_next_step"]
+
+
+def test_classify_task_intent_keeps_simple_chat_on_main(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {"user_text": "你好，简单介绍一下你能做什么"},
+    )
+
+    data = json.loads(result)
+    assert data["intent"] == "chat"
+    assert data["recommended_agent_id"] == "main"
+    assert data["can_answer_directly"] is True
+
+
 def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"

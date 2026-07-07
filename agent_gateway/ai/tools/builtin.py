@@ -197,6 +197,12 @@ def _clean_strings(items: list[str] | None) -> list[str]:
     return [str(item).strip() for item in items or [] if str(item).strip()]
 
 
+def _keyword_score(text: str, keywords: tuple[str, ...]) -> int:
+    """按关键词命中数给意图分类打分。"""
+
+    return sum(1 for keyword in keywords if keyword and keyword in text)
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -556,6 +562,191 @@ def register_builtin_tools(
             "note": "这是委派建议，不会自动调用目标 Agent。",
         }
         return json.dumps(suggestion, ensure_ascii=False, indent=2)
+
+    def classify_task_intent(user_text: str, context_hint: str = "") -> str:
+        """把用户输入归类到主入口可处理或更适合交给的专用 Agent。"""
+
+        text = f"{user_text} {context_hint}".strip()
+        normalized = text.lower()
+        catalog = [
+            {
+                "intent": "repo-analysis",
+                "agent": "repo-analyzer",
+                "keywords": (
+                    "github.com/",
+                    "gitlab.com/",
+                    "仓库",
+                    "repo",
+                    "repository",
+                    "项目分析",
+                    "代码库",
+                ),
+                "reason": "用户关注代码仓库、项目结构或可借鉴点，repo-analyzer 更适合处理。",
+                "next": "提取仓库链接、分析目标和输出格式后，建议交给 repo-analyzer。",
+                "direct": False,
+            },
+            {
+                "intent": "planning",
+                "agent": "planner",
+                "keywords": (
+                    "规划",
+                    "计划",
+                    "阶段",
+                    "路线图",
+                    "roadmap",
+                    "拆解",
+                    "任务清单",
+                ),
+                "reason": "用户需要拆目标、排阶段或明确验收标准，planner 更适合处理。",
+                "next": "先明确目标、边界、约束和完成标准，再建议交给 planner。",
+                "direct": False,
+            },
+            {
+                "intent": "document",
+                "agent": "doc-writer",
+                "keywords": (
+                    "readme",
+                    "文档",
+                    "报告",
+                    "手册",
+                    "整理成md",
+                    "markdown",
+                    "写成",
+                ),
+                "reason": "用户需要沉淀正式 Markdown 或结构化文档，doc-writer 更适合处理。",
+                "next": "确认文档类型、读者、材料来源和保存位置，再建议交给 doc-writer。",
+                "direct": False,
+            },
+            {
+                "intent": "review",
+                "agent": "reviewer",
+                "keywords": (
+                    "审查",
+                    "review",
+                    "风险",
+                    "漏洞",
+                    "问题",
+                    "隐患",
+                    "是否合理",
+                ),
+                "reason": "用户需要发现风险、缺口或边界问题，reviewer 更适合处理。",
+                "next": "整理审查对象、风险关注点和证据范围后，建议交给 reviewer。",
+                "direct": False,
+            },
+            {
+                "intent": "research",
+                "agent": "research",
+                "keywords": (
+                    "搜索",
+                    "调研",
+                    "查一下",
+                    "最新",
+                    "资料",
+                    "来源",
+                    "新闻",
+                    "对比",
+                ),
+                "reason": "用户需要联网检索、来源核验或资料对比，research 更适合处理。",
+                "next": "明确检索问题、时间范围和需要的来源粒度，再建议交给 research。",
+                "direct": False,
+            },
+            {
+                "intent": "ops",
+                "agent": "ops",
+                "keywords": (
+                    "docker",
+                    "容器",
+                    "redis",
+                    "rabbitmq",
+                    "postgres",
+                    "报错",
+                    "日志",
+                    "磁盘",
+                    "运维",
+                    "健康检查",
+                ),
+                "reason": "用户关注系统运行、容器、中间件或只读排障，ops 更适合处理。",
+                "next": "先确认环境、错误现象和只读排查范围，再建议交给 ops。",
+                "direct": False,
+            },
+            {
+                "intent": "diet",
+                "agent": "diet-assistant-zhanghaibo",
+                "keywords": (
+                    "饮食",
+                    "减肥",
+                    "减脂",
+                    "热量",
+                    "体重",
+                    "早餐",
+                    "午餐",
+                    "晚餐",
+                    "蛋白质",
+                ),
+                "reason": "用户关注个人饮食、体重或减脂记录，饮食助手更适合处理。",
+                "next": "确认用户身份和餐食/体重数据后，建议交给 diet-assistant-zhanghaibo。",
+                "direct": False,
+            },
+            {
+                "intent": "personal",
+                "agent": "personal-secretary-zhanghaibo",
+                "keywords": (
+                    "待办",
+                    "提醒",
+                    "复盘",
+                    "日程",
+                    "明天",
+                    "今天安排",
+                    "个人计划",
+                    "时间块",
+                ),
+                "reason": "用户关注个人计划、待办、提醒或复盘，个人秘书更适合处理。",
+                "next": "确认用户身份、时间范围和需要记录的事项后，建议交给 personal-secretary-zhanghaibo。",
+                "direct": False,
+            },
+        ]
+
+        best = max(
+            catalog,
+            key=lambda row: _keyword_score(normalized, row["keywords"]),
+        )
+        score = _keyword_score(normalized, best["keywords"])
+        if not text:
+            intent = "unknown"
+            agent = "main"
+            confidence = 0.0
+            reason = "用户输入为空，无法判断任务意图。"
+            next_step = "请补充要处理的问题或目标。"
+            can_answer_directly = False
+        elif score <= 0:
+            intent = "chat"
+            agent = "main"
+            confidence = 0.55
+            reason = "未命中专用 Agent 的明显触发词，main 可以先直接回答。"
+            next_step = "直接回答；如果后续出现复杂目标，再重新分类。"
+            can_answer_directly = True
+        else:
+            intent = str(best["intent"])
+            agent = str(best["agent"])
+            confidence = min(0.95, 0.55 + score * 0.12)
+            reason = str(best["reason"])
+            next_step = str(best["next"])
+            can_answer_directly = bool(best["direct"])
+
+        return json.dumps(
+            {
+                "type": "task_intent_classification",
+                "intent": intent,
+                "confidence": round(confidence, 2),
+                "recommended_agent_id": agent,
+                "reason": reason,
+                "can_answer_directly": can_answer_directly,
+                "suggested_next_step": next_step,
+                "note": "这是任务意图识别结果，不会自动调用目标 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     def list_agent_capabilities(
         include_tools: bool = False,
@@ -1087,6 +1278,32 @@ def register_builtin_tools(
             },
             handler=suggest_agent_delegation,
             tags=("agent", "delegation", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="classify_task_intent",
+            description=(
+                "Classify a user request into chat, research, planning, document, "
+                "review, repo-analysis, personal, diet, ops, or unknown, and "
+                "recommend the best configured agent. This does not execute handoff."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_text"],
+                "properties": {
+                    "user_text": {
+                        "type": "string",
+                        "description": "Original user request to classify.",
+                    },
+                    "context_hint": {
+                        "type": "string",
+                        "description": "Optional channel/session context that may help routing.",
+                    },
+                },
+            },
+            handler=classify_task_intent,
+            tags=("agent", "routing", "classification"),
         )
     )
     registry.register(

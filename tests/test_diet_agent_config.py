@@ -46,6 +46,29 @@ def test_platform_entries_and_personal_secretary_are_separated() -> None:
     )
 
 
+def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    by_id = {row["id"]: row for row in agents}
+    tools = set(by_id["main"]["tool_policy"]["tool_names"])
+    prompt_dir = ROOT / "workspace" / by_id["main"]["prompt_policy"]["prompt_dir"]
+
+    assert "classify_task_intent" in tools
+    assert by_id["main"]["prompt_policy"]["prompt_dir"] == "agents/main"
+    assert (prompt_dir / "IDENTITY.md").exists()
+    assert (prompt_dir / "SOUL.md").exists()
+    assert (prompt_dir / "TOOLS.md").exists()
+
+    combined_prompt = "\n".join(
+        (prompt_dir / name).read_text(encoding="utf-8")
+        for name in ["IDENTITY.md", "SOUL.md", "TOOLS.md"]
+    )
+    assert "classify_task_intent" in combined_prompt
+    assert "不假装已经完成多 Agent 自动交接" in combined_prompt
+    assert "personal_todo_add" not in tools
+    assert "meal_log_add" not in tools
+    assert "bash" not in tools
+
+
 def test_research_agent_has_brief_tool_and_source_prompt() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}

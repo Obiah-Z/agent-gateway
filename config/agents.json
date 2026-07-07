@@ -13,6 +13,7 @@
           "read_file",
           "list_directory",
           "get_current_time",
+          "classify_task_intent",
           "memory_write",
           "memory_search",
           "web_search",
@@ -25,7 +26,7 @@
         "top_k": 3
       },
       "prompt_policy": {
-        "prompt_dir": "",
+        "prompt_dir": "agents/main",
         "use_global_files": true,
         "skills_enabled": true
       }
