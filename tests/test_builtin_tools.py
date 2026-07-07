@@ -892,6 +892,35 @@ def test_review_agent_handoff_package_gate_blocks_incomplete_package(tmp_path: P
     assert "补充 target_agent_id" in data["next_actions"][0]
 
 
+def test_format_agent_handoff_package_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    package = {
+        "type": "agent_handoff_package",
+        "target_agent_id": "doc-writer",
+        "handoff_prompt": "目标 Agent：doc-writer",
+        "delegation_suggestion": {"target_agent_id": "planner"},
+    }
+    review = registry.dispatch(
+        "review_agent_handoff_package_gate",
+        {"package_json": json.dumps(package, ensure_ascii=False)},
+    )
+
+    summary = registry.dispatch(
+        "format_agent_handoff_package_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## Agent 交接包门禁审查" in summary
+    assert "- 结论：不建议继续" in summary
+    assert "- 目标 Agent：doc-writer" in summary
+    assert "| 交接目标明确 | 未通过 | target=doc-writer；delegation_target=planner |" in summary
+    assert "## 下一步" in summary
+    assert "- 补充 target_agent_id，并确保 delegation_suggestion.target_agent_id 与之一致。" in summary
+
+
 def test_review_collaboration_progress_gate_allows_next_stage(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

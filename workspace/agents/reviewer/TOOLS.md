@@ -18,6 +18,8 @@
 
 审查入口 Agent 输出的 `agent_handoff_package` 是否可以交给目标 Agent 时，使用 `review_agent_handoff_package_gate`。它检查目标 Agent、用户原始目标、handoff_prompt 结构、约束边界、推荐依据和“未自动执行”声明，输出 go / conditional-go / no-go。
 
+直接回复交接包门禁结果时，使用 `format_agent_handoff_package_gate_review`，不要把 `review_agent_handoff_package_gate` 的原始 JSON 直接贴给用户。
+
 审查入口 Agent 输出的 `agent_collaboration_progress` 是否可以进入下一阶段时，使用 `review_collaboration_progress_gate`。它检查阶段状态是否连续、下一阶段是否明确、`next_handoff_args` 是否可用、上游结果是否可追溯、风险边界是否说明，输出 go / conditional-go / no-go。
 
 审查入口 Agent 输出的 `agent_collaboration_final_summary` 是否可以直接回复用户时，使用 `review_collaboration_final_summary_gate`。它检查最终结论、阶段覆盖、阶段输出、完成状态、下一步和“未重新执行”边界，输出 go / conditional-go / no-go。
