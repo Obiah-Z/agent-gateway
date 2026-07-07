@@ -883,6 +883,65 @@ def test_summarize_ops_health_flags_missing_paths_and_disk_warning(tmp_path: Pat
     assert "优先做只读空间定位" in data["safe_recommendations"][0]
 
 
+def test_ops_runtime_diagnostics_reads_recent_events_and_failures(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    events = tmp_path / "data" / "events"
+    alerts = tmp_path / "data" / "alerts"
+    failed = tmp_path / "data" / "delivery-queue" / "failed"
+    events.mkdir(parents=True)
+    alerts.mkdir(parents=True)
+    failed.mkdir(parents=True)
+    (events / "runtime-events-2026-07-07.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "delivery.sent",
+                        "component": "delivery",
+                        "status": "ok",
+                        "message": "Delivery sent",
+                        "time": "2026-07-07T00:00:00+00:00",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "type": "feishu.event.rejected",
+                        "component": "feishu",
+                        "status": "rejected",
+                        "error": "method not allowed",
+                        "message": "Feishu webhook request rejected",
+                        "channel": "feishu",
+                        "time": "2026-07-07T00:01:00+00:00",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (alerts / "history.jsonl").write_text(
+        json.dumps({"event": "triggered", "rule": {"id": "delivery_failed"}}, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+    (failed / "delivery-1.json").write_text("{}", encoding="utf-8")
+    registry = ToolRegistry()
+    register_builtin_tools(registry, workspace)
+
+    data = json.loads(registry.dispatch("ops_runtime_diagnostics", {"event_limit": 20}))
+
+    assert data["type"] == "ops_runtime_diagnostics"
+    assert data["risk_level"] == "warning"
+    assert data["error_event_count"] == 1
+    assert data["failed_delivery_count"] == 1
+    assert data["error_by_component"] == {"feishu": 1}
+    assert data["recent_errors"][0]["error"] == "method not allowed"
+    assert any("飞书拒绝事件优先检查" in item for item in data["safe_recommendations"])
+    assert "清空失败投递" in data["manual_confirmation_required"]
+
+
 def test_assess_risk_decision_scores_findings_and_actions(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

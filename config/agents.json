@@ -216,6 +216,7 @@
           "get_current_time",
           "ops_readonly_health",
           "summarize_ops_health",
+          "ops_runtime_diagnostics",
           "bash"
         ]
       },

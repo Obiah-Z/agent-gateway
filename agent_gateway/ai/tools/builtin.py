@@ -168,6 +168,25 @@ def _extract_markdown_list_items(section: str) -> list[str]:
     return items
 
 
+def _read_jsonl_tail(path: Path, *, limit: int) -> list[dict[str, object]]:
+    """读取 JSONL 文件尾部并容错解析。"""
+
+    if not path.exists() or not path.is_file():
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    rows: list[dict[str, object]] = []
+    for line in lines[-limit:]:
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+    return rows
+
+
 def _directory_size(path: Path, *, max_files: int = 20_000) -> tuple[int, int, bool]:
     """只读估算目录大小，返回字节数、扫描文件数和是否截断。"""
 
@@ -1568,6 +1587,120 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def ops_runtime_diagnostics(event_limit: int = 200) -> str:
+        """只读汇总最近运行事件、错误和本地失败投递线索。"""
+
+        project_root = workspace_root.parent
+        data_root = project_root / "data"
+        events_dir = data_root / "events"
+        alerts_dir = data_root / "alerts"
+        delivery_failed_dir = data_root / "delivery-queue" / "failed"
+        limit = max(20, min(int(event_limit or 200), 1000))
+
+        event_files = sorted(events_dir.glob("runtime-events*.jsonl")) if events_dir.exists() else []
+        latest_event_file = event_files[-1] if event_files else events_dir / "runtime-events.jsonl"
+        events = _read_jsonl_tail(latest_event_file, limit=limit)
+        error_events = [
+            row
+            for row in events
+            if str(row.get("error") or "").strip()
+            or str(row.get("status") or "").lower() in {"error", "failed", "rejected"}
+            or str(row.get("type") or "").endswith(".failed")
+        ]
+        by_component: dict[str, int] = {}
+        by_type: dict[str, int] = {}
+        for row in error_events:
+            component = str(row.get("component") or "unknown")
+            event_type = str(row.get("type") or "unknown")
+            by_component[component] = by_component.get(component, 0) + 1
+            by_type[event_type] = by_type.get(event_type, 0) + 1
+
+        recent_errors = []
+        for row in error_events[-6:]:
+            recent_errors.append(
+                {
+                    "time": row.get("time", ""),
+                    "component": row.get("component", ""),
+                    "type": row.get("type", ""),
+                    "status": row.get("status", ""),
+                    "message": row.get("message", ""),
+                    "error": row.get("error", ""),
+                    "channel": row.get("channel", ""),
+                    "agent_id": row.get("agent_id", ""),
+                    "correlation_id": row.get("correlation_id", ""),
+                }
+            )
+
+        alert_files = sorted(alerts_dir.glob("*.jsonl")) if alerts_dir.exists() else []
+        alert_rows: list[dict[str, object]] = []
+        for path in alert_files[-3:]:
+            alert_rows.extend(_read_jsonl_tail(path, limit=20))
+        failed_delivery_count = (
+            len([path for path in delivery_failed_dir.glob("*.json") if path.is_file()])
+            if delivery_failed_dir.exists()
+            else 0
+        )
+
+        risk_level = "normal"
+        if failed_delivery_count > 0 or any(
+            str(row.get("status") or "").lower() in {"failed", "error"} for row in error_events
+        ):
+            risk_level = "warning"
+        if len(error_events) >= 10 or failed_delivery_count >= 10:
+            risk_level = "critical"
+
+        findings = [
+            f"最近扫描事件 {len(events)} 条，识别错误/拒绝/失败事件 {len(error_events)} 条。",
+            f"本地失败投递文件 {failed_delivery_count} 个。",
+        ]
+        if by_component:
+            findings.append(
+                "错误模块分布："
+                + "；".join(f"{name}={count}" for name, count in sorted(by_component.items()))
+                + "。"
+            )
+        if alert_rows:
+            findings.append(f"最近告警历史样本 {len(alert_rows)} 条。")
+
+        recommendations = []
+        if failed_delivery_count:
+            recommendations.append("先查看失败投递详情，确认是通道、权限、网络还是消息格式问题。")
+        if by_component.get("feishu"):
+            recommendations.append("飞书拒绝事件优先检查回调路径、请求方法、验签和加密配置。")
+        if by_component.get("delivery"):
+            recommendations.append("投递错误优先检查通道 token、receive_id、队列积压和重试状态。")
+        if by_component.get("agent_loop") or by_component.get("task_worker"):
+            recommendations.append("执行错误优先检查模型返回、工具调用闭环、session 历史和 worker 日志。")
+        if not recommendations:
+            recommendations.append("未发现明确运行错误，保持事件流和告警巡检即可。")
+        recommendations.append("该诊断只读，不会清理队列、重启服务或修改配置。")
+
+        return json.dumps(
+            {
+                "type": "ops_runtime_diagnostics",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "risk_level": risk_level,
+                "event_file": str(latest_event_file),
+                "event_count": len(events),
+                "error_event_count": len(error_events),
+                "failed_delivery_count": failed_delivery_count,
+                "error_by_component": by_component,
+                "error_by_type": by_type,
+                "recent_errors": recent_errors,
+                "alert_sample_count": len(alert_rows),
+                "findings": findings,
+                "safe_recommendations": recommendations,
+                "manual_confirmation_required": [
+                    "清空失败投递",
+                    "重启服务",
+                    "修改通道配置",
+                    "删除事件或告警历史",
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def assess_risk_decision(
         review_target: str,
         findings: list[dict[str, str]] | None = None,
@@ -2507,6 +2640,26 @@ def register_builtin_tools(
             },
             handler=summarize_ops_health,
             tags=("ops", "health", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="ops_runtime_diagnostics",
+            description=(
+                "Read recent local runtime event JSONL files and summarize errors, "
+                "failed deliveries, alert samples, and safe troubleshooting steps."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "event_limit": {
+                        "type": "integer",
+                        "description": "How many recent event rows to inspect, capped at 1000.",
+                    }
+                },
+            },
+            handler=ops_runtime_diagnostics,
+            tags=("ops", "events", "errors", "read"),
         )
     )
     registry.register(
