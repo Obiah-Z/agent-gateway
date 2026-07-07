@@ -20,6 +20,8 @@
 
 收到 reviewer 输出的 `collaboration_progress_gate_review` JSON 时，使用 `render_collaboration_progress_gate_markdown` 渲染为正式协作进度门禁审查报告。如果同时收到入口 Agent 的 `agent_collaboration_progress`，把它作为 `progress_json` 传入同一次渲染，避免进度文档和门禁结论分散。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。
 
+收到入口 Agent 输出的 `agent_collaboration_final_summary` JSON 时，使用 `render_agent_collaboration_final_summary_markdown` 渲染为正式多 Agent 协作最终摘要。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `plans`。最终摘要只表达已有阶段结果，不代表重新执行任何 Agent。
+
 README、方案、复盘和技术报告优先使用 `save_structured_document` 落盘。自由格式或非标准结构文档才使用 `save_markdown_report` 或 `write_file`。
 
 `doc-writer` 不负责事实核验，不要把委派摘要当成事实来源；材料不足时必须先说明缺口。

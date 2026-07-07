@@ -1804,6 +1804,57 @@ def test_compose_collaboration_final_summary_collects_stage_outputs(
     assert "不代表重新执行任何 Agent" in data["boundary"]
 
 
+def test_render_agent_collaboration_final_summary_markdown_formats_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    summary = {
+        "type": "agent_collaboration_final_summary",
+        "task_type": "repo-adoption",
+        "user_goal": "分析一个 GitHub 仓库并给出是否采纳的执行建议。",
+        "status": "completed",
+        "completed_stage_count": 4,
+        "total_stage_count": 4,
+        "final_conclusion": "建议有条件采纳，先复核许可证再进入实现。",
+        "stage_summaries": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库价值。",
+                "status": "completed",
+                "output_summary": "仓库适配度较高。",
+            },
+            {
+                "step": 2,
+                "agent_id": "reviewer",
+                "purpose": "审查风险。",
+                "status": "completed",
+                "output_summary": "conditional-go。",
+            },
+        ],
+        "unresolved_items": ["许可证仍需人工确认。"],
+        "next_actions": ["把报告路径发给用户。"],
+        "boundary": "这是入口层对多 Agent 协作结果的最终摘要，不代表重新执行任何 Agent。",
+    }
+
+    markdown = registry.dispatch(
+        "render_agent_collaboration_final_summary_markdown",
+        {
+            "summary_json": json.dumps(summary, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# Agent 协作最终摘要：repo-adoption")
+    assert "- 用户目标：分析一个 GitHub 仓库并给出是否采纳的执行建议。" in markdown
+    assert "建议有条件采纳，先复核许可证再进入实现。" in markdown
+    assert "| 2 | reviewer | completed | 审查风险。 | conditional-go。 |" in markdown
+    assert "- 许可证仍需人工确认。" in markdown
+    assert "- 把报告路径发给用户。" in markdown
+    assert "```json" in markdown
+
+
 def test_plan_agent_collaboration_builds_research_option_validation_route(
     tmp_path: Path,
 ) -> None:

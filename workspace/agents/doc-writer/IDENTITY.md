@@ -17,6 +17,7 @@
 - 收到入口 Agent 的 `agent_collaboration_plan` JSON 时，使用 `render_agent_collaboration_markdown` 生成多 Agent 协作方案。
 - 收到入口 Agent 的 `agent_collaboration_progress` JSON 时，使用 `render_agent_collaboration_progress_markdown` 生成多 Agent 协作进度文档。
 - 收到 reviewer 的 `collaboration_progress_gate_review` JSON 时，使用 `render_collaboration_progress_gate_markdown` 生成协作进度门禁审查报告；如果同时有 `agent_collaboration_progress`，一并传入，避免进度和门禁脱节。
+- 收到入口 Agent 的 `agent_collaboration_final_summary` JSON 时，使用 `render_agent_collaboration_final_summary_markdown` 生成多 Agent 协作最终摘要。
 - README、方案、复盘和技术报告优先使用 `save_structured_document`。
 - 只有自由格式文档才使用 `save_markdown_report` 或 `write_file`。
 

@@ -2683,6 +2683,69 @@ def register_builtin_tools(
 
         return "\n\n".join(sections) + metadata
 
+    def render_agent_collaboration_final_summary_markdown(
+        summary_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把入口 Agent 的协作最终摘要 JSON 渲染成正式 Markdown。"""
+
+        if not summary_json.strip():
+            return "Error: summary_json is required"
+        summary = json.loads(summary_json)
+        if not isinstance(summary, dict):
+            return "Error: summary_json must be a JSON object"
+        if summary.get("type") != "agent_collaboration_final_summary":
+            return "Error: summary_json type must be agent_collaboration_final_summary"
+
+        task_type = str(summary.get("task_type") or "unknown").strip()
+        status = str(summary.get("status") or "unknown").strip()
+        document_title = title.strip() or f"Agent 协作最终摘要：{task_type}"
+        overview = "\n".join(
+            [
+                f"- 用户目标：{summary.get('user_goal') or '待明确'}",
+                f"- 协作类型：{task_type}",
+                f"- 当前状态：{status}",
+                f"- 已完成阶段：{summary.get('completed_stage_count', 0)} / {summary.get('total_stage_count', 0)}",
+                f"- 执行边界：{summary.get('boundary') or '这是入口层摘要，不代表任何 Agent 已经自动执行。'}",
+            ]
+        )
+
+        stage_rows = []
+        for item in summary.get("stage_summaries") or []:
+            if not isinstance(item, dict):
+                continue
+            stage_rows.append(
+                [
+                    item.get("step") or "待定",
+                    item.get("agent_id") or "unknown",
+                    item.get("status") or "unknown",
+                    item.get("purpose") or "按职责处理",
+                    item.get("output_summary") or "暂无",
+                ]
+            )
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(summary, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", overview),
+                _markdown_section("最终结论", str(summary.get("final_conclusion") or "待补充").strip()),
+                _markdown_section(
+                    "阶段结果",
+                    _markdown_table(["步骤", "Agent", "状态", "职责", "输出摘要"], stage_rows),
+                ),
+                _markdown_section("未决事项", _markdown_bullets(summary.get("unresolved_items"))),
+                _markdown_section("下一步", _markdown_bullets(summary.get("next_actions"))),
+            ]
+        ) + metadata
+
     def outline_structured_document(
         title: str,
         document_type: str,
@@ -5539,6 +5602,35 @@ def register_builtin_tools(
             },
             handler=render_collaboration_progress_gate_markdown,
             tags=("document", "markdown", "agent", "collaboration", "progress", "gate", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_agent_collaboration_final_summary_markdown",
+            description=(
+                "Render an agent_collaboration_final_summary JSON object into a formal "
+                "Chinese Markdown final collaboration summary."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["summary_json"],
+                "properties": {
+                    "summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_collaboration_final_summary.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw final summary metadata.",
+                    },
+                },
+            },
+            handler=render_agent_collaboration_final_summary_markdown,
+            tags=("document", "markdown", "agent", "collaboration", "summary"),
         )
     )
     registry.register(
