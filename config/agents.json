@@ -142,6 +142,7 @@
           "personal_briefing_generate",
           "personal_time_blocks_generate",
           "personal_daily_workflow_generate",
+          "personal_inbox_triage",
           "get_current_time",
           "memory_write",
           "memory_search",

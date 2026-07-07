@@ -257,6 +257,47 @@ class PersonalStore:
             "note": "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。",
         }
 
+    def triage_inbox(
+        self,
+        text: str,
+        *,
+        user_scope: str = "",
+        context: str = "",
+    ) -> dict[str, Any]:
+        """把用户碎片输入整理成可执行收件箱建议，不直接写入数据。"""
+
+        normalized = " ".join(str(text or "").strip().split())
+        context_text = " ".join(str(context or "").strip().split())
+        signals = self._inbox_signals(normalized)
+        suggested_todos = self._suggest_todos_from_text(normalized)
+        suggested_review = self._suggest_review_from_text(normalized, signals)
+        suggested_memory = self._suggest_memory_from_text(normalized, signals)
+        confirmations = self._inbox_confirmations(
+            normalized,
+            suggested_todos=suggested_todos,
+            suggested_review=suggested_review,
+            suggested_memory=suggested_memory,
+        )
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "type": "personal_inbox_triage",
+            "source_text": normalized,
+            "context": context_text,
+            "intent": self._inbox_intent(signals, suggested_todos, suggested_review),
+            "suggested_todos": suggested_todos,
+            "suggested_review": suggested_review,
+            "suggested_memory": suggested_memory,
+            "needs_confirmation": confirmations,
+            "next_actions": self._inbox_next_actions(
+                suggested_todos=suggested_todos,
+                suggested_review=suggested_review,
+                suggested_memory=suggested_memory,
+                confirmations=confirmations,
+            ),
+            "note": "这是个人秘书收件箱整理建议，不会自动写入待办、复盘或长期记忆。",
+        }
+
     def _scope_dir(self, user_scope: str) -> Path:
         scope = MemoryStore.normalize_scope(user_scope)
         name = MemoryStore._scope_dir_name(scope) if scope else "global"
@@ -326,6 +367,175 @@ class PersonalStore:
             if isinstance(items, list) and items:
                 return f"先处理「{items[0].get('title', '')}」。"
         return "先确认今天最重要的一件事，再开始执行。"
+
+    @staticmethod
+    def _inbox_signals(text: str) -> set[str]:
+        signals: set[str] = set()
+        lowered = text.lower()
+        if any(word in text for word in ["要做", "待办", "提醒", "记一下", "明天要", "今天要", "本周要", "下周要"]):
+            signals.add("todo")
+        if any(word in text for word in ["完成", "做完", "复盘", "卡点", "明天第一步", "今天复盘"]):
+            signals.add("review")
+        if any(word in text for word in ["长期", "偏好", "固定", "以后", "目标", "习惯"]):
+            signals.add("memory")
+        if any(word in lowered for word in ["urgent", "asap"]) or any(word in text for word in ["紧急", "马上", "今天必须"]):
+            signals.add("urgent")
+        if any(word in text for word in ["不确定", "可能", "待确认", "看情况"]):
+            signals.add("uncertain")
+        return signals
+
+    @classmethod
+    def _suggest_todos_from_text(cls, text: str) -> list[dict[str, Any]]:
+        if not text:
+            return []
+        todos: list[dict[str, Any]] = []
+        for fragment in cls._split_inbox_fragments(text):
+            if not cls._looks_like_todo(fragment):
+                continue
+            todos.append(
+                {
+                    "title": cls._clean_todo_title(fragment),
+                    "priority": cls._infer_priority(fragment),
+                    "due_at": cls._infer_due_at(fragment),
+                    "notes": "",
+                }
+            )
+        return todos[:5]
+
+    @staticmethod
+    def _suggest_review_from_text(text: str, signals: set[str]) -> dict[str, Any] | None:
+        if "review" not in signals:
+            return None
+        completed = []
+        blockers = []
+        next_step = ""
+        for fragment in PersonalStore._split_inbox_fragments(text):
+            if any(word in fragment for word in ["完成", "做完"]):
+                completed.append(fragment)
+            elif any(word in fragment for word in ["卡点", "卡住", "焦虑", "不清楚"]):
+                blockers.append(fragment)
+            elif "明天" in fragment or "下一步" in fragment:
+                next_step = fragment
+        return {
+            "summary": text[:160],
+            "completed": completed[:5],
+            "blockers": blockers[:5],
+            "next_step": next_step,
+        }
+
+    @staticmethod
+    def _suggest_memory_from_text(text: str, signals: set[str]) -> dict[str, Any] | None:
+        if "memory" not in signals:
+            return None
+        return {
+            "content": text[:300],
+            "category": "personal_preference",
+            "reason": "包含长期目标、固定偏好或稳定习惯信号。",
+        }
+
+    @staticmethod
+    def _inbox_confirmations(
+        text: str,
+        *,
+        suggested_todos: list[dict[str, Any]],
+        suggested_review: dict[str, Any] | None,
+        suggested_memory: dict[str, Any] | None,
+    ) -> list[str]:
+        confirmations: list[str] = []
+        if not text:
+            confirmations.append("需要补充要整理的原始内容。")
+        if not suggested_todos and suggested_review is None and suggested_memory is None:
+            confirmations.append("这段内容更像普通对话，是否需要整理成待办或复盘？")
+        if len(suggested_todos) > 3:
+            confirmations.append("待办较多，是否需要只保留今天最重要的 3 件？")
+        if suggested_memory is not None:
+            confirmations.append("是否确认写入长期记忆？")
+        return confirmations
+
+    @staticmethod
+    def _inbox_next_actions(
+        *,
+        suggested_todos: list[dict[str, Any]],
+        suggested_review: dict[str, Any] | None,
+        suggested_memory: dict[str, Any] | None,
+        confirmations: list[str],
+    ) -> list[str]:
+        actions: list[str] = []
+        if suggested_todos:
+            actions.append("确认后调用 personal_todo_add 写入待办。")
+        if suggested_review is not None:
+            actions.append("确认后调用 personal_review_add 写入复盘。")
+        if suggested_memory is not None:
+            actions.append("确认后调用 memory_write 写入长期记忆。")
+        if confirmations:
+            actions.append("先向用户确认含糊项，再写入结构化数据。")
+        if not actions:
+            actions.append("直接用简短中文回复，不需要写入结构化数据。")
+        return actions
+
+    @staticmethod
+    def _inbox_intent(
+        signals: set[str],
+        suggested_todos: list[dict[str, Any]],
+        suggested_review: dict[str, Any] | None,
+    ) -> str:
+        if suggested_todos and suggested_review is not None:
+            return "mixed"
+        if suggested_todos or "todo" in signals:
+            return "todo"
+        if suggested_review is not None or "review" in signals:
+            return "review"
+        if "memory" in signals:
+            return "memory"
+        return "chat"
+
+    @staticmethod
+    def _split_inbox_fragments(text: str) -> list[str]:
+        raw_parts = []
+        for line in text.replace("；", "\n").replace("。", "\n").replace("，", "\n").splitlines():
+            raw_parts.extend(line.split(";"))
+        return [part.strip(" -\t") for part in raw_parts if part.strip(" -\t")]
+
+    @staticmethod
+    def _looks_like_todo(fragment: str) -> bool:
+        if any(word in fragment for word in ["完成", "做完"]) and not any(
+            word in fragment for word in ["要完成", "需要完成", "必须完成"]
+        ):
+            return False
+        return any(
+            word in fragment
+            for word in ["要", "待办", "提醒", "准备", "整理", "复习", "背", "练", "写", "提交"]
+        )
+
+    @staticmethod
+    def _clean_todo_title(fragment: str) -> str:
+        title = fragment.strip()
+        for prefix in ["记一下", "待办", "提醒我", "我要", "需要", "今天", "明天"]:
+            if title.startswith(prefix):
+                title = title[len(prefix) :].strip(" ：:，,")
+        return title[:120] or fragment[:120]
+
+    @staticmethod
+    def _infer_priority(fragment: str) -> str:
+        if any(word in fragment.lower() for word in ["urgent", "asap"]) or any(
+            word in fragment for word in ["紧急", "马上", "今天必须", "必须"]
+        ):
+            return "urgent"
+        if any(word in fragment for word in ["重要", "优先", "明天"]):
+            return "high"
+        return "normal"
+
+    @staticmethod
+    def _infer_due_at(fragment: str) -> str:
+        if "今天" in fragment:
+            return "today"
+        if "明天" in fragment:
+            return "tomorrow"
+        if "本周" in fragment:
+            return "this_week"
+        if "下周" in fragment:
+            return "next_week"
+        return ""
 
     @staticmethod
     def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -486,6 +696,20 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(workflow, ensure_ascii=False, indent=2)
 
+    def personal_inbox_triage(
+        text: str,
+        context: str = "",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        triage = personal_store.triage_inbox(
+            text,
+            user_scope=_scope(__runtime_context, user_scope),
+            context=context,
+        )
+        return json.dumps(triage, ensure_ascii=False, indent=2)
+
     registry.register(
         RegisteredTool(
             name="personal_todo_add",
@@ -613,5 +837,24 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_daily_workflow_generate,
             tags=("personal", "workflow", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_inbox_triage",
+            description=(
+                "Triage a messy personal message into suggested todos, review, memory, "
+                "confirmation questions, and next actions without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "context": {"type": "string"},
+                },
+            },
+            handler=personal_inbox_triage,
+            tags=("personal", "inbox", "planning", "read"),
         )
     )

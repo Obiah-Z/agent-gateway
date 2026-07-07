@@ -216,3 +216,44 @@ def test_personal_daily_workflow_combines_todos_reviews_and_time_blocks(tmp_path
         "recent_review_count": 1,
     }
     assert workflow["note"] == "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。"
+
+
+def test_personal_inbox_triage_suggests_actions_without_writing(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    triage = json.loads(
+        registry.dispatch(
+            "personal_inbox_triage",
+            {
+                "text": (
+                    "今天完成 Redis 复盘，但场景题还是卡点。"
+                    "明天要练 RabbitMQ 选型，记一下长期目标是月底前完成面试项目表达。"
+                )
+            },
+            runtime_context=context,
+        )
+    )
+
+    assert triage["type"] == "personal_inbox_triage"
+    assert triage["user_scope"] == "user:alice"
+    assert triage["intent"] == "mixed"
+    assert triage["suggested_todos"][0]["title"] == "要练 RabbitMQ 选型"
+    assert triage["suggested_todos"][0]["due_at"] == "tomorrow"
+    assert triage["suggested_review"]["blockers"] == ["但场景题还是卡点"]
+    assert triage["suggested_memory"]["category"] == "personal_preference"
+    assert "是否确认写入长期记忆？" in triage["needs_confirmation"]
+    assert any("personal_todo_add" in action for action in triage["next_actions"])
+    assert store.list_todos(user_scope="user:alice") == []
+    assert store.recent_reviews(user_scope="user:alice") == []
+
+
+def test_personal_inbox_triage_handles_plain_chat(tmp_path: Path) -> None:
+    store = PersonalStore(tmp_path / "workspace")
+    triage = store.triage_inbox("今天有点累", user_scope="user:alice")
+
+    assert triage["intent"] == "chat"
+    assert triage["suggested_todos"] == []
+    assert any("这段内容更像普通对话" in item for item in triage["needs_confirmation"])
