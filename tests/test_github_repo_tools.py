@@ -4,6 +4,7 @@ import json
 from agent_gateway.ai.tools.github_repo import (
     GitHubRepoClient,
     assess_gateway_repo_fit,
+    compose_repo_analysis,
     normalize_github_repo_summary,
     parse_github_repo,
     register_github_repo_tools,
@@ -180,3 +181,84 @@ def test_github_repo_gateway_fit_tool_uses_summary_json() -> None:
     assert fit["repository"] == "demo/repo"
     assert fit["priority"] in {"medium", "high"}
     assert "next_steps" in fit
+
+
+def test_compose_repo_analysis_combines_summary_fit_and_findings() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="workflow",
+        repo_data={
+            "html_url": "https://github.com/demo/workflow",
+            "description": "Agent workflow and tool calling templates",
+            "language": "Markdown",
+            "topics": ["agent", "workflow"],
+            "stargazers_count": 2000,
+            "forks_count": 120,
+            "license": {"spdx_id": "MIT"},
+            "archived": False,
+            "pushed_at": "2026-07-01T00:00:00Z",
+        },
+        readme={
+            "name": "README.md",
+            "path": "README.md",
+            "content": "Agent workflow examples.",
+            "error": "",
+        },
+        tree=[{"path": "skills/writer/SKILL.md", "type": "blob", "size": 100}],
+    )
+    fit = assess_gateway_repo_fit(summary, focus=["workflow"])
+
+    analysis = compose_repo_analysis(
+        summary,
+        fit,
+        analysis_goal="判断是否值得 Gateway 借鉴。",
+        key_findings=["仓库提供 workflow 示例。"],
+        risks=["需要确认许可证复用边界。"],
+        recommendations=["优先抽取 workflow 模板。"],
+    )
+
+    assert analysis["type"] == "github_repo_analysis"
+    assert analysis["repository"] == "demo/workflow"
+    assert analysis["analysis_goal"] == "判断是否值得 Gateway 借鉴。"
+    assert analysis["gateway_fit"]["priority"] == fit["priority"]
+    assert analysis["key_findings"] == ["仓库提供 workflow 示例。"]
+    assert analysis["risks"] == ["需要确认许可证复用边界。"]
+    assert analysis["recommendations"] == ["优先抽取 workflow 模板。"]
+    assert "对 Gateway 的借鉴点" in analysis["suggested_report_sections"]
+
+
+def test_compose_github_repo_analysis_tool_outputs_stable_json() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="repo",
+        repo_data={
+            "html_url": "https://github.com/demo/repo",
+            "description": "agent gateway templates",
+            "language": "Python",
+            "topics": ["agent", "gateway"],
+            "license": {"spdx_id": "Apache-2.0"},
+            "archived": False,
+        },
+        readme={"name": "README.md", "path": "README.md", "content": "agent gateway", "error": ""},
+        tree=[{"path": "AGENTS.md", "type": "blob", "size": 5}],
+    )
+    fit = assess_gateway_repo_fit(summary)
+    registry = ToolRegistry()
+    register_github_repo_tools(registry, client=object())
+
+    analysis = json.loads(
+        registry.dispatch(
+            "compose_github_repo_analysis",
+            {
+                "repo_summary_json": json.dumps(summary, ensure_ascii=False),
+                "gateway_fit_json": json.dumps(fit, ensure_ascii=False),
+                "analysis_goal": "输出结构化仓库分析",
+            },
+        )
+    )
+
+    assert analysis["type"] == "github_repo_analysis"
+    assert analysis["repository"] == "demo/repo"
+    assert analysis["project_positioning"]["language"] == "Python"
+    assert analysis["gateway_fit"]["score"] == fit["fit_score"]
+    assert analysis["recommendations"]

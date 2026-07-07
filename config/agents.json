@@ -233,6 +233,7 @@
         "tool_names": [
           "github_repo_summary",
           "github_repo_gateway_fit",
+          "compose_github_repo_analysis",
           "read_file",
           "list_directory",
           "get_current_time",

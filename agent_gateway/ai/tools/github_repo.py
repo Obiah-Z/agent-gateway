@@ -247,6 +247,80 @@ def assess_gateway_repo_fit(
     }
 
 
+def compose_repo_analysis(
+    repo_summary: dict[str, Any],
+    gateway_fit: dict[str, Any] | None = None,
+    *,
+    analysis_goal: str = "",
+    key_findings: list[str] | None = None,
+    risks: list[str] | None = None,
+    recommendations: list[str] | None = None,
+) -> dict[str, Any]:
+    """把仓库摘要和 Gateway fit 评估组合成稳定的仓库分析结论。"""
+
+    fit = gateway_fit or assess_gateway_repo_fit(repo_summary)
+    finding_items = [str(item).strip() for item in key_findings or [] if str(item).strip()]
+    risk_items = [str(item).strip() for item in risks or [] if str(item).strip()]
+    recommendation_items = [
+        str(item).strip() for item in recommendations or [] if str(item).strip()
+    ]
+    summary_risks = [str(item).strip() for item in fit.get("risks") or [] if str(item).strip()]
+    reuse_ideas = [
+        str(item).strip() for item in fit.get("gateway_reuse_ideas") or [] if str(item).strip()
+    ]
+    next_steps = [str(item).strip() for item in fit.get("next_steps") or [] if str(item).strip()]
+
+    position = repo_summary.get("description") or "仓库描述不足，需要结合 README 和目录继续确认。"
+    if repo_summary.get("archived"):
+        lifecycle = "archived"
+    elif repo_summary.get("pushed_at") or repo_summary.get("updated_at"):
+        lifecycle = "active-or-recent"
+    else:
+        lifecycle = "unknown"
+
+    if not finding_items:
+        finding_items = [
+            f"主要语言：{repo_summary.get('language') or 'unknown'}。",
+            f"关注度：{repo_summary.get('stars', 0)} stars，{repo_summary.get('forks', 0)} forks。",
+            f"适配优先级：{fit.get('priority', 'unknown')}，fit_score={fit.get('fit_score', 0)}。",
+        ]
+    if not risk_items:
+        risk_items = summary_risks or ["暂未从结构化摘要中发现明确风险，仍需人工复核 README 和关键代码。"]
+    if not recommendation_items:
+        recommendation_items = reuse_ideas + next_steps
+
+    return {
+        "type": "github_repo_analysis",
+        "repository": repo_summary.get("repository", ""),
+        "url": repo_summary.get("url", ""),
+        "analysis_goal": analysis_goal.strip() or "说明项目用途、价值、风险和 Gateway 可借鉴点。",
+        "project_positioning": {
+            "description": position,
+            "language": repo_summary.get("language") or "unknown",
+            "topics": repo_summary.get("topics") or [],
+            "license": repo_summary.get("license") or "unknown",
+            "lifecycle": lifecycle,
+        },
+        "gateway_fit": {
+            "score": fit.get("fit_score", 0),
+            "priority": fit.get("priority", "unknown"),
+            "signals": fit.get("signals") or [],
+        },
+        "key_findings": finding_items[:8],
+        "gateway_reuse_ideas": reuse_ideas[:8],
+        "risks": risk_items[:8],
+        "recommendations": recommendation_items[:8],
+        "suggested_report_sections": [
+            "仓库结论",
+            "项目定位",
+            "技术栈与结构",
+            "对 Gateway 的借鉴点",
+            "风险与不确定点",
+            "建议下一步",
+        ],
+    }
+
+
 def _gateway_reuse_ideas(text: str, tree_paths: list[str]) -> list[str]:
     """根据仓库文本和目录信号生成 Gateway 可借鉴方向。"""
 
@@ -299,6 +373,37 @@ def register_github_repo_tools(
         assessment = assess_gateway_repo_fit(data, focus=focus or [])
         return json.dumps(assessment, ensure_ascii=False, indent=2)
 
+    def compose_github_repo_analysis(
+        repo_summary_json: str,
+        gateway_fit_json: str = "",
+        analysis_goal: str = "",
+        key_findings: list[str] | None = None,
+        risks: list[str] | None = None,
+        recommendations: list[str] | None = None,
+    ) -> str:
+        """组合仓库摘要、fit 评分和分析补充项，输出稳定分析 JSON。"""
+
+        if not repo_summary_json.strip():
+            return "Error: repo_summary_json is required"
+        summary = json.loads(repo_summary_json)
+        if not isinstance(summary, dict):
+            return "Error: repo_summary_json must be a JSON object"
+        fit = None
+        if gateway_fit_json.strip():
+            parsed_fit = json.loads(gateway_fit_json)
+            if not isinstance(parsed_fit, dict):
+                return "Error: gateway_fit_json must be a JSON object"
+            fit = parsed_fit
+        analysis = compose_repo_analysis(
+            summary,
+            fit,
+            analysis_goal=analysis_goal,
+            key_findings=key_findings,
+            risks=risks,
+            recommendations=recommendations,
+        )
+        return json.dumps(analysis, ensure_ascii=False, indent=2)
+
     registry.register(
         RegisteredTool(
             name="github_repo_summary",
@@ -350,5 +455,49 @@ def register_github_repo_tools(
             },
             handler=github_repo_gateway_fit,
             tags=("github", "repository", "analysis"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_github_repo_analysis",
+            description=(
+                "Compose a stable repository analysis JSON from github_repo_summary, "
+                "optional github_repo_gateway_fit, and curated findings."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["repo_summary_json"],
+                "properties": {
+                    "repo_summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_summary.",
+                    },
+                    "gateway_fit_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by github_repo_gateway_fit.",
+                    },
+                    "analysis_goal": {
+                        "type": "string",
+                        "description": "What the user wants to learn from the repository.",
+                    },
+                    "key_findings": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Curated findings from README/tree/key files.",
+                    },
+                    "risks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional risks or uncertainties found by the agent.",
+                    },
+                    "recommendations": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional next actions or Gateway adaptation ideas.",
+                    },
+                },
+            },
+            handler=compose_github_repo_analysis,
+            tags=("github", "repository", "analysis", "report"),
         )
     )
