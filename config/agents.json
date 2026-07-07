@@ -30,7 +30,8 @@
           "fetch_url",
           "format_agent_capability_catalog",
           "match_agent_capability",
-          "format_agent_capability_match"
+          "format_agent_capability_match",
+          "compose_agent_handoff_package"
         ]
       },
       "memory_policy": {
@@ -104,7 +105,8 @@
           "prepare_entry_route_response",
           "format_agent_capability_catalog",
           "match_agent_capability",
-          "format_agent_capability_match"
+          "format_agent_capability_match",
+          "compose_agent_handoff_package"
         ]
       },
       "memory_policy": {
@@ -146,7 +148,8 @@
           "prepare_entry_route_response",
           "format_agent_capability_catalog",
           "match_agent_capability",
-          "format_agent_capability_match"
+          "format_agent_capability_match",
+          "compose_agent_handoff_package"
         ]
       },
       "memory_policy": {

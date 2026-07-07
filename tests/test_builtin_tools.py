@@ -2533,6 +2533,55 @@ def test_format_agent_capability_match_outputs_recommendation(tmp_path: Path) ->
     assert "不代表目标 Agent 已经自动执行" in result
 
 
+def test_compose_agent_handoff_package_builds_prompt_and_suggestion(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    match = {
+        "type": "agent_capability_match",
+        "user_goal": "把已有材料整理成 Markdown 报告",
+        "recommended_agent_id": "doc-writer",
+        "confidence": 0.71,
+        "matches": [
+            {
+                "agent_id": "doc-writer",
+                "name": "DocWriter",
+                "score": 4,
+                "matched_terms": ["文档", "报告"],
+                "reason": "目标与该 Agent 的职责或工具命中：文档, 报告。",
+                "handoff_inputs": ["`source_material`：已有分析、计划或审查结论。"],
+            }
+        ],
+        "next_actions": ["调用 build_agent_handoff_prompt 生成交接提示。"],
+        "boundary": "这是基于当前 Agent 能力目录的推荐，不代表目标 Agent 已经自动执行。",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "compose_agent_handoff_package",
+            {
+                "user_goal": "把已有材料整理成 Markdown 报告",
+                "match_json": json.dumps(match, ensure_ascii=False),
+                "source_platform": "wework",
+                "constraints": ["只整理已有材料，不补事实"],
+                "expected_output": "Markdown 报告",
+                "should_persist": True,
+            },
+        )
+    )
+
+    assert data["type"] == "agent_handoff_package"
+    assert data["target_agent_id"] == "doc-writer"
+    assert data["delegation_suggestion"]["target_agent_id"] == "doc-writer"
+    assert data["delegation_suggestion"]["confidence"] == 0.71
+    assert "目标 Agent：doc-writer" in data["handoff_prompt"]
+    assert "只整理已有材料，不补事实" in data["handoff_prompt"]
+    assert "Markdown 报告" in data["handoff_prompt"]
+    assert "不要声称目标 Agent 已经自动执行" in data["next_actions"][1]
+    assert "不代表目标 Agent 已经自动执行" in data["boundary"]
+
+
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)

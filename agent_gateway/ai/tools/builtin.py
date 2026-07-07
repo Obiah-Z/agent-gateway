@@ -2874,6 +2874,75 @@ def register_builtin_tools(
         ]
         return "\n".join(sections).strip()
 
+    def compose_agent_handoff_package(
+        user_goal: str,
+        match_json: str,
+        context_summary: str = "",
+        constraints: list[str] | None = None,
+        expected_output: str = "",
+        source_platform: str = "",
+        should_persist: bool = False,
+        known_inputs: list[str] | None = None,
+        open_questions: list[str] | None = None,
+    ) -> str:
+        """把 Agent 能力匹配结果转换成标准交接包。"""
+
+        if not user_goal.strip():
+            return "Error: user_goal is required"
+        if not match_json.strip():
+            return "Error: match_json is required"
+        match = json.loads(match_json)
+        if not isinstance(match, dict):
+            return "Error: match_json must be a JSON object"
+        if match.get("type") != "agent_capability_match":
+            return "Error: match_json type must be agent_capability_match"
+
+        target = str(match.get("recommended_agent_id") or "main").strip()
+        matches = [item for item in match.get("matches") or [] if isinstance(item, dict)]
+        best = next((item for item in matches if item.get("agent_id") == target), matches[0] if matches else {})
+        reason = str(best.get("reason") or "基于当前 Agent 能力目录推荐。").strip()
+        context = context_summary.strip() or reason
+        handoff_prompt = build_agent_handoff_prompt(
+            user_goal=user_goal,
+            target_agent_id=target,
+            context_summary=context,
+            constraints=constraints,
+            expected_output=expected_output,
+            source_platform=source_platform,
+            should_persist=should_persist,
+            known_inputs=known_inputs,
+            open_questions=open_questions,
+        )
+        delegation = json.loads(
+            suggest_agent_delegation(
+                task_type=str(match.get("task_type") or "agent-capability-match"),
+                target_agent_id=target,
+                reason=reason,
+                context_summary=context,
+                handoff_prompt=handoff_prompt,
+                confidence=float(match.get("confidence") or 0.0),
+                can_answer_briefly=True,
+            )
+        )
+        return json.dumps(
+            {
+                "type": "agent_handoff_package",
+                "user_goal": user_goal.strip(),
+                "target_agent_id": target,
+                "confidence": match.get("confidence", 0),
+                "match": match,
+                "handoff_prompt": handoff_prompt,
+                "delegation_suggestion": delegation,
+                "next_actions": [
+                    "把 handoff_prompt 交给目标 Agent，或复制给用户确认后继续。",
+                    "不要声称目标 Agent 已经自动执行。",
+                ],
+                "boundary": "这是入口层交接包，不代表目标 Agent 已经自动执行。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def build_collaboration_stage_handoff(
         collaboration_plan_json: str,
         stage: int = 1,
@@ -6046,6 +6115,35 @@ def register_builtin_tools(
             },
             handler=build_agent_handoff_prompt,
             tags=("agent", "delegation", "handoff"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_agent_handoff_package",
+            description=(
+                "Compose a full handoff package from an agent_capability_match: "
+                "handoff prompt, delegation suggestion, next actions, and boundary."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_goal", "match_json"],
+                "properties": {
+                    "user_goal": {"type": "string"},
+                    "match_json": {
+                        "type": "string",
+                        "description": "JSON string returned by match_agent_capability.",
+                    },
+                    "context_summary": {"type": "string"},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "expected_output": {"type": "string"},
+                    "source_platform": {"type": "string"},
+                    "should_persist": {"type": "boolean"},
+                    "known_inputs": {"type": "array", "items": {"type": "string"}},
+                    "open_questions": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=compose_agent_handoff_package,
+            tags=("agent", "delegation", "handoff", "routing"),
         )
     )
     registry.register(

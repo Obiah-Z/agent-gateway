@@ -41,6 +41,7 @@
 - 如果用户只问少数 Agent，用 `agent_ids` 过滤。
 - 再调用 `format_agent_capability_catalog` 转成用户可读中文目录。
 - 如果用户问“这个任务该交给谁”，在读取目录后调用 `match_agent_capability`，再调用 `format_agent_capability_match` 生成中文推荐说明。
+- 如果用户确认采用推荐 Agent，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议。
 - 不要凭记忆列 Agent 能力，避免和配置漂移。
 
 ## `format_entry_response`
