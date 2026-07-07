@@ -133,6 +133,7 @@
           "personal_review_add",
           "personal_review_recent",
           "personal_briefing_generate",
+          "personal_time_blocks_generate",
           "get_current_time",
           "memory_write",
           "memory_search",

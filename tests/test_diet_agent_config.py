@@ -303,4 +303,22 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_review_add",
         "personal_review_recent",
         "personal_briefing_generate",
+        "personal_time_blocks_generate",
     }.issubset(tools[SECRETARY_AGENT_ID])
+
+
+def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
+    identity = (
+        ROOT / "workspace" / "agents" / SECRETARY_AGENT_ID / "IDENTITY.md"
+    ).read_text(encoding="utf-8")
+    soul = (ROOT / "workspace" / "agents" / SECRETARY_AGENT_ID / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    tools_md = (
+        ROOT / "workspace" / "agents" / SECRETARY_AGENT_ID / "TOOLS.md"
+    ).read_text(encoding="utf-8")
+
+    assert "personal_time_blocks_generate" in identity
+    assert "personal_time_blocks_generate" in soul
+    assert "personal_time_blocks_generate" in tools_md
+    assert "上午下午晚上" in tools_md

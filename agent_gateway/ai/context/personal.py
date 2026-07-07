@@ -167,6 +167,37 @@ class PersonalStore:
             "next_steps": next_steps[:5],
         }
 
+    def generate_time_blocks(
+        self,
+        *,
+        user_scope: str = "",
+        todo_limit: int = 9,
+    ) -> dict[str, Any]:
+        """把未完成待办安排到上午、下午、晚上三个时间块。"""
+
+        open_todos = self.list_todos(status="open", limit=todo_limit, user_scope=user_scope)
+        sorted_todos = sorted(open_todos, key=self._todo_sort_key)
+        blocks = [
+            {"name": "上午", "focus": "", "items": []},
+            {"name": "下午", "focus": "", "items": []},
+            {"name": "晚上", "focus": "", "items": []},
+        ]
+        for index, todo in enumerate(sorted_todos[:todo_limit]):
+            blocks[index % len(blocks)]["items"].append(todo)
+        for block in blocks:
+            if block["items"]:
+                block["focus"] = str(block["items"][0].get("title", "")).strip()
+            else:
+                block["focus"] = "留作缓冲或处理临时事项"
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "source_todo_count": len(open_todos),
+            "blocks": blocks,
+            "first_action": self._first_time_block_action(blocks),
+            "note": "这是基于未完成待办生成的建议时间块，不会自动修改待办状态。",
+        }
+
     def _scope_dir(self, user_scope: str) -> Path:
         scope = MemoryStore.normalize_scope(user_scope)
         name = MemoryStore._scope_dir_name(scope) if scope else "global"
@@ -220,6 +251,22 @@ class PersonalStore:
         if open_todos:
             return str(open_todos[0].get("title", "")).strip()
         return "暂无明确待办，建议先确认今天最重要的一件事。"
+
+    @staticmethod
+    def _todo_sort_key(todo: dict[str, Any]) -> tuple[int, str, str]:
+        priority_order = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+        priority = priority_order.get(str(todo.get("priority", "")).lower(), 2)
+        due_at = str(todo.get("due_at", "") or "9999-99-99")
+        created_at = str(todo.get("created_at", ""))
+        return (priority, due_at, created_at)
+
+    @staticmethod
+    def _first_time_block_action(blocks: list[dict[str, Any]]) -> str:
+        for block in blocks:
+            items = block.get("items")
+            if isinstance(items, list) and items:
+                return f"先处理「{items[0].get('title', '')}」。"
+        return "先确认今天最重要的一件事，再开始执行。"
 
     @staticmethod
     def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -354,6 +401,18 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(briefing, ensure_ascii=False, indent=2)
 
+    def personal_time_blocks_generate(
+        todo_limit: int = 9,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        plan = personal_store.generate_time_blocks(
+            user_scope=_scope(__runtime_context, user_scope),
+            todo_limit=todo_limit,
+        )
+        return json.dumps(plan, ensure_ascii=False, indent=2)
+
     registry.register(
         RegisteredTool(
             name="personal_todo_add",
@@ -449,5 +508,19 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_briefing_generate,
             tags=("personal", "briefing", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_time_blocks_generate",
+            description="Generate morning/afternoon/evening time blocks from open personal todos.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "todo_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_time_blocks_generate,
+            tags=("personal", "planning", "read"),
         )
     )
