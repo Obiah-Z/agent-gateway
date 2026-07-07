@@ -166,6 +166,18 @@ def test_monitoring_dashboard_includes_task_queue_view() -> None:
     assert ".task-item" in styles
 
 
+def test_monitoring_dashboard_includes_personal_secretary_view() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "personal-panel" in index
+    assert "个人秘书" in index
+    assert "personal-user-scope" in index
+    assert "personal.recent" in app_js
+    assert "function renderPersonal" in app_js
+    assert "slicePanelItems(items, \"personal\")" in app_js
+
+
 def test_monitoring_dashboard_includes_inbound_broker_observability() -> None:
     app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 

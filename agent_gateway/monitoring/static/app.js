@@ -166,6 +166,9 @@ const dom = {
   dietSummary: $("#diet-summary"),
   dietUserScope: $("#diet-user-scope"),
   dietList: $("#diet-list"),
+  personalSummary: $("#personal-summary"),
+  personalUserScope: $("#personal-user-scope"),
+  personalList: $("#personal-list"),
   tasksSummary: $("#tasks-summary"),
   tasksList: $("#tasks-list"),
   deliveryState: $("#delivery-state"),
@@ -718,11 +721,20 @@ function buildDietQuery(base = {}) {
   return params;
 }
 
+function buildPersonalQuery(base = {}) {
+  const params = { ...base };
+  const userScope = dom.personalUserScope?.value?.trim() || "";
+  if (userScope) {
+    params.user_scope = userScope;
+  }
+  return params;
+}
+
 async function refreshAll() {
   clearAlert();
   dom.refreshBtn.disabled = true;
   try {
-    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, diet, tasks, taskExecutions, laneDoctor, schedulerStatus, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
+    const [health, runtime, deliveryStats, deliveryList, cronJobs, events, errors, memories, diet, personal, tasks, taskExecutions, laneDoctor, schedulerStatus, metricsSummary, metricsTail, alertsActive, alertsHistory] = await Promise.all([
       rpc("health.check"),
       rpc("runtime.status"),
       rpc("delivery.stats"),
@@ -736,6 +748,7 @@ async function refreshAll() {
       rpc("errors.recent", buildErrorQuery({ limit: 40 })),
       rpc("memory.recent", { limit: 20 }),
       rpc("diet.recent", buildDietQuery({ limit: 20 })),
+      rpc("personal.recent", buildPersonalQuery({ limit: 20 })),
       rpc("tasks.list", { status: "all", limit: 40 }),
       rpc("tasks.executions", { limit: 24 }),
       rpc("tasks.lanes.doctor", { limit: 12 }),
@@ -766,6 +779,7 @@ async function refreshAll() {
     renderErrors(errors);
     renderMemories(memories);
     renderDiet(diet);
+    renderPersonal(personal);
     renderTasks(tasks, taskExecutions, laneDoctor, schedulerStatus || runtime.tasks?.session_scheduler || {});
     renderDelivery(deliveryList);
     renderCron(cronJobs);
@@ -2231,6 +2245,78 @@ function renderDiet(payload) {
   appendCollapseToggle(dom.dietList, "diet", items.length, () => renderDiet(payload));
 }
 
+function renderPersonal(payload) {
+  clearNode(dom.personalList);
+  const todos = Array.isArray(payload?.todos) ? payload.todos : [];
+  const reviews = Array.isArray(payload?.reviews) ? payload.reviews : [];
+  const items = [
+    ...todos.map((item) => ({ kind: "todo", ...item })),
+    ...reviews.map((item) => ({ kind: "review", ...item })),
+  ].sort((a, b) => {
+    const left = Date.parse(a.completed_at || a.created_at || a.ts || "") || 0;
+    const right = Date.parse(b.completed_at || b.created_at || b.ts || "") || 0;
+    return right - left;
+  });
+  dom.personalSummary.textContent = payload?.requires_user_scope
+    ? "需要指定用户"
+    : `${todos.length} 条待办 · ${reviews.length} 条复盘`;
+  dom.personalList.className = items.length ? "memory-list" : "memory-list empty";
+  if (!items.length) {
+    dom.personalList.textContent = payload?.requires_user_scope
+      ? "输入 user_scope 后查看该用户的待办和复盘。"
+      : "最近没有个人秘书记录。";
+    return;
+  }
+  const visibleItems = slicePanelItems(items, "personal");
+  for (const item of visibleItems) {
+    const card = document.createElement("article");
+    card.className = "memory-item";
+    const head = document.createElement("div");
+    head.className = "memory-head";
+    const title = document.createElement("div");
+    appendText(title, "strong", personalTitle(item));
+    appendText(title, "small", personalSubtitle(item));
+    head.appendChild(title);
+    appendText(head, "span", formatTimestamp(item.completed_at || item.created_at || item.ts), "event-time");
+    card.appendChild(head);
+    appendText(card, "p", personalDescription(item), "memory-content");
+    dom.personalList.appendChild(card);
+  }
+  appendCollapseToggle(dom.personalList, "personal", items.length, () => renderPersonal(payload));
+}
+
+function personalTitle(item) {
+  if (item.kind === "todo") {
+    return item.status === "done" ? `已完成待办：${item.title || "--"}` : `待办：${item.title || "--"}`;
+  }
+  return `复盘：${item.summary || "--"}`;
+}
+
+function personalSubtitle(item) {
+  if (item.kind === "todo") {
+    const priority = item.priority ? `优先级 ${item.priority}` : "未标记优先级";
+    const due = item.due_at ? ` · 截止 ${item.due_at}` : "";
+    return `${statusLabel(item.status || "open")} · ${priority}${due}`;
+  }
+  return item.user_scope || "个人复盘";
+}
+
+function personalDescription(item) {
+  if (item.kind === "todo") {
+    const notes = item.notes ? `说明：${item.notes}` : "无补充说明";
+    const result = item.result ? ` · 结果：${item.result}` : "";
+    return `${notes}${result}`;
+  }
+  const completed = Array.isArray(item.completed) && item.completed.length
+    ? `完成：${item.completed.join("、")}`
+    : "完成：暂无";
+  const blockers = Array.isArray(item.blockers) && item.blockers.length
+    ? `卡点：${item.blockers.join("、")}`
+    : "卡点：暂无";
+  const next = item.next_step ? `明天第一步：${item.next_step}` : "明天第一步：待明确";
+  return `${completed}\n${blockers}\n${next}`;
+}
+
 function renderDietStatus(status) {
   const card = document.createElement("article");
   card.className = "memory-item";
@@ -2871,6 +2957,11 @@ async function bootstrap() {
     }
   });
   dom.dietUserScope?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      refreshAll();
+    }
+  });
+  dom.personalUserScope?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       refreshAll();
     }
