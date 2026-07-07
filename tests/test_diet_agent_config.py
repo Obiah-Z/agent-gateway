@@ -84,6 +84,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         prompt_dir = ROOT / "workspace" / by_id[agent_id]["prompt_policy"]["prompt_dir"]
         identity = (prompt_dir / "IDENTITY.md").read_text(encoding="utf-8")
         soul = (prompt_dir / "SOUL.md").read_text(encoding="utf-8")
+        tools_md = (prompt_dir / "TOOLS.md").read_text(encoding="utf-8")
 
         assert "classify_task_intent" in tools
         assert "format_entry_response" in tools
@@ -96,6 +97,10 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "build_agent_handoff_prompt" in soul
         assert "format_entry_response" in soul
         assert "suggest_agent_delegation" in soul
+        assert "classify_task_intent" in tools_md
+        assert "build_agent_handoff_prompt" in tools_md
+        assert "suggest_agent_delegation" in tools_md
+        assert "format_entry_response" in tools_md
 
 
 def test_research_agent_has_brief_tool_and_source_prompt() -> None:
@@ -367,12 +372,16 @@ def test_entry_agents_require_structured_handoff_prompt() -> None:
         soul = (ROOT / "workspace" / "agents" / agent_id / "SOUL.md").read_text(
             encoding="utf-8"
         )
+        tools_md = (ROOT / "workspace" / "agents" / agent_id / "TOOLS.md").read_text(
+            encoding="utf-8"
+        )
         assert "suggest_agent_delegation" in soul
         assert "list_agent_capabilities" in soul
         assert "build_agent_handoff_prompt" in soul
         assert "handoff_prompt" in soul
         assert "用户原始目标" in soul
         assert "期望输出" in soul
+        assert "不要声称目标 Agent 已经自动执行完成" in tools_md
 
 
 def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> None:
@@ -396,6 +405,31 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "suggest_agent_delegation" not in tools[agent_id]
         assert "list_agent_capabilities" not in tools[agent_id]
         assert "build_agent_handoff_prompt" not in tools[agent_id]
+
+
+def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
+    content = (ROOT / "doc" / "Agent能力边界总览.md").read_text(encoding="utf-8")
+
+    for term in [
+        "compose_research_evidence_pack",
+        "render_execution_record_markdown",
+        "ops_runtime_diagnostics",
+        "personal_day_review_plan_generate",
+        "diet_day_review_plan_generate",
+        "build_agent_handoff_prompt",
+    ]:
+        assert term in content
+    for agent_id in [
+        "research",
+        "repo-analyzer",
+        "planner",
+        "reviewer",
+        "doc-writer",
+        "personal-secretary-zhanghaibo",
+        "diet-assistant-zhanghaibo",
+        "ops",
+    ]:
+        assert agent_id in content
 
 
 def test_personal_secretary_has_structured_personal_tools() -> None:
