@@ -1333,6 +1333,48 @@ def test_review_research_option_comparison_gate_allows_complete_comparison(
     assert all(item["passed"] for item in data["checklist"])
 
 
+def test_format_research_option_comparison_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    comparison = {
+        "type": "research_option_comparison",
+        "topic": "缓存选型",
+        "decision_question": "是否采用 Redis 作为分布式协调组件？",
+        "criteria": [],
+        "recommended_option": "",
+        "evidence_quality": "missing",
+        "options": [{"name": "Redis"}],
+        "sources": [{"title": "一篇博客", "source_type": "blog", "fact": "只说 Redis 很快。"}],
+        "uncertainty": [],
+    }
+    review = registry.dispatch(
+        "review_research_option_comparison_gate",
+        {
+            "comparison_json": json.dumps(comparison, ensure_ascii=False),
+            "min_options": 2,
+            "min_sources": 2,
+            "require_primary_source": True,
+            "require_recommendation": True,
+        },
+    )
+
+    formatted = registry.dispatch(
+        "format_research_option_comparison_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## Research 方案对比门禁审查" in formatted
+    assert "- 结论：不建议继续" in formatted
+    assert "- 推荐方案：未说明" in formatted
+    assert "- 候选方案数量：1" in formatted
+    assert "- 来源数量：1" in formatted
+    assert "| 评价维度已列出 | 未通过 | 缺少 criteria。 |" in formatted
+    assert "| 推荐方案已说明 | 未通过 | 缺少 recommended_option。 |" in formatted
+    assert "- 补充推荐方案和推荐理由。" in formatted
+
+
 def test_review_github_repo_risk_gate_blocks_unclear_license(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

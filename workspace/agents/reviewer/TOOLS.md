@@ -8,6 +8,8 @@
 
 审查 research 输出的 `research_option_comparison` 是否可以进入 planner 拆解或交给 doc-writer 成文时，使用 `review_research_option_comparison_gate`。它检查决策问题、候选方案、评价维度、来源数量、URL、一手来源、推荐项、候选方案证据和不确定点，输出 go / conditional-go / no-go。
 
+直接回复 research 方案对比门禁结果时，使用 `format_research_option_comparison_gate_review`，不要把 `review_research_option_comparison_gate` 的原始 JSON 直接贴给用户。
+
 审查 repo-analyzer 输出的 `github_repo_risk_scan` 是否可以支撑仓库采纳、引用或复用时，使用 `review_github_repo_risk_gate`。它检查许可证、维护状态、高危阻塞风险、缓解动作和预期用途，输出 go / conditional-go / no-go。
 
 审查计划、采纳路线图、方案验证计划、执行手册或 planner 输出是否可以进入实现时，使用 `review_task_plan_gate`。它检查目标、边界、阶段、完成标准、风险和验收依据，输出 go / conditional-go / no-go。输入是 `task_plan_from_research_option_comparison` 时，它还会检查方案门禁、推荐方案、候选方案、评价维度和执行动作限制。

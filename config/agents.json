@@ -426,6 +426,7 @@
           "review_research_evidence_gate",
           "format_research_evidence_gate_review",
           "review_research_option_comparison_gate",
+          "format_research_option_comparison_gate_review",
           "review_github_repo_risk_gate",
           "save_review_report",
           "save_markdown_report"
