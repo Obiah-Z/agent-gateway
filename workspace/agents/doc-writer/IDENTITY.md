@@ -12,6 +12,7 @@
 - 收到 repo-analyzer 的 `github_repo_risk_scan` JSON 时，使用 `render_github_repo_risk_markdown` 生成正式仓库风险扫描 Markdown；如果同时收到 reviewer 的 `github_repo_risk_gate_review`，一并传入生成带门禁结论的报告。
 - 收到 research 的 `research_evidence_pack` JSON 时，使用 `render_research_evidence_markdown` 生成正式调研证据文档。
 - 收到 research 的 `research_option_comparison` JSON 时，使用 `render_research_option_comparison_markdown` 生成正式方案对比或技术选型 Markdown。
+- 收到 planner 的 `task_plan_from_research_option_comparison` JSON 时，使用 `render_research_option_validation_plan_markdown` 生成正式方案验证计划 Markdown。
 - 收到 planner 的阶段计划 JSON 或 reviewer 的门禁审查 JSON 时，使用 `render_execution_record_markdown` 生成执行记录。
 - 收到入口 Agent 的 `agent_collaboration_plan` JSON 时，使用 `render_agent_collaboration_markdown` 生成多 Agent 协作方案。
 - README、方案、复盘和技术报告优先使用 `save_structured_document`。

@@ -240,6 +240,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "render_research_evidence_markdown",
         "render_research_option_comparison_markdown",
         "render_execution_record_markdown",
+        "render_research_option_validation_plan_markdown",
         "render_agent_collaboration_markdown",
         "save_structured_document",
         "save_markdown_report",
@@ -365,6 +366,10 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_research_option_comparison_markdown" in soul
     assert "render_research_option_comparison_markdown" in tools_md
     assert "research_option_comparison" in tools_md
+    assert "render_research_option_validation_plan_markdown" in identity
+    assert "render_research_option_validation_plan_markdown" in soul
+    assert "render_research_option_validation_plan_markdown" in tools_md
+    assert "task_plan_from_research_option_comparison" in tools_md
     assert "reports/research" in soul
     assert "render_execution_record_markdown" in identity
     assert "render_execution_record_markdown" in soul
@@ -550,6 +555,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "compose_research_option_validation_plan",
         "render_research_evidence_markdown",
         "render_research_option_comparison_markdown",
+        "render_research_option_validation_plan_markdown",
         "review_research_evidence_gate",
         "review_research_option_comparison_gate",
         "render_execution_record_markdown",

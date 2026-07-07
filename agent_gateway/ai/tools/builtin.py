@@ -2198,6 +2198,76 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_research_option_validation_plan_markdown(
+        task_plan_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 planner 的方案验证计划 JSON 渲染成正式 Markdown。"""
+
+        if not task_plan_json.strip():
+            return "Error: task_plan_json is required"
+        plan = json.loads(task_plan_json)
+        if not isinstance(plan, dict):
+            return "Error: task_plan_json must be a JSON object"
+        if plan.get("type") != "task_plan_from_research_option_comparison":
+            return "Error: task_plan_json type must be task_plan_from_research_option_comparison"
+
+        plan_title = str(plan.get("title") or "方案验证计划").strip()
+        document_title = title.strip() or plan_title
+        decision = plan.get("decision") if isinstance(plan.get("decision"), dict) else {}
+        criteria = _clean_strings(plan.get("criteria") if isinstance(plan.get("criteria"), list) else [])
+        candidates = _clean_strings(
+            plan.get("candidate_options") if isinstance(plan.get("candidate_options"), list) else []
+        )
+        summary = "\n".join(
+            [
+                f"- 目标：{plan.get('goal') or '待明确'}",
+                f"- 范围：{plan.get('scope') or '待明确'}",
+                f"- 推荐方案：{decision.get('recommended_option') or '待确认'}",
+                f"- 门禁结论：{decision.get('gate') or 'missing'}",
+                f"- 建议动作：{decision.get('recommended_action') or 'review-first'}",
+            ]
+        )
+
+        phase_rows = []
+        for index, phase in enumerate(plan.get("phases") or [], start=1):
+            if not isinstance(phase, dict):
+                continue
+            phase_rows.append(
+                [
+                    phase.get("name") or f"阶段 {index}",
+                    phase.get("task") or "待明确",
+                    phase.get("output") or "待明确",
+                    phase.get("done") or "待补充",
+                ]
+            )
+
+        risks = _clean_strings(plan.get("risks") if isinstance(plan.get("risks"), list) else [])
+        next_steps = _clean_strings(plan.get("next_steps") if isinstance(plan.get("next_steps"), list) else [])
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(plan, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section("候选方案", _markdown_bullets(candidates)),
+                _markdown_section("评价维度", _markdown_bullets(criteria)),
+                _markdown_section("验证阶段", _markdown_table(["阶段", "任务", "输出", "完成标准"], phase_rows)),
+                _markdown_section("风险与限制", _markdown_bullets(risks)),
+                _markdown_section("下一步", _markdown_bullets(next_steps)),
+                _markdown_section(
+                    "说明",
+                    str(plan.get("note") or "这是方案验证计划，不代表已经完成实施或生产落地。"),
+                ),
+            ]
+        ) + metadata
+
     def render_agent_collaboration_markdown(
         collaboration_json: str,
         title: str = "",
@@ -4573,6 +4643,35 @@ def register_builtin_tools(
             },
             handler=render_execution_record_markdown,
             tags=("document", "markdown", "plan", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_research_option_validation_plan_markdown",
+            description=(
+                "Render a task_plan_from_research_option_comparison JSON object from "
+                "planner into a formal Chinese Markdown validation plan."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["task_plan_json"],
+                "properties": {
+                    "task_plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_option_validation_plan.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw validation plan metadata.",
+                    },
+                },
+            },
+            handler=render_research_option_validation_plan_markdown,
+            tags=("document", "markdown", "research", "plan", "validation"),
         )
     )
     registry.register(

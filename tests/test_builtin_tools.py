@@ -333,6 +333,55 @@ def test_compose_research_option_validation_plan_uses_gate_decision(
     assert "热点 session 仍需 Redis 协调。" in data["risks"]
 
 
+def test_render_research_option_validation_plan_markdown_formats_plan(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "task_plan_from_research_option_comparison",
+        "title": "RabbitMQ 方案验证计划",
+        "goal": "验证 RabbitMQ 是否适合 Gateway 入站削峰。",
+        "scope": "只做最小验证，不直接生产化。",
+        "decision": {
+            "gate": "conditional-go",
+            "recommended_option": "RabbitMQ",
+            "recommended_action": "pilot",
+        },
+        "criteria": ["可靠投递", "削峰能力"],
+        "candidate_options": ["RabbitMQ", "Redis"],
+        "phases": [
+            {
+                "name": "证据与门禁复核",
+                "task": "复核方案对比和门禁。",
+                "output": "未决问题清单。",
+                "done": "阻塞项已确认。",
+            },
+            {
+                "name": "最小验证设计",
+                "task": "设计 RabbitMQ 最小实验。",
+                "output": "实验范围和回滚方式。",
+                "done": "可独立验证关键假设。",
+            },
+        ],
+        "risks": ["热点 session 仍需 Redis 协调。"],
+        "next_steps": ["只进入最小验证，不直接做生产化改造。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_research_option_validation_plan_markdown",
+        {"task_plan_json": json.dumps(plan, ensure_ascii=False)},
+    )
+
+    assert markdown.startswith("# RabbitMQ 方案验证计划")
+    assert "推荐方案：RabbitMQ" in markdown
+    assert "门禁结论：conditional-go" in markdown
+    assert "## 候选方案" in markdown
+    assert "- RabbitMQ" in markdown
+    assert "| 证据与门禁复核 | 复核方案对比和门禁。" in markdown
+    assert "热点 session 仍需 Redis 协调。" in markdown
+
+
 def test_adapt_collaboration_plan_to_task_plan_outputs_staged_handoffs(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
