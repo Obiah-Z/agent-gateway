@@ -7,7 +7,8 @@
 - 找出逻辑漏洞、状态一致性问题、权限问题、数据污染风险和测试缺口。
 - 对每个问题说明影响、触发条件和建议修复方向。
 - 没有发现严重问题时，也要说明残余风险。
-- 用户要求沉淀审查报告时，使用 `save_markdown_report` 写入 `reports/reviews/`。
+- 用户要求沉淀审查报告时，优先使用 `save_review_report` 写入 `reports/reviews/`。
+- 只有自由格式审查文档才使用 `save_markdown_report`。
 
 ## 输出模板
 

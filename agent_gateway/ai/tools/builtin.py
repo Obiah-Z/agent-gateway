@@ -82,6 +82,15 @@ def _slugify_report_name(value: str) -> str:
     return name or "未命名报告"
 
 
+def _markdown_list(items: list[str]) -> str:
+    """把字符串列表渲染成 Markdown 列表。"""
+
+    cleaned = [str(item).strip() for item in items if str(item).strip()]
+    if not cleaned:
+        return "- 暂无"
+    return "\n".join(f"- {item}" for item in cleaned)
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -134,6 +143,92 @@ def register_builtin_tools(
         path.write_text(document, encoding="utf-8")
         relative = path.relative_to(workspace_root)
         return f"报告路径：workspace/{relative}"
+
+    def save_task_plan(
+        title: str,
+        goal: str,
+        scope: str = "",
+        phases: list[dict[str, str]] | None = None,
+        risks: list[str] | None = None,
+        next_steps: list[str] | None = None,
+        file_name: str = "",
+    ) -> str:
+        """保存结构化计划文档，供 planner 固定产出格式。"""
+
+        rows = []
+        for phase in phases or []:
+            rows.append(
+                "| {name} | {task} | {output} | {done} |".format(
+                    name=str(phase.get("name", "")).replace("|", "\\|"),
+                    task=str(phase.get("task", "")).replace("|", "\\|"),
+                    output=str(phase.get("output", "")).replace("|", "\\|"),
+                    done=str(phase.get("done", "") or phase.get("acceptance", "")).replace("|", "\\|"),
+                )
+            )
+        phase_table = "\n".join(
+            [
+                "| 阶段 | 任务 | 输出 | 完成标准 |",
+                "|---|---|---|---|",
+                *(rows or ["| 待拆分 | 待明确 | 待明确 | 待明确 |"]),
+            ]
+        )
+        content = "\n\n".join(
+            [
+                f"## 目标\n{goal or '待明确'}",
+                f"## 边界\n{scope or '待明确'}",
+                f"## 阶段计划\n{phase_table}",
+                f"## 风险\n{_markdown_list(risks or [])}",
+                f"## 下一步\n{_markdown_list(next_steps or [])}",
+            ]
+        )
+        return save_markdown_report(
+            title=title,
+            content=content,
+            category="plans",
+            file_name=file_name or title,
+        )
+
+    def save_review_report(
+        title: str,
+        conclusion: str,
+        findings: list[dict[str, str]] | None = None,
+        test_gaps: list[str] | None = None,
+        residual_risks: list[str] | None = None,
+        file_name: str = "",
+    ) -> str:
+        """保存结构化审查报告，供 reviewer 固定产出格式。"""
+
+        rows = []
+        for finding in findings or []:
+            rows.append(
+                "| {severity} | {issue} | {impact} | {suggestion} |".format(
+                    severity=str(finding.get("severity", "")).replace("|", "\\|"),
+                    issue=str(finding.get("issue", "")).replace("|", "\\|"),
+                    impact=str(finding.get("impact", "")).replace("|", "\\|"),
+                    suggestion=str(finding.get("suggestion", "")).replace("|", "\\|"),
+                )
+            )
+        findings_table = "\n".join(
+            [
+                "| 严重级别 | 问题 | 影响 | 建议 |",
+                "|---|---|---|---|",
+                *(rows or ["| 无 | 未发现明确问题 | 无 | 继续按测试结果复核 |"]),
+            ]
+        )
+        content = "\n\n".join(
+            [
+                f"## 审查结论\n{conclusion or '待明确'}",
+                f"## 主要问题\n{findings_table}",
+                f"## 测试缺口\n{_markdown_list(test_gaps or [])}",
+                f"## 残余风险\n{_markdown_list(residual_risks or [])}",
+            ]
+        )
+        return save_markdown_report(
+            title=title,
+            content=content,
+            category="reviews",
+            file_name=file_name or title,
+        )
 
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
@@ -232,6 +327,70 @@ def register_builtin_tools(
             },
             handler=save_markdown_report,
             tags=("filesystem", "write", "report"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="save_task_plan",
+            description="Save a structured task plan Markdown document under workspace/reports/plans/.",
+            input_schema={
+                "type": "object",
+                "required": ["title", "goal"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "phases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "task": {"type": "string"},
+                                "output": {"type": "string"},
+                                "done": {"type": "string"},
+                                "acceptance": {"type": "string"},
+                            },
+                        },
+                    },
+                    "risks": {"type": "array", "items": {"type": "string"}},
+                    "next_steps": {"type": "array", "items": {"type": "string"}},
+                    "file_name": {"type": "string"},
+                },
+            },
+            handler=save_task_plan,
+            tags=("filesystem", "write", "report", "plan"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="save_review_report",
+            description="Save a structured risk review Markdown document under workspace/reports/reviews/.",
+            input_schema={
+                "type": "object",
+                "required": ["title", "conclusion"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "conclusion": {"type": "string"},
+                    "findings": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "severity": {"type": "string"},
+                                "issue": {"type": "string"},
+                                "impact": {"type": "string"},
+                                "suggestion": {"type": "string"},
+                            },
+                        },
+                    },
+                    "test_gaps": {"type": "array", "items": {"type": "string"}},
+                    "residual_risks": {"type": "array", "items": {"type": "string"}},
+                    "file_name": {"type": "string"},
+                },
+            },
+            handler=save_review_report,
+            tags=("filesystem", "write", "report", "review"),
         )
     )
     registry.register(

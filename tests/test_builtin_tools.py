@@ -77,6 +77,67 @@ def test_save_markdown_report_sanitizes_unsafe_filename(tmp_path: Path) -> None:
     ) == "# 已有标题\n\n内容"
 
 
+def test_save_task_plan_writes_structured_plan(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "save_task_plan",
+        {
+            "title": "Agent 能力增强计划",
+            "goal": "增强共享 Agent 的工具能力",
+            "scope": "不做多 Agent 自动协作",
+            "phases": [
+                {
+                    "name": "阶段一",
+                    "task": "补工具",
+                    "output": "工具 schema",
+                    "done": "测试通过",
+                }
+            ],
+            "risks": ["工具权限过宽"],
+            "next_steps": ["先跑单测"],
+        },
+    )
+
+    assert result == "报告路径：workspace/reports/plans/Agent-能力增强计划.md"
+    content = (tmp_path / "reports" / "plans" / "Agent-能力增强计划.md").read_text(
+        encoding="utf-8"
+    )
+    assert "| 阶段一 | 补工具 | 工具 schema | 测试通过 |" in content
+    assert "## 下一步\n- 先跑单测" in content
+
+
+def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "save_review_report",
+        {
+            "title": "工具权限审查",
+            "conclusion": "有条件通过",
+            "findings": [
+                {
+                    "severity": "中",
+                    "issue": "权限偏宽",
+                    "impact": "可能误写文件",
+                    "suggestion": "改用专用工具",
+                }
+            ],
+            "test_gaps": ["缺少失败路径测试"],
+            "residual_risks": ["模型仍可能选择通用工具"],
+        },
+    )
+
+    assert result == "报告路径：workspace/reports/reviews/工具权限审查.md"
+    content = (tmp_path / "reports" / "reviews" / "工具权限审查.md").read_text(
+        encoding="utf-8"
+    )
+    assert "| 中 | 权限偏宽 | 可能误写文件 | 改用专用工具 |" in content
+    assert "## 残余风险\n- 模型仍可能选择通用工具" in content
+
+
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

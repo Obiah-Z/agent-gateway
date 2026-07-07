@@ -117,9 +117,11 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert {"read_file", "list_directory", "write_file", "save_markdown_report"}.issubset(
         tools["planner"]
     )
+    assert "save_task_plan" in tools["planner"]
     assert {"read_file", "list_directory", "save_markdown_report"}.issubset(
         tools["reviewer"]
     )
+    assert "save_review_report" in tools["reviewer"]
     assert "save_markdown_report" in tools["repo-analyzer"]
     assert "write_file" not in tools["reviewer"]
     assert "bash" not in tools["reviewer"]

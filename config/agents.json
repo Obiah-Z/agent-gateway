@@ -274,6 +274,7 @@
           "read_file",
           "list_directory",
           "write_file",
+          "save_task_plan",
           "save_markdown_report",
           "get_current_time",
           "memory_search"
@@ -304,6 +305,7 @@
           "list_directory",
           "get_current_time",
           "memory_search",
+          "save_review_report",
           "save_markdown_report"
         ]
       },
