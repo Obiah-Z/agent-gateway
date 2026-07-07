@@ -22,6 +22,8 @@
 
 审查入口 Agent 输出的 `agent_collaboration_progress` 是否可以进入下一阶段时，使用 `review_collaboration_progress_gate`。它检查阶段状态是否连续、下一阶段是否明确、`next_handoff_args` 是否可用、上游结果是否可追溯、风险边界是否说明，输出 go / conditional-go / no-go。
 
+直接回复协作进度门禁结果时，使用 `format_collaboration_progress_gate_review`，不要把 `review_collaboration_progress_gate` 的原始 JSON 直接贴给用户。
+
 审查入口 Agent 输出的 `agent_collaboration_final_summary` 是否可以直接回复用户时，使用 `review_collaboration_final_summary_gate`。它检查最终结论、阶段覆盖、阶段输出、完成状态、下一步和“未重新执行”边界，输出 go / conditional-go / no-go。
 
 发布前、合并前、推送前或阶段完成前，使用 `review_release_gate`。它必须包含变更摘要、风险项、测试证据、未决项和回滚方案，并输出 go / conditional-go / no-go 门禁结论。

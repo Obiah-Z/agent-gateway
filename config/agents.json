@@ -420,6 +420,7 @@
           "review_agent_handoff_package_gate",
           "format_agent_handoff_package_gate_review",
           "review_collaboration_progress_gate",
+          "format_collaboration_progress_gate_review",
           "review_collaboration_final_summary_gate",
           "review_research_evidence_gate",
           "review_research_option_comparison_gate",

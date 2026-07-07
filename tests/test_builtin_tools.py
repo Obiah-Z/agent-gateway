@@ -1002,6 +1002,44 @@ def test_review_collaboration_progress_gate_blocks_missing_handoff_context(
     ]
 
 
+def test_format_collaboration_progress_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    progress = {
+        "type": "agent_collaboration_progress",
+        "task_type": "research-option-validation",
+        "status": "in-progress",
+        "completed_stage_count": 2,
+        "total_stage_count": 5,
+        "next_stage": {"step": 3, "agent_id": "planner"},
+        "stages": [
+            {"step": 1, "agent_id": "research", "status": "completed"},
+            {"step": 2, "agent_id": "reviewer", "status": "pending"},
+            {"step": 3, "agent_id": "planner", "status": "next"},
+            {"step": 4, "agent_id": "reviewer", "status": "completed"},
+        ],
+        "next_handoff_args": {"stage": 2},
+    }
+    review = registry.dispatch(
+        "review_collaboration_progress_gate",
+        {"progress_json": json.dumps(progress, ensure_ascii=False)},
+    )
+
+    summary = registry.dispatch(
+        "format_collaboration_progress_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## 协作进度门禁审查" in summary
+    assert "- 结论：不建议继续" in summary
+    assert "- 当前进度：2/5" in summary
+    assert "- 下一阶段：第 3 阶段 / planner" in summary
+    assert "| 阶段状态连续 | 未通过 | 异常阶段数：2；next 标记数：1。 |" in summary
+    assert "- 修正 stages 状态，确保已完成阶段连续且最多只有一个 next。" in summary
+
+
 def test_review_collaboration_final_summary_gate_allows_complete_summary(
     tmp_path: Path,
 ) -> None:
