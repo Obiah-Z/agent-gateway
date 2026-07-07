@@ -91,6 +91,27 @@ def _markdown_list(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in cleaned)
 
 
+def _markdown_section(title: str, content: str) -> str:
+    """渲染一个 Markdown 二级章节。"""
+
+    body = content.strip() or "待补充"
+    return f"## {title}\n{body}"
+
+
+def _normalize_document_type(value: str) -> str:
+    """归一化文档类型。"""
+
+    document_type = value.strip().lower().replace("_", "-")
+    aliases = {
+        "tech-report": "technical-report",
+        "technical": "technical-report",
+        "plan": "proposal",
+        "方案": "proposal",
+        "复盘": "retrospective",
+    }
+    return aliases.get(document_type, document_type)
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -227,6 +248,73 @@ def register_builtin_tools(
             title=title,
             content=content,
             category="reviews",
+            file_name=file_name or title,
+        )
+
+    def save_structured_document(
+        title: str,
+        document_type: str,
+        summary: str,
+        background: str = "",
+        content: str = "",
+        conclusions: list[str] | None = None,
+        next_steps: list[str] | None = None,
+        risks: list[str] | None = None,
+        file_name: str = "",
+    ) -> str:
+        """按文档类型保存结构化 Markdown 文档，供 doc-writer 固定产出。"""
+
+        normalized_type = _normalize_document_type(document_type)
+        category_by_type = {
+            "readme": "docs",
+            "proposal": "proposals",
+            "retrospective": "retrospectives",
+            "technical-report": "technical-reports",
+        }
+        category = category_by_type.get(normalized_type, "general")
+        sections_by_type = {
+            "readme": [
+                _markdown_section("项目简介", summary),
+                _markdown_section("核心能力", content),
+                _markdown_section("使用方式", "\n".join(next_steps or [])),
+                _markdown_section("限制与注意事项", _markdown_list(risks or [])),
+            ],
+            "proposal": [
+                _markdown_section("摘要", summary),
+                _markdown_section("背景", background),
+                _markdown_section("方案", content),
+                _markdown_section("风险与限制", _markdown_list(risks or [])),
+                _markdown_section("下一步", _markdown_list(next_steps or [])),
+            ],
+            "retrospective": [
+                _markdown_section("摘要", summary),
+                _markdown_section("完成情况", content),
+                _markdown_section("问题与卡点", _markdown_list(risks or [])),
+                _markdown_section("后续行动", _markdown_list(next_steps or [])),
+            ],
+            "technical-report": [
+                _markdown_section("摘要", summary),
+                _markdown_section("背景", background),
+                _markdown_section("技术分析", content),
+                _markdown_section("结论", _markdown_list(conclusions or [])),
+                _markdown_section("风险与限制", _markdown_list(risks or [])),
+                _markdown_section("下一步", _markdown_list(next_steps or [])),
+            ],
+        }
+        sections = sections_by_type.get(
+            normalized_type,
+            [
+                _markdown_section("摘要", summary),
+                _markdown_section("背景", background),
+                _markdown_section("主要内容", content),
+                _markdown_section("结论", _markdown_list(conclusions or [])),
+                _markdown_section("下一步", _markdown_list(next_steps or [])),
+            ],
+        )
+        return save_markdown_report(
+            title=title,
+            content="\n\n".join(sections),
+            category=category,
             file_name=file_name or title,
         )
 
@@ -391,6 +479,35 @@ def register_builtin_tools(
             },
             handler=save_review_report,
             tags=("filesystem", "write", "report", "review"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="save_structured_document",
+            description=(
+                "Save a structured Markdown document for README, proposal, "
+                "retrospective, or technical-report use cases."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title", "document_type", "summary"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "document_type": {
+                        "type": "string",
+                        "enum": ["readme", "proposal", "retrospective", "technical-report"],
+                    },
+                    "summary": {"type": "string"},
+                    "background": {"type": "string"},
+                    "content": {"type": "string"},
+                    "conclusions": {"type": "array", "items": {"type": "string"}},
+                    "next_steps": {"type": "array", "items": {"type": "string"}},
+                    "risks": {"type": "array", "items": {"type": "string"}},
+                    "file_name": {"type": "string"},
+                },
+            },
+            handler=save_structured_document,
+            tags=("filesystem", "write", "report", "document"),
         )
     )
     registry.register(

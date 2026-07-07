@@ -250,6 +250,7 @@
           "read_file",
           "list_directory",
           "write_file",
+          "save_structured_document",
           "save_markdown_report",
           "get_current_time",
           "memory_search"

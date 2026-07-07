@@ -138,6 +138,56 @@ def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
     assert "## 残余风险\n- 模型仍可能选择通用工具" in content
 
 
+def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "save_structured_document",
+        {
+            "title": "Redis 技术栈分析",
+            "document_type": "technical-report",
+            "summary": "说明 Redis 在系统中的作用。",
+            "background": "Gateway 已接入 Redis。",
+            "content": "Redis 负责幂等、限流和 session lane。",
+            "conclusions": ["Redis 适合做轻量协调层"],
+            "risks": ["不能把 Redis 当长期主存储"],
+            "next_steps": ["补充容量基线"],
+        },
+    )
+
+    assert result == "报告路径：workspace/reports/technical-reports/Redis-技术栈分析.md"
+    content = (
+        tmp_path / "reports" / "technical-reports" / "Redis-技术栈分析.md"
+    ).read_text(encoding="utf-8")
+    assert "## 技术分析\nRedis 负责幂等、限流和 session lane。" in content
+    assert "## 结论\n- Redis 适合做轻量协调层" in content
+
+
+def test_save_structured_document_writes_retrospective(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "save_structured_document",
+        {
+            "title": "7月复盘",
+            "document_type": "retrospective",
+            "summary": "本月完成 Agent 能力增强。",
+            "content": "完成工具和提示词增强。",
+            "risks": ["多 Agent 协作还未实现"],
+            "next_steps": ["继续补协作编排"],
+        },
+    )
+
+    assert result == "报告路径：workspace/reports/retrospectives/7月复盘.md"
+    content = (tmp_path / "reports" / "retrospectives" / "7月复盘.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## 完成情况\n完成工具和提示词增强。" in content
+    assert "## 后续行动\n- 继续补协作编排" in content
+
+
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

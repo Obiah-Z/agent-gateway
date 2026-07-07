@@ -111,9 +111,13 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert {"github_repo_summary", "read_file", "list_directory", "web_search", "fetch_url"}.issubset(
         tools["repo-analyzer"]
     )
-    assert {"read_file", "list_directory", "write_file", "save_markdown_report"}.issubset(
-        tools["doc-writer"]
-    )
+    assert {
+        "read_file",
+        "list_directory",
+        "write_file",
+        "save_structured_document",
+        "save_markdown_report",
+    }.issubset(tools["doc-writer"])
     assert {"read_file", "list_directory", "write_file", "save_markdown_report"}.issubset(
         tools["planner"]
     )
