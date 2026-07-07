@@ -1078,6 +1078,7 @@ def register_builtin_tools(
         evidence = _clean_strings(required_evidence)
         evidence.extend(_clean_strings(plan.get("acceptance_checks") if isinstance(plan.get("acceptance_checks"), list) else []))
         evidence.extend(_clean_strings(plan.get("next_steps") if isinstance(plan.get("next_steps"), list) else []))
+        plan_type = str(plan.get("type") or "").strip()
 
         checklist = [
             {
@@ -1116,6 +1117,39 @@ def register_builtin_tools(
                 "evidence": "；".join(evidence[:4]) if evidence else "缺少验收或测试依据。",
             },
         ]
+        if plan_type == "task_plan_from_research_option_comparison":
+            decision_data = plan.get("decision") if isinstance(plan.get("decision"), dict) else {}
+            gate_decision = str(decision_data.get("gate") or "").strip()
+            recommended_action = str(decision_data.get("recommended_action") or "").strip()
+            recommended_option = str(decision_data.get("recommended_option") or "").strip()
+            criteria = _clean_strings(plan.get("criteria") if isinstance(plan.get("criteria"), list) else [])
+            candidate_options = _clean_strings(
+                plan.get("candidate_options") if isinstance(plan.get("candidate_options"), list) else []
+            )
+            checklist.extend(
+                [
+                    {
+                        "item": "方案验证门禁已通过或有条件通过",
+                        "passed": gate_decision in {"go", "conditional-go"},
+                        "evidence": gate_decision or "缺少 research_option_comparison_gate_review 结论。",
+                    },
+                    {
+                        "item": "推荐方案已明确",
+                        "passed": bool(recommended_option),
+                        "evidence": recommended_option or "缺少 recommended_option。",
+                    },
+                    {
+                        "item": "候选方案和评价维度已保留",
+                        "passed": bool(candidate_options) and bool(criteria),
+                        "evidence": f"候选方案：{len(candidate_options)}；评价维度：{len(criteria)}。",
+                    },
+                    {
+                        "item": "执行动作限制合理",
+                        "passed": recommended_action in {"pilot", "review-first"} and gate_decision != "no-go",
+                        "evidence": recommended_action or "缺少 recommended_action。",
+                    },
+                ]
+            )
 
         failed = [item for item in checklist if not item["passed"]]
         if len(failed) >= 3 or not target:
@@ -1139,6 +1173,14 @@ def register_builtin_tools(
                 next_actions.append("补充主要风险、风险门槛和规避动作。")
             elif item["item"] == "验收或测试依据已列出":
                 next_actions.append("补充测试命令、人工验收或回滚验证依据。")
+            elif item["item"] == "方案验证门禁已通过或有条件通过":
+                next_actions.append("先让 reviewer 审查 research_option_comparison，并处理 no-go 阻塞项。")
+            elif item["item"] == "推荐方案已明确":
+                next_actions.append("补充推荐方案，或明确当前只做候选方案对比不进入验证。")
+            elif item["item"] == "候选方案和评价维度已保留":
+                next_actions.append("补充候选方案和评价维度，确保验证计划能追溯选型依据。")
+            elif item["item"] == "执行动作限制合理":
+                next_actions.append("将 no-go 计划限制为补证，或把可执行计划降级为 review-first / pilot。")
         if not next_actions:
             next_actions.append("计划具备进入执行的基本条件，执行前保留审查记录。")
 

@@ -427,6 +427,8 @@ def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
     assert "review_task_plan_gate" in identity
     assert "review_task_plan_gate" in soul
     assert "review_task_plan_gate" in tools_md
+    assert "task_plan_from_research_option_comparison" in soul
+    assert "方案验证计划" in tools_md
     assert "review_agent_collaboration_gate" in identity
     assert "review_agent_collaboration_gate" in soul
     assert "review_agent_collaboration_gate" in tools_md

@@ -577,6 +577,51 @@ def test_review_task_plan_gate_blocks_under_specified_plan(tmp_path: Path) -> No
     assert "为每个阶段补齐完成标准。" in data["next_actions"]
 
 
+def test_review_task_plan_gate_blocks_no_go_research_validation_plan(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "task_plan_from_research_option_comparison",
+        "title": "RabbitMQ 方案验证计划",
+        "goal": "验证 RabbitMQ 是否适合 Gateway 入站削峰。",
+        "scope": "只做最小验证。",
+        "decision": {
+            "gate": "no-go",
+            "recommended_option": "RabbitMQ",
+            "recommended_action": "pilot",
+        },
+        "criteria": ["可靠投递"],
+        "candidate_options": ["RabbitMQ", "Redis"],
+        "phases": [
+            {
+                "name": "最小验证设计",
+                "task": "设计实验。",
+                "output": "实验设计。",
+                "done": "回滚路径明确。",
+            }
+        ],
+        "risks": ["门禁未通过。"],
+        "next_steps": ["pytest tests/test_builtin_tools.py -q"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_task_plan_gate",
+            {"plan_json": json.dumps(plan, ensure_ascii=False)},
+        )
+    )
+
+    assert data["decision"] == "conditional-go"
+    failed_items = [item["item"] for item in data["checklist"] if not item["passed"]]
+    assert "方案验证门禁已通过或有条件通过" in failed_items
+    assert "执行动作限制合理" in failed_items
+    assert "先让 reviewer 审查 research_option_comparison，并处理 no-go 阻塞项。" in data[
+        "next_actions"
+    ]
+
+
 def test_review_agent_collaboration_gate_allows_complete_route(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
