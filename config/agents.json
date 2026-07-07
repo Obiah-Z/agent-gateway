@@ -41,6 +41,7 @@
         "mode": "allowlist",
         "tool_names": [
           "get_current_time",
+          "compose_research_brief",
           "memory_write",
           "memory_search",
           "web_search",

@@ -413,6 +413,57 @@ def test_assess_risk_decision_scores_findings_and_actions(tmp_path: Path) -> Non
     ]
 
 
+def test_compose_research_brief_structures_sources_and_uncertainty(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "compose_research_brief",
+        {
+            "topic": "RabbitMQ 适合 Gateway 入站队列吗",
+            "conclusion": "适合做可靠任务削峰，但会话串行仍需要额外协调层。",
+            "sources": [
+                {
+                    "title": "RabbitMQ docs",
+                    "url": "https://www.rabbitmq.com/docs",
+                    "fact": "RabbitMQ supports durable queues and acknowledgements.",
+                },
+                {
+                    "title": "Redis docs",
+                    "url": "https://redis.io/docs",
+                    "fact": "Redis can be used for distributed coordination primitives.",
+                },
+            ],
+            "uncertainty": ["具体吞吐需要本机压测确认"],
+            "freshness": "2026-07-07 检索",
+            "reusable_summary": "RabbitMQ 适合削峰，Redis 更适合轻量协调。",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "research_brief"
+    assert data["evidence_level"] == "limited"
+    assert data["sources"][0]["url"] == "https://www.rabbitmq.com/docs"
+    assert data["uncertainty"] == ["具体吞吐需要本机压测确认"]
+    assert data["reusable_summary"] == "RabbitMQ 适合削峰，Redis 更适合轻量协调。"
+
+
+def test_compose_research_brief_marks_missing_sources(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "compose_research_brief",
+            {"topic": "未知事实", "conclusion": ""},
+        )
+    )
+
+    assert data["evidence_level"] == "missing"
+    assert "缺少可核验来源 URL。" in data["uncertainty"]
+    assert "缺少明确结论。" in data["uncertainty"]
+
+
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

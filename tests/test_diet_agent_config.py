@@ -46,6 +46,27 @@ def test_platform_entries_and_personal_secretary_are_separated() -> None:
     )
 
 
+def test_research_agent_has_brief_tool_and_source_prompt() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
+    identity = (ROOT / "workspace" / "agents" / "research" / "IDENTITY.md").read_text(
+        encoding="utf-8"
+    )
+    soul = (ROOT / "workspace" / "agents" / "research" / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    tools_md = (ROOT / "workspace" / "agents" / "research" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "compose_research_brief" in tools["research"]
+    assert {"web_search", "fetch_url"}.issubset(tools["research"])
+    assert "compose_research_brief" in identity
+    assert "compose_research_brief" in soul
+    assert "compose_research_brief" in tools_md
+    assert "未经核验" in tools_md
+
+
 def test_personal_secretary_cron_targets_single_wework_peer() -> None:
     cron = json.loads(
         (ROOT / "workspace" / "agents" / SECRETARY_AGENT_ID / "CRON.json").read_text(encoding="utf-8")

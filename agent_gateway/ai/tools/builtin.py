@@ -741,6 +741,49 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def compose_research_brief(
+        topic: str,
+        conclusion: str,
+        sources: list[dict[str, str]] | None = None,
+        uncertainty: list[str] | None = None,
+        reusable_summary: str = "",
+        freshness: str = "",
+        next_steps: list[str] | None = None,
+    ) -> str:
+        """把联网调研结果整理成结构化简报。"""
+
+        normalized_sources = []
+        for source in sources or []:
+            title = str(source.get("title", "")).strip()
+            url = str(source.get("url", "")).strip()
+            fact = str(source.get("fact", "") or source.get("evidence", "")).strip()
+            if title or url or fact:
+                normalized_sources.append({"title": title, "url": url, "fact": fact})
+        gaps = _clean_strings(uncertainty)
+        steps = _clean_strings(next_steps)
+        evidence_level = "strong" if len(normalized_sources) >= 2 and not gaps else "limited"
+        if not normalized_sources:
+            evidence_level = "missing"
+            gaps.append("缺少可核验来源 URL。")
+        if not conclusion.strip():
+            evidence_level = "missing"
+            gaps.append("缺少明确结论。")
+        return json.dumps(
+            {
+                "type": "research_brief",
+                "topic": topic.strip(),
+                "conclusion": conclusion.strip(),
+                "freshness": freshness.strip(),
+                "evidence_level": evidence_level,
+                "sources": normalized_sources,
+                "uncertainty": gaps,
+                "reusable_summary": reusable_summary.strip() or conclusion.strip(),
+                "next_steps": steps or ["如需复用，请用 memory_write 保存摘要、来源 URL 和检索日期。"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -1128,6 +1171,41 @@ def register_builtin_tools(
             },
             handler=assess_risk_decision,
             tags=("review", "risk", "decision"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="compose_research_brief",
+            description=(
+                "Compose verified research findings into a structured brief: "
+                "conclusion, sources, uncertainty, reusable summary, and next steps."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["topic", "conclusion"],
+                "properties": {
+                    "topic": {"type": "string"},
+                    "conclusion": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "url": {"type": "string"},
+                                "fact": {"type": "string"},
+                                "evidence": {"type": "string"},
+                            },
+                        },
+                    },
+                    "uncertainty": {"type": "array", "items": {"type": "string"}},
+                    "reusable_summary": {"type": "string"},
+                    "freshness": {"type": "string"},
+                    "next_steps": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=compose_research_brief,
+            tags=("research", "brief", "evidence"),
         )
     )
     registry.register(
