@@ -786,6 +786,124 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_agent_collaboration_gate(
+        collaboration_json: str = "",
+        review_target: str = "",
+        known_risks: list[str] | None = None,
+    ) -> str:
+        """审查多 Agent 协作路线是否具备安全交接条件。"""
+
+        plan: dict[str, Any] = {}
+        if collaboration_json.strip():
+            parsed = json.loads(collaboration_json)
+            if not isinstance(parsed, dict):
+                return "Error: collaboration_json must be a JSON object"
+            plan = parsed
+        target = review_target.strip() or str(plan.get("task_type") or plan.get("user_goal") or "").strip()
+        sequence = plan.get("handoff_sequence") if isinstance(plan.get("handoff_sequence"), list) else []
+        risks = _clean_strings(known_risks)
+        risks.extend(_clean_strings(plan.get("constraints") if isinstance(plan.get("constraints"), list) else []))
+        agent_ids = []
+        malformed_steps = 0
+        missing_contracts = 0
+        missing_outputs = 0
+        for index, stage in enumerate(sequence, start=1):
+            if not isinstance(stage, dict):
+                malformed_steps += 1
+                continue
+            agent_id = str(stage.get("agent_id") or "").strip()
+            if agent_id:
+                agent_ids.append(agent_id)
+            else:
+                malformed_steps += 1
+            input_contract = stage.get("input_contract")
+            if not isinstance(input_contract, dict) or not input_contract:
+                missing_contracts += 1
+            if not str(stage.get("expected_output") or "").strip():
+                missing_outputs += 1
+            try:
+                stage_step = int(stage.get("step") or index)
+            except (TypeError, ValueError):
+                stage_step = -1
+            if stage_step != index:
+                risks.append(f"步骤序号不连续或不匹配：期望 {index}。")
+
+        note = str(plan.get("note") or "").strip()
+        next_actions = _clean_strings(plan.get("next_actions") if isinstance(plan.get("next_actions"), list) else [])
+        no_auto_execution_declared = "不代表任何 Agent 已经执行" in note or "不会自动调用任何 Agent" in " ".join(next_actions)
+        checklist = [
+            {
+                "item": "协作目标已明确",
+                "passed": bool(str(plan.get("user_goal") or target).strip()) and bool(str(plan.get("expected_output") or "").strip()),
+                "evidence": str(plan.get("user_goal") or target or "缺少 user_goal。").strip(),
+            },
+            {
+                "item": "协作路线存在",
+                "passed": bool(sequence) and malformed_steps == 0,
+                "evidence": f"阶段数量：{len(sequence)}；Agent：{', '.join(agent_ids) or '未指定'}",
+            },
+            {
+                "item": "交接输入契约完整",
+                "passed": bool(sequence) and missing_contracts == 0,
+                "evidence": "每个阶段都有 input_contract。" if sequence and missing_contracts == 0 else f"缺少输入契约阶段数：{missing_contracts}",
+            },
+            {
+                "item": "阶段输出明确",
+                "passed": bool(sequence) and missing_outputs == 0,
+                "evidence": "每个阶段都有 expected_output。" if sequence and missing_outputs == 0 else f"缺少输出定义阶段数：{missing_outputs}",
+            },
+            {
+                "item": "边界和约束已说明",
+                "passed": bool(risks),
+                "evidence": "；".join(risks[:4]) if risks else "缺少 constraints / known_risks。",
+            },
+            {
+                "item": "未自动执行声明明确",
+                "passed": no_auto_execution_declared,
+                "evidence": note or "缺少协作路线未自动执行声明。",
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if len(failed) >= 3 or not target:
+            decision = "no-go"
+        elif failed:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        remediation = []
+        for item in failed:
+            if item["item"] == "协作目标已明确":
+                remediation.append("补充 user_goal 和 expected_output。")
+            elif item["item"] == "协作路线存在":
+                remediation.append("补齐 handoff_sequence，并为每个阶段指定 agent_id。")
+            elif item["item"] == "交接输入契约完整":
+                remediation.append("为每个阶段补充 input_contract，明确上游结果和必要输入。")
+            elif item["item"] == "阶段输出明确":
+                remediation.append("为每个阶段补充 expected_output，避免交接结果不可用。")
+            elif item["item"] == "边界和约束已说明":
+                remediation.append("补充协作约束、不可做事项和风险边界。")
+            elif item["item"] == "未自动执行声明明确":
+                remediation.append("明确说明该结果只生成协作路线，不代表任何 Agent 已经执行。")
+        if not remediation:
+            remediation.append("协作路线具备交接条件，执行前仍需逐阶段保留产物。")
+
+        return json.dumps(
+            {
+                "type": "collaboration_gate_review",
+                "review_target": target,
+                "decision": decision,
+                "checklist": checklist,
+                "agents": agent_ids,
+                "risks": risks[:8],
+                "next_actions": remediation[:6],
+                "note": "这是多 Agent 协作路线门禁审查，不会自动执行任何 Agent。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -2515,6 +2633,29 @@ def register_builtin_tools(
             },
             handler=review_task_plan_gate,
             tags=("review", "plan", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_agent_collaboration_gate",
+            description=(
+                "Review whether an agent_collaboration_plan is safe and complete enough "
+                "for staged handoff: goal, route, input contracts, outputs, constraints, "
+                "and explicit non-execution statement."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "collaboration_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_agent_collaboration.",
+                    },
+                    "review_target": {"type": "string"},
+                    "known_risks": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            handler=review_agent_collaboration_gate,
+            tags=("review", "agent", "collaboration", "gate", "risk"),
         )
     )
     registry.register(

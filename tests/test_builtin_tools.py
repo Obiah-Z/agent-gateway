@@ -386,6 +386,78 @@ def test_review_task_plan_gate_blocks_under_specified_plan(tmp_path: Path) -> No
     assert "为每个阶段补齐完成标准。" in data["next_actions"]
 
 
+def test_review_agent_collaboration_gate_allows_complete_route(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "user_goal": "评估仓库并沉淀采纳方案。",
+        "expected_output": "结构化仓库分析、采纳计划和正式 Markdown。",
+        "constraints": ["不自动执行目标 Agent。"],
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库。",
+                "input_contract": {"user_goal": "评估仓库。"},
+                "expected_output": "github_repo_analysis JSON。",
+            },
+            {
+                "step": 2,
+                "agent_id": "doc-writer",
+                "purpose": "整理正式文档。",
+                "input_contract": {"upstream_result": "github_repo_analysis JSON。"},
+                "expected_output": "Markdown 报告。",
+            },
+        ],
+        "next_actions": ["当前工具只生成协作路线，不会自动调用任何 Agent。"],
+        "note": "这是多 Agent 协作路线规划，不代表任何 Agent 已经执行。",
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_agent_collaboration_gate",
+            {"collaboration_json": json.dumps(plan, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "collaboration_gate_review"
+    assert data["decision"] == "go"
+    assert data["agents"] == ["repo-analyzer", "doc-writer"]
+    assert all(item["passed"] for item in data["checklist"])
+    assert data["next_actions"] == ["协作路线具备交接条件，执行前仍需逐阶段保留产物。"]
+
+
+def test_review_agent_collaboration_gate_blocks_missing_contracts(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "user_goal": "评估仓库。",
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库。",
+            }
+        ],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_agent_collaboration_gate",
+            {"collaboration_json": json.dumps(plan, ensure_ascii=False)},
+        )
+    )
+
+    assert data["decision"] == "no-go"
+    assert len([item for item in data["checklist"] if not item["passed"]]) >= 3
+    assert "为每个阶段补充 input_contract，明确上游结果和必要输入。" in data["next_actions"]
+    assert "明确说明该结果只生成协作路线，不代表任何 Agent 已经执行。" in data["next_actions"]
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
