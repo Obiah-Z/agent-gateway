@@ -2582,6 +2582,44 @@ def test_compose_agent_handoff_package_builds_prompt_and_suggestion(
     assert "不代表目标 Agent 已经自动执行" in data["boundary"]
 
 
+def test_format_agent_handoff_package_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    package = {
+        "type": "agent_handoff_package",
+        "user_goal": "把已有材料整理成 Markdown 报告",
+        "target_agent_id": "doc-writer",
+        "confidence": 0.71,
+        "handoff_prompt": "目标 Agent：doc-writer\n\n## 用户原始目标\n把已有材料整理成 Markdown 报告",
+        "delegation_suggestion": {
+            "type": "agent_delegation_suggestion",
+            "target_agent_id": "doc-writer",
+            "reason": "目标与该 Agent 的职责命中：文档, 报告。",
+            "confidence": 0.71,
+        },
+        "next_actions": [
+            "把 handoff_prompt 交给目标 Agent，或复制给用户确认后继续。",
+            "不要声称目标 Agent 已经自动执行。",
+        ],
+        "boundary": "这是入口层交接包，不代表目标 Agent 已经自动执行。",
+    }
+
+    result = registry.dispatch(
+        "format_agent_handoff_package",
+        {"package_json": json.dumps(package, ensure_ascii=False)},
+    )
+
+    assert result.startswith("# Agent 交接包")
+    assert "目标 Agent：`doc-writer`" in result
+    assert "置信度：0.71" in result
+    assert "目标与该 Agent 的职责命中" in result
+    assert "```text" in result
+    assert "目标 Agent：doc-writer" in result
+    assert "不要声称目标 Agent 已经自动执行" in result
+
+
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)

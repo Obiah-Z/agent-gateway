@@ -66,6 +66,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "match_agent_capability" in tools
     assert "format_agent_capability_match" in tools
     assert "compose_agent_handoff_package" in tools
+    assert "format_agent_handoff_package" in tools
     assert "list_agent_collaboration_routes" in tools
     assert "plan_agent_collaboration" in tools
     assert "explain_agent_route" in tools
@@ -90,6 +91,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "match_agent_capability" in combined_prompt
     assert "format_agent_capability_match" in combined_prompt
     assert "compose_agent_handoff_package" in combined_prompt
+    assert "format_agent_handoff_package" in combined_prompt
     assert "list_agent_collaboration_routes" in combined_prompt
     assert "plan_agent_collaboration" in combined_prompt
     assert "explain_agent_route" in combined_prompt
@@ -118,6 +120,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "match_agent_capability" in tools
         assert "format_agent_capability_match" in tools
         assert "compose_agent_handoff_package" in tools
+        assert "format_agent_handoff_package" in tools
         assert "list_agent_collaboration_routes" in tools
         assert "suggest_agent_delegation" in tools
         assert "build_agent_handoff_prompt" in tools
@@ -141,10 +144,12 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "match_agent_capability" in identity
         assert "format_agent_capability_match" in identity
         assert "compose_agent_handoff_package" in identity
+        assert "format_agent_handoff_package" in identity
         assert "format_agent_capability_catalog" in soul
         assert "match_agent_capability" in soul
         assert "format_agent_capability_match" in soul
         assert "compose_agent_handoff_package" in soul
+        assert "format_agent_handoff_package" in soul
         assert "list_agent_collaboration_routes" in identity
         assert "list_agent_collaboration_routes" in soul
         assert "plan_agent_collaboration" in identity
@@ -165,6 +170,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "match_agent_capability" in tools_md
         assert "format_agent_capability_match" in tools_md
         assert "compose_agent_handoff_package" in tools_md
+        assert "format_agent_handoff_package" in tools_md
         assert "list_agent_collaboration_routes" in tools_md
         assert "plan_agent_collaboration" in tools_md
         assert "explain_agent_route" in tools_md
@@ -610,6 +616,8 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "format_agent_capability_match" in tools["wework-entry"]
     assert "compose_agent_handoff_package" in tools["feishu-entry"]
     assert "compose_agent_handoff_package" in tools["wework-entry"]
+    assert "format_agent_handoff_package" in tools["feishu-entry"]
+    assert "format_agent_handoff_package" in tools["wework-entry"]
     assert "list_agent_collaboration_routes" in tools["feishu-entry"]
     assert "list_agent_collaboration_routes" in tools["wework-entry"]
     assert "build_agent_handoff_prompt" in tools["feishu-entry"]
@@ -638,6 +646,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "match_agent_capability" not in tools[agent_id]
         assert "format_agent_capability_match" not in tools[agent_id]
         assert "compose_agent_handoff_package" not in tools[agent_id]
+        assert "format_agent_handoff_package" not in tools[agent_id]
         assert "list_agent_collaboration_routes" not in tools[agent_id]
         assert "build_agent_handoff_prompt" not in tools[agent_id]
         assert "build_collaboration_stage_handoff" not in tools[agent_id]
@@ -683,6 +692,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "match_agent_capability",
         "format_agent_capability_match",
         "compose_agent_handoff_package",
+        "format_agent_handoff_package",
         "list_agent_collaboration_routes",
         "plan_agent_collaboration",
         "research-option-validation",

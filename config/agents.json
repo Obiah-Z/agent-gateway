@@ -31,7 +31,8 @@
           "format_agent_capability_catalog",
           "match_agent_capability",
           "format_agent_capability_match",
-          "compose_agent_handoff_package"
+          "compose_agent_handoff_package",
+          "format_agent_handoff_package"
         ]
       },
       "memory_policy": {
@@ -106,7 +107,8 @@
           "format_agent_capability_catalog",
           "match_agent_capability",
           "format_agent_capability_match",
-          "compose_agent_handoff_package"
+          "compose_agent_handoff_package",
+          "format_agent_handoff_package"
         ]
       },
       "memory_policy": {
@@ -149,7 +151,8 @@
           "format_agent_capability_catalog",
           "match_agent_capability",
           "format_agent_capability_match",
-          "compose_agent_handoff_package"
+          "compose_agent_handoff_package",
+          "format_agent_handoff_package"
         ]
       },
       "memory_policy": {

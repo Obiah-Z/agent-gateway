@@ -16,7 +16,7 @@
 - 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。
 - 对不属于当前入口职责的任务，使用 `suggest_agent_delegation` 生成结构化委派建议。
 - 用户询问当前有哪些 Agent、谁能做什么或某个任务该交给谁时，先用 `list_agent_capabilities` 查询当前系统真实能力目录；列目录用 `format_agent_capability_catalog`，按任务推荐用 `match_agent_capability` 后接 `format_agent_capability_match`。
-- 用户确认要交给推荐 Agent 时，使用 `compose_agent_handoff_package` 生成完整交接包。
+- 用户确认要交给推荐 Agent 时，使用 `compose_agent_handoff_package` 生成完整交接包，再用 `format_agent_handoff_package` 输出用户可读说明。
 - 不确定可用 Agent、协作路线或交接字段时，先用 `list_agent_capabilities` 和 `list_agent_collaboration_routes` 查询当前系统真实能力目录。
 - 保留用户原始意图、关键约束和目标 Agent 可直接接手的交接提示。
 

@@ -2943,6 +2943,43 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_agent_handoff_package(
+        package_json: str,
+        include_prompt: bool = True,
+    ) -> str:
+        """把入口层交接包格式化成用户可读说明。"""
+
+        if not package_json.strip():
+            return "Error: package_json is required"
+        package = json.loads(package_json)
+        if not isinstance(package, dict):
+            return "Error: package_json must be a JSON object"
+        if package.get("type") != "agent_handoff_package":
+            return "Error: package_json type must be agent_handoff_package"
+
+        delegation = package.get("delegation_suggestion") if isinstance(package.get("delegation_suggestion"), dict) else {}
+        lines = [
+            "# Agent 交接包",
+            "",
+            f"- 用户目标：{package.get('user_goal') or '待明确'}",
+            f"- 目标 Agent：`{package.get('target_agent_id') or delegation.get('target_agent_id') or 'main'}`",
+            f"- 置信度：{package.get('confidence', delegation.get('confidence', 0))}",
+            f"- 推荐理由：{delegation.get('reason') or '基于当前 Agent 能力目录推荐。'}",
+            f"- 边界：{package.get('boundary') or '这是入口层交接包，不代表目标 Agent 已经自动执行。'}",
+        ]
+        if include_prompt:
+            lines.extend(
+                [
+                    "",
+                    "## 可复制交接提示",
+                    "```text",
+                    str(package.get("handoff_prompt") or "").strip() or "暂无 handoff_prompt。",
+                    "```",
+                ]
+            )
+        lines.extend(["", "## 下一步", _markdown_bullets(package.get("next_actions"))])
+        return "\n".join(lines).strip()
+
     def build_collaboration_stage_handoff(
         collaboration_plan_json: str,
         stage: int = 1,
@@ -6144,6 +6181,31 @@ def register_builtin_tools(
             },
             handler=compose_agent_handoff_package,
             tags=("agent", "delegation", "handoff", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_agent_handoff_package",
+            description=(
+                "Format an agent_handoff_package JSON object into a Chinese "
+                "user-facing handoff summary."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["package_json"],
+                "properties": {
+                    "package_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_agent_handoff_package.",
+                    },
+                    "include_prompt": {
+                        "type": "boolean",
+                        "description": "Whether to include the full handoff prompt.",
+                    },
+                },
+            },
+            handler=format_agent_handoff_package,
+            tags=("agent", "delegation", "handoff", "format", "routing"),
         )
     )
     registry.register(

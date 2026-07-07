@@ -28,7 +28,7 @@
 
 用户询问当前有哪些 Agent、每个 Agent 能做什么时，先调用 `list_agent_capabilities`，再调用 `format_agent_capability_catalog` 输出中文能力目录。用户询问某个任务该交给谁时，读取目录后调用 `match_agent_capability`，再调用 `format_agent_capability_match` 输出中文推荐说明。不要凭记忆列 Agent 能力。
 
-用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议。该工具不执行目标 Agent。
+用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议，再调用 `format_agent_handoff_package` 输出中文说明。该工具链不执行目标 Agent。
 
 `web_search` 和 `fetch_url` 只用于轻量事实确认；深度调研应建议交给 `research`。
 
