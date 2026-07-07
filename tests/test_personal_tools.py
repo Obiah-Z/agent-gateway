@@ -218,6 +218,42 @@ def test_personal_daily_workflow_combines_todos_reviews_and_time_blocks(tmp_path
     assert workflow["note"] == "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。"
 
 
+def test_personal_day_review_plan_generates_draft_without_writing(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练习 RabbitMQ 选型", "priority": "high", "due_at": "tomorrow"},
+        runtime_context=context,
+    )
+
+    plan = json.loads(
+        registry.dispatch(
+            "personal_day_review_plan_generate",
+            {
+                "today_summary": "今天完成 Redis 项目表达复盘。",
+                "completed": ["整理 Redis 在 Gateway 中的作用"],
+                "blockers": ["场景题还有点不稳"],
+                "tomorrow_focus": "先练 RabbitMQ 选型表达",
+            },
+            runtime_context=context,
+        )
+    )
+
+    assert plan["type"] == "personal_day_review_plan"
+    assert plan["user_scope"] == "user:alice"
+    assert plan["review_draft"]["summary"] == "今天完成 Redis 项目表达复盘。"
+    assert plan["review_draft"]["next_step"] == "先练 RabbitMQ 选型表达"
+    assert plan["tomorrow_plan"]["focus"] == "先练 RabbitMQ 选型表达"
+    assert plan["tomorrow_plan"]["priority_todos"][0]["title"] == "练习 RabbitMQ 选型"
+    assert "这些卡点是否需要拆成待办或求助事项？" in plan["needs_confirmation"]
+    assert store.recent_reviews(user_scope="user:alice") == []
+    assert store.list_todos(user_scope="user:alice")[0]["status"] == "open"
+
+
 def test_personal_inbox_triage_suggests_actions_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

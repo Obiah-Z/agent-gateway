@@ -257,6 +257,82 @@ class PersonalStore:
             "note": "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。",
         }
 
+    def generate_day_review_plan(
+        self,
+        *,
+        user_scope: str = "",
+        today_summary: str = "",
+        completed: list[str] | None = None,
+        blockers: list[str] | None = None,
+        tomorrow_focus: str = "",
+        todo_limit: int = 6,
+        review_limit: int = 3,
+    ) -> dict[str, Any]:
+        """生成个人日复盘和明日计划草稿，不写入复盘或待办。"""
+
+        briefing = self.generate_briefing(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        time_blocks = self.generate_time_blocks(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+        )
+        open_todos = briefing.get("open_todos", [])
+        recent_reviews = briefing.get("recent_reviews", [])
+        completed_items = self._clean_list(completed or [])
+        blocker_items = self._clean_list(blockers or [])
+        review_summary = today_summary.strip()
+        if not review_summary and recent_reviews:
+            review_summary = str(recent_reviews[0].get("summary", "")).strip()
+        tomorrow_first_step = tomorrow_focus.strip() or self._first_time_block_action(
+            time_blocks.get("blocks", [])
+        )
+
+        confirmations = []
+        if not review_summary:
+            confirmations.append("今天最重要的完成事项是什么？")
+        if not tomorrow_focus and not open_todos:
+            confirmations.append("明天第一步要做什么？")
+        if blocker_items:
+            confirmations.append("这些卡点是否需要拆成待办或求助事项？")
+
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "type": "personal_day_review_plan",
+            "review_draft": {
+                "summary": review_summary or "待补充今日复盘摘要",
+                "completed": completed_items,
+                "blockers": blocker_items,
+                "next_step": tomorrow_first_step,
+            },
+            "tomorrow_plan": {
+                "focus": tomorrow_focus.strip() or briefing.get("suggested_focus", ""),
+                "first_step": tomorrow_first_step,
+                "priority_todos": [
+                    {
+                        "title": str(todo.get("title", "")),
+                        "priority": str(todo.get("priority", "")),
+                        "due_at": str(todo.get("due_at", "")),
+                    }
+                    for todo in open_todos[:5]
+                ],
+                "time_blocks": time_blocks.get("blocks", []),
+            },
+            "needs_confirmation": confirmations,
+            "next_actions": [
+                "确认后可调用 personal_review_add 写入复盘。",
+                "如明日第一步不是已有待办，确认后可调用 personal_todo_add 写入待办。",
+            ],
+            "source": {
+                "open_todo_count": len(open_todos),
+                "recent_review_count": len(recent_reviews),
+            },
+            "note": "这是个人日复盘和明日计划草稿，不会自动写入复盘、待办或长期记忆。",
+        }
+
     def triage_inbox(
         self,
         text: str,
@@ -696,6 +772,28 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(workflow, ensure_ascii=False, indent=2)
 
+    def personal_day_review_plan_generate(
+        today_summary: str = "",
+        completed: list[str] | None = None,
+        blockers: list[str] | None = None,
+        tomorrow_focus: str = "",
+        todo_limit: int = 6,
+        review_limit: int = 3,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        plan = personal_store.generate_day_review_plan(
+            user_scope=_scope(__runtime_context, user_scope),
+            today_summary=today_summary,
+            completed=completed or [],
+            blockers=blockers or [],
+            tomorrow_focus=tomorrow_focus,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        return json.dumps(plan, ensure_ascii=False, indent=2)
+
     def personal_inbox_triage(
         text: str,
         context: str = "",
@@ -837,6 +935,28 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_daily_workflow_generate,
             tags=("personal", "workflow", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_day_review_plan_generate",
+            description=(
+                "Generate a structured personal day review and tomorrow plan draft "
+                "from optional user summary, open todos, and recent reviews without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "today_summary": {"type": "string"},
+                    "completed": {"type": "array", "items": {"type": "string"}},
+                    "blockers": {"type": "array", "items": {"type": "string"}},
+                    "tomorrow_focus": {"type": "string"},
+                    "todo_limit": {"type": "integer"},
+                    "review_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_day_review_plan_generate,
+            tags=("personal", "review", "planning", "read"),
         )
     )
     registry.register(
