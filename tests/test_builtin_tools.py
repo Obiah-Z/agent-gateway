@@ -719,6 +719,63 @@ def test_compose_research_brief_structures_sources_and_uncertainty(tmp_path: Pat
     assert data["reusable_summary"] == "RabbitMQ 适合削峰，Redis 更适合轻量协调。"
 
 
+def test_assess_research_confidence_scores_primary_sources(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "assess_research_confidence",
+        {
+            "topic": "RabbitMQ 是否适合可靠队列",
+            "conclusion": "RabbitMQ 适合可靠任务削峰。",
+            "sources": [
+                {
+                    "title": "RabbitMQ docs",
+                    "url": "https://www.rabbitmq.com/docs",
+                    "source_type": "official",
+                    "fact": "Supports durable queues and acknowledgements.",
+                },
+                {
+                    "title": "RabbitMQ confirms guide",
+                    "url": "https://www.rabbitmq.com/docs/confirms",
+                    "source_type": "docs",
+                    "fact": "Publisher confirms and consumer acknowledgements are documented.",
+                },
+            ],
+            "time_sensitive": False,
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "research_confidence_assessment"
+    assert data["confidence"] == "high"
+    assert data["source_count"] == 2
+    assert data["sources"][0]["quality"] == "high"
+    assert data["recommended_next_actions"] == ["可以基于当前证据形成可复用摘要。"]
+
+
+def test_assess_research_confidence_marks_missing_time_sensitive_sources(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "assess_research_confidence",
+            {
+                "topic": "某公司当前 CEO",
+                "conclusion": "",
+                "sources": [],
+                "time_sensitive": True,
+            },
+        )
+    )
+
+    assert data["confidence"] == "missing"
+    assert data["confidence_score"] == 0
+    assert "缺少可核验来源。" in data["uncertainty"]
+    assert "确认来源发布时间或最后更新时间。" in data["recommended_next_actions"]
+
+
 def test_compose_research_brief_marks_missing_sources(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

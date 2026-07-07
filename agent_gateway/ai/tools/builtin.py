@@ -1232,6 +1232,107 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def assess_research_confidence(
+        topic: str,
+        conclusion: str,
+        sources: list[dict[str, str]] | None = None,
+        uncertainty: list[str] | None = None,
+        source_conflicts: list[str] | None = None,
+        time_sensitive: bool = False,
+    ) -> str:
+        """评估调研来源质量、结论置信度和后续验证动作。"""
+
+        normalized_sources = []
+        score = 0
+        for source in sources or []:
+            title = str(source.get("title", "")).strip()
+            url = str(source.get("url", "")).strip()
+            source_type = str(source.get("source_type", "") or source.get("type", "")).strip().lower()
+            fact = str(source.get("fact", "") or source.get("evidence", "")).strip()
+            quality = "unknown"
+            if source_type in {"official", "docs", "paper", "primary", "官方", "论文"}:
+                quality = "high"
+                score += 25
+            elif source_type in {"news", "reputable", "secondary", "媒体"}:
+                quality = "medium"
+                score += 15
+            elif source_type in {"blog", "forum", "social", "community", "博客", "社区"}:
+                quality = "low"
+                score += 8
+            elif url:
+                quality = "medium"
+                score += 12
+            if fact:
+                score += 5
+            if title or url or fact:
+                normalized_sources.append(
+                    {
+                        "title": title,
+                        "url": url,
+                        "source_type": source_type or "unknown",
+                        "quality": quality,
+                        "fact": fact,
+                    }
+                )
+
+        gaps = _clean_strings(uncertainty)
+        conflicts = _clean_strings(source_conflicts)
+        if len(normalized_sources) >= 2:
+            score += 15
+        if len(normalized_sources) >= 3:
+            score += 10
+        if not conclusion.strip():
+            score -= 30
+            gaps.append("缺少明确结论。")
+        if not normalized_sources:
+            score = 0
+            gaps.append("缺少可核验来源。")
+        if conflicts:
+            score -= 25
+        if time_sensitive and len(normalized_sources) < 2:
+            score -= 15
+            gaps.append("时效敏感问题需要至少两个近期来源交叉验证。")
+
+        score = max(0, min(score, 100))
+        if score >= 75:
+            confidence = "high"
+        elif score >= 45:
+            confidence = "medium"
+        elif score > 0:
+            confidence = "low"
+        else:
+            confidence = "missing"
+
+        actions = []
+        if not normalized_sources:
+            actions.append("补充至少一个可核验来源 URL。")
+        if time_sensitive:
+            actions.append("确认来源发布时间或最后更新时间。")
+        if conflicts:
+            actions.append("对冲突来源做逐条比对，并优先采用一手来源。")
+        if gaps:
+            actions.append("补齐不确定点对应的证据。")
+        if not actions:
+            actions.append("可以基于当前证据形成可复用摘要。")
+
+        return json.dumps(
+            {
+                "type": "research_confidence_assessment",
+                "topic": topic.strip(),
+                "conclusion": conclusion.strip(),
+                "confidence": confidence,
+                "confidence_score": score,
+                "source_count": len(normalized_sources),
+                "sources": normalized_sources,
+                "uncertainty": gaps,
+                "source_conflicts": conflicts,
+                "time_sensitive": bool(time_sensitive),
+                "recommended_next_actions": actions[:6],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -1815,6 +1916,45 @@ def register_builtin_tools(
             },
             handler=compose_research_brief,
             tags=("research", "brief", "evidence"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="assess_research_confidence",
+            description=(
+                "Assess research source quality and conclusion confidence from "
+                "sources, uncertainty, conflicts, and time-sensitivity."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["topic", "conclusion"],
+                "properties": {
+                    "topic": {"type": "string"},
+                    "conclusion": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "url": {"type": "string"},
+                                "source_type": {
+                                    "type": "string",
+                                    "description": "official/docs/paper/news/blog/forum/community/etc.",
+                                },
+                                "type": {"type": "string"},
+                                "fact": {"type": "string"},
+                                "evidence": {"type": "string"},
+                            },
+                        },
+                    },
+                    "uncertainty": {"type": "array", "items": {"type": "string"}},
+                    "source_conflicts": {"type": "array", "items": {"type": "string"}},
+                    "time_sensitive": {"type": "boolean"},
+                },
+            },
+            handler=assess_research_confidence,
+            tags=("research", "confidence", "evidence"),
         )
     )
     registry.register(

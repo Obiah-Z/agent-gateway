@@ -104,8 +104,12 @@ def test_research_agent_has_brief_tool_and_source_prompt() -> None:
         encoding="utf-8"
     )
 
+    assert "assess_research_confidence" in tools["research"]
     assert "compose_research_brief" in tools["research"]
     assert {"web_search", "fetch_url"}.issubset(tools["research"])
+    assert "assess_research_confidence" in identity
+    assert "assess_research_confidence" in soul
+    assert "assess_research_confidence" in tools_md
     assert "compose_research_brief" in identity
     assert "compose_research_brief" in soul
     assert "compose_research_brief" in tools_md
