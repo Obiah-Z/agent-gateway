@@ -3801,6 +3801,18 @@ def register_builtin_tools(
 
         data = json.loads(config_path.read_text(encoding="utf-8"))
         wanted = {agent_id.strip() for agent_id in agent_ids or [] if agent_id.strip()}
+
+        def agent_layer(agent_id: str) -> str:
+            if agent_id in {"main", "feishu-entry", "wework-entry"}:
+                return "entry"
+            if agent_id in {"research", "repo-analyzer", "planner", "reviewer", "doc-writer"}:
+                return "shared-capability"
+            if agent_id in {"ops"}:
+                return "ops"
+            if agent_id.startswith(("personal-", "diet-")):
+                return "personal"
+            return "custom"
+
         capabilities = []
         for agent in data.get("agents", []):
             agent_id = str(agent.get("id", "")).strip()
@@ -3818,6 +3830,7 @@ def register_builtin_tools(
             row = {
                 "id": agent_id,
                 "name": agent.get("name", ""),
+                "layer": agent_layer(agent_id),
                 "personality": agent.get("personality", ""),
                 "prompt_dir": prompt_dir,
                 "duties": duties[:8],
@@ -3873,12 +3886,14 @@ def register_builtin_tools(
         for item in agents:
             agent_id = str(item.get("id") or "unknown").strip()
             name = str(item.get("name") or agent_id).strip()
+            layer = str(item.get("layer") or "custom").strip()
             personality = str(item.get("personality") or "未配置").strip()
             duties = _clean_strings(item.get("duties") if isinstance(item.get("duties"), list) else [])
             handoff_inputs = _clean_strings(
                 item.get("handoff_inputs") if isinstance(item.get("handoff_inputs"), list) else []
             )
             lines.extend(["", f"## `{agent_id}` - {name}", f"- 定位：{personality}"])
+            lines.append(f"- 分层：{layer}")
             lines.append("- 主要职责：")
             lines.append(_markdown_bullets(duties[:6]))
             if handoff_inputs:
@@ -3934,6 +3949,7 @@ def register_builtin_tools(
                 [
                     agent_id,
                     str(item.get("name") or ""),
+                    str(item.get("layer") or ""),
                     str(item.get("personality") or ""),
                     " ".join(duties),
                     " ".join(handoff_inputs),

@@ -2386,6 +2386,7 @@ def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) 
     assert data["type"] == "agent_capability_catalog"
     assert data["count"] == 1
     assert data["agents"][0]["id"] == "planner"
+    assert data["agents"][0]["layer"] == "shared-capability"
     assert data["agents"][0]["duties"] == ["明确目标、边界、依赖和风险。", "拆成阶段任务。"]
     assert data["agents"][0]["handoff_inputs"] == [
         "`goal`：用户最终想达成的结果。",
@@ -2406,6 +2407,7 @@ def test_format_agent_capability_catalog_outputs_user_facing_directory(
             {
                 "id": "planner",
                 "name": "TaskPlanner",
+                "layer": "shared-capability",
                 "personality": "清晰、务实",
                 "duties": ["拆解阶段任务。", "明确验收标准。"],
                 "handoff_inputs": ["`goal`：用户目标。"],
@@ -2434,6 +2436,7 @@ def test_format_agent_capability_catalog_outputs_user_facing_directory(
     assert result.startswith("# Agent 能力目录")
     assert "当前可展示 1 个 Agent" in result
     assert "## `planner` - TaskPlanner" in result
+    assert "- 分层：shared-capability" in result
     assert "- 拆解阶段任务。" in result
     assert "- `goal`：用户目标。" in result
     assert "save_task_plan, compose_repo_review_task_plan" in result
