@@ -326,6 +326,9 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_github_repo_risk_markdown" in identity
     assert "render_github_repo_risk_markdown" in soul
     assert "render_github_repo_risk_markdown" in tools_md
+    assert "github_repo_risk_gate_review" in identity
+    assert "github_repo_risk_gate_review" in soul
+    assert "gate_review_json" in tools_md
     assert "render_research_evidence_markdown" in identity
     assert "render_research_evidence_markdown" in soul
     assert "render_research_evidence_markdown" in tools_md

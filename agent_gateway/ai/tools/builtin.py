@@ -1385,6 +1385,7 @@ def register_builtin_tools(
 
     def render_github_repo_risk_markdown(
         risk_scan_json: str,
+        gate_review_json: str = "",
         title: str = "",
         include_raw_metadata: bool = False,
     ) -> str:
@@ -1397,6 +1398,14 @@ def register_builtin_tools(
             return "Error: risk_scan_json must be a JSON object"
         if scan.get("type") != "github_repo_risk_scan":
             return "Error: risk_scan_json type must be github_repo_risk_scan"
+        gate_review: dict[str, Any] = {}
+        if gate_review_json.strip():
+            parsed_review = json.loads(gate_review_json)
+            if not isinstance(parsed_review, dict):
+                return "Error: gate_review_json must be a JSON object"
+            if parsed_review.get("type") != "github_repo_risk_gate_review":
+                return "Error: gate_review_json type must be github_repo_risk_gate_review"
+            gate_review = parsed_review
 
         repository = str(scan.get("repository") or "unknown/repository")
         document_title = title.strip() or f"仓库风险扫描：{repository}"
@@ -1431,22 +1440,57 @@ def register_builtin_tools(
         dependency_files = _clean_strings(
             scan.get("dependency_files") if isinstance(scan.get("dependency_files"), list) else []
         )
+        review_section = ""
+        if gate_review:
+            checklist_rows = []
+            for item in gate_review.get("checklist") or []:
+                if not isinstance(item, dict):
+                    continue
+                checklist_rows.append(
+                    [
+                        item.get("item") or "未命名检查项",
+                        "通过" if item.get("passed") else "未通过",
+                        item.get("evidence") or "未提供",
+                    ]
+                )
+            review_section = _markdown_section(
+                "门禁审查结论",
+                "\n\n".join(
+                    [
+                        "\n".join(
+                            [
+                                f"- reviewer 结论：{gate_review.get('decision') or 'unknown'}",
+                                f"- 上游建议：{gate_review.get('source_decision') or 'unknown'}",
+                                f"- 审查对象：{gate_review.get('review_target') or repository}",
+                            ]
+                        ),
+                        _markdown_table(["检查项", "结果", "依据"], checklist_rows),
+                    ]
+                ),
+            )
 
         metadata = ""
         if include_raw_metadata:
+            raw_payload: dict[str, Any] = {"risk_scan": scan}
+            if gate_review:
+                raw_payload["gate_review"] = gate_review
             metadata = "\n\n" + _markdown_section(
                 "结构化元数据",
-                "```json\n" + json.dumps(scan, ensure_ascii=False, indent=2) + "\n```",
+                "```json\n" + json.dumps(raw_payload, ensure_ascii=False, indent=2) + "\n```",
             )
 
-        return "\n\n".join(
+        sections = [
+            f"# {document_title}",
+            _markdown_section("摘要", summary),
+            _markdown_section(
+                "风险项",
+                _markdown_table(["级别", "领域", "问题", "影响", "建议"], risk_rows),
+            ),
+        ]
+        if review_section:
+            sections.append(review_section)
+        sections.extend(
             [
-                f"# {document_title}",
-                _markdown_section("摘要", summary),
-                _markdown_section(
-                    "风险项",
-                    _markdown_table(["级别", "领域", "问题", "影响", "建议"], risk_rows),
-                ),
                 _markdown_section("依赖文件信号", _markdown_bullets(dependency_files)),
                 _markdown_section("建议下一步", _markdown_bullets(scan.get("next_actions"))),
                 _markdown_section(
@@ -1454,7 +1498,9 @@ def register_builtin_tools(
                     str(scan.get("note") or "这是轻量风险扫描，不代表已经完成法律、安全或运行验证。"),
                 ),
             ]
-        ) + metadata
+        )
+
+        return "\n\n".join(sections) + metadata
 
     def render_research_evidence_markdown(
         evidence_json: str,
@@ -3436,6 +3482,10 @@ def register_builtin_tools(
                     "risk_scan_json": {
                         "type": "string",
                         "description": "JSON string returned by github_repo_risk_scan.",
+                    },
+                    "gate_review_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by review_github_repo_risk_gate.",
                     },
                     "title": {
                         "type": "string",

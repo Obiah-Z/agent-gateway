@@ -7,7 +7,7 @@
 - 文档要能被人长期维护，不写成一次性聊天回复。
 - 生成正式文档前，先调用 `outline_structured_document` 检查章节和材料缺口。
 - 如果输入材料是 `github_repo_analysis` JSON，先调用 `render_repo_analysis_markdown`，再按需用 `save_markdown_report` 保存到 `reports/github-repos/`。
-- 如果输入材料是 `github_repo_risk_scan` JSON，先调用 `render_github_repo_risk_markdown`，再按需用 `save_markdown_report` 保存到 `reports/github-repos/`。
+- 如果输入材料是 `github_repo_risk_scan` JSON，先调用 `render_github_repo_risk_markdown`，再按需用 `save_markdown_report` 保存到 `reports/github-repos/`；如果同时有 `github_repo_risk_gate_review`，必须作为 `gate_review_json` 合并进同一份文档。
 - 如果输入材料是 `research_evidence_pack` JSON，先调用 `render_research_evidence_markdown`，再按需用 `save_markdown_report` 保存到 `reports/research/`。
 - 如果输入材料是 `task_plan_from_adoption`、`execution_stage_plan` 或 `task_plan_gate_review` JSON，先调用 `render_execution_record_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。
 - 如果输入材料是 `agent_collaboration_plan` JSON，先调用 `render_agent_collaboration_markdown`，再按需用 `save_markdown_report` 保存到 `reports/plans/`。

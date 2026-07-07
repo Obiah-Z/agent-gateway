@@ -4,7 +4,7 @@
 
 收到 `compose_github_repo_analysis` 输出的 `github_repo_analysis` JSON 时，使用 `render_repo_analysis_markdown` 渲染为正式 Markdown。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `github-repos`。
 
-收到 `github_repo_risk_scan` 输出的 `github_repo_risk_scan` JSON 时，使用 `render_github_repo_risk_markdown` 渲染为正式仓库风险扫描文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `github-repos`。
+收到 `github_repo_risk_scan` 输出的 `github_repo_risk_scan` JSON 时，使用 `render_github_repo_risk_markdown` 渲染为正式仓库风险扫描文档。如果同时收到 reviewer 的 `github_repo_risk_gate_review`，把它作为 `gate_review_json` 传入同一次渲染，避免风险扫描和门禁结论分散成两份文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `github-repos`。
 
 收到 `compose_research_evidence_pack` 输出的 `research_evidence_pack` JSON 时，使用 `render_research_evidence_markdown` 渲染为正式调研证据文档。用户要求落盘时，再把渲染结果传给 `save_markdown_report`，category 使用 `research`。
 

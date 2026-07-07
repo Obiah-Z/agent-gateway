@@ -820,11 +820,26 @@ def test_render_github_repo_risk_markdown_formats_risk_scan(tmp_path: Path) -> N
             "不代表已经完成法律、安全或运行验证。"
         ),
     }
+    gate_review = {
+        "type": "github_repo_risk_gate_review",
+        "review_target": "demo/risky",
+        "source_decision": "hold",
+        "decision": "no-go",
+        "checklist": [
+            {
+                "item": "许可证风险可接受",
+                "passed": False,
+                "evidence": "unknown",
+            }
+        ],
+        "next_actions": ["人工复核 LICENSE、README 授权说明或联系作者后再复用。"],
+    }
 
     markdown = registry.dispatch(
         "render_github_repo_risk_markdown",
         {
             "risk_scan_json": json.dumps(scan, ensure_ascii=False),
+            "gate_review_json": json.dumps(gate_review, ensure_ascii=False),
             "include_raw_metadata": True,
         },
     )
@@ -833,9 +848,13 @@ def test_render_github_repo_risk_markdown_formats_risk_scan(tmp_path: Path) -> N
     assert "- 风险等级：high" in markdown
     assert "- 建议决策：hold" in markdown
     assert "| high | license | 许可证缺失或未识别。 | 复用边界不清晰。 | 复用前人工确认 LICENSE。 |" in markdown
+    assert "## 门禁审查结论" in markdown
+    assert "- reviewer 结论：no-go" in markdown
+    assert "| 许可证风险可接受 | 未通过 | unknown |" in markdown
     assert "- requirements.txt" in markdown
     assert "- package.json" in markdown
     assert "- 复核许可证和 README。" in markdown
+    assert '"gate_review"' in markdown
     assert "```json" in markdown
 
 
