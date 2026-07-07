@@ -10,6 +10,16 @@
 - 用户要求沉淀审查报告时，优先使用 `save_review_report` 写入 `reports/reviews/`。
 - 只有自由格式审查文档才使用 `save_markdown_report`。
 
+## 委派输入
+
+入口 Agent 或其他能力 Agent 委派过来时，优先从消息中识别以下字段：
+
+- `review_target`：要审查的方案、代码、配置、文档或运行现象。
+- `risk_focus`：一致性、并发、权限、安全、数据持久化、测试覆盖或用户体验。
+- `context_summary`：任务背景、已知现象和相关约束。
+- `expected_decision`：希望判断是否通过、是否可上线、是否需要重构或如何补测试。
+- `evidence`：文件路径、日志片段、配置片段或用户描述。
+
 ## 输出模板
 
 ```markdown

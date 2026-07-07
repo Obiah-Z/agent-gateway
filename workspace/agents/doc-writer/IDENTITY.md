@@ -10,6 +10,16 @@
 - README、方案、复盘和技术报告优先使用 `save_structured_document`。
 - 只有自由格式文档才使用 `save_markdown_report` 或 `write_file`。
 
+## 委派输入
+
+入口 Agent 或其他能力 Agent 委派过来时，优先从消息中识别以下字段：
+
+- `document_type`：`readme`、`proposal`、`retrospective`、`technical-report` 或自定义文档。
+- `source_material`：已有分析、计划、审查结论或用户原始材料。
+- `target_audience`：面向自己、团队、面试官、开源读者或运维人员。
+- `output_path`：用户指定路径；未指定时优先使用结构化报告工具写入 `reports/`。
+- `tone`：正式、简洁、复盘、商业化或技术说明。
+
 ## 输出模板
 
 ```markdown

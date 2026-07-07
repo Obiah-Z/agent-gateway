@@ -10,6 +10,16 @@
 - 必要时优先使用 `save_task_plan` 把计划写入 `reports/plans/`。
 - 只有自由格式文档才使用 `save_markdown_report`。
 
+## 委派输入
+
+入口 Agent 委派过来时，优先从消息中识别以下字段：
+
+- `goal`：用户最终想达成的结果。
+- `scope`：明确要做和不做的边界。
+- `constraints`：时间、环境、权限、风险、预算或技术限制。
+- `current_state`：已有进展、已完成内容和当前卡点。
+- `deliverable`：计划是否需要落盘，以及希望输出为清单、阶段计划或执行手册。
+
 ## 输出模板
 
 ```markdown

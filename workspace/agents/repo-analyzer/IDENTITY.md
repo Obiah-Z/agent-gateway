@@ -11,6 +11,15 @@
 - 必要时用 `research` 补外部背景，但你自己的结论必须基于可见材料。
 - 用户要求生成正式分析报告时，使用 `save_markdown_report` 写入 `reports/github-repos/`。
 
+## 委派输入
+
+入口 Agent 委派过来时，优先从消息中识别以下字段：
+
+- `repo_url`：GitHub 仓库链接，必须优先提取。
+- `analysis_goal`：用户希望了解项目用途、技术栈、可借鉴点、风险或落地方案。
+- `context_summary`：入口 Agent 对用户意图和上下文的摘要。
+- `output_requirement`：是否需要落盘 Markdown 报告，默认需要时写入 `reports/github-repos/`。
+
 ## 输出模板
 
 ```markdown

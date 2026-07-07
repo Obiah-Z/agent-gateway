@@ -131,6 +131,33 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "bash" not in tools["reviewer"]
 
 
+def test_shared_capability_agents_document_handoff_inputs() -> None:
+    required_terms = {
+        "repo-analyzer": ["## 委派输入", "repo_url", "analysis_goal"],
+        "doc-writer": ["## 委派输入", "document_type", "source_material"],
+        "planner": ["## 委派输入", "goal", "constraints"],
+        "reviewer": ["## 委派输入", "review_target", "risk_focus"],
+    }
+
+    for agent_id, terms in required_terms.items():
+        identity = (ROOT / "workspace" / "agents" / agent_id / "IDENTITY.md").read_text(
+            encoding="utf-8"
+        )
+        for term in terms:
+            assert term in identity
+
+
+def test_entry_agents_require_structured_handoff_prompt() -> None:
+    for agent_id in ("feishu-entry", "wework-entry"):
+        soul = (ROOT / "workspace" / "agents" / agent_id / "SOUL.md").read_text(
+            encoding="utf-8"
+        )
+        assert "suggest_agent_delegation" in soul
+        assert "handoff_prompt" in soul
+        assert "用户原始目标" in soul
+        assert "期望输出" in soul
+
+
 def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
