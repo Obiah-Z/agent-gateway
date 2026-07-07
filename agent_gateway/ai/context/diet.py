@@ -443,6 +443,75 @@ class DietStore:
             "note": "每日闭环只汇总已记录的数据；如果缺少计划或餐食，请先补齐后再复盘。",
         }
 
+    def generate_day_review_plan(self, user_scope: str, *, date: str = "", days: int = 7) -> dict[str, Any]:
+        """生成饮食日总结和明日建议草稿，不自动写入计划或记录。"""
+
+        scope = self._require_scope(user_scope)
+        safe_days = max(1, min(int(days or 7), 30))
+        status = self.today_status(scope, date=date)
+        briefing = self.coach_briefing(scope, days=safe_days)
+        target = _as_float(status.get("target_calories"))
+        actual = _as_float(status.get("actual_calories"))
+        protein = _as_float(status.get("protein_g"))
+        delta = round(actual - target, 1)
+        missing_meals = list(status.get("missing_meals", []))
+        risk_flags = sorted(
+            set(
+                [
+                    *[str(flag) for flag in status.get("risk_flags", [])],
+                    *[str(flag) for flag in briefing.get("risk_flags", [])],
+                ]
+            )
+        )
+        tomorrow_strategy = self._tomorrow_strategy(
+            risk_flags=risk_flags,
+            missing_meals=missing_meals,
+            briefing=briefing,
+        )
+        confirmations = []
+        if missing_meals:
+            confirmations.append(f"是否需要补记缺失餐次：{'、'.join(missing_meals)}？")
+        if not status.get("latest_weight"):
+            confirmations.append("是否补记一次今日或明早体重？")
+        if not status.get("plan"):
+            confirmations.append("是否生成明日饮食计划？")
+
+        return {
+            "type": "diet_day_review_plan",
+            "user_scope": scope,
+            "date": status["date"],
+            "review": {
+                "target_calories": target,
+                "actual_calories": actual,
+                "calorie_delta": delta,
+                "protein_g": protein,
+                "meal_count": status.get("meal_count", 0),
+                "missing_meals": missing_meals,
+                "summary": self._diet_day_review_summary(
+                    actual=actual,
+                    target=target,
+                    protein=protein,
+                    missing_meals=missing_meals,
+                ),
+            },
+            "trend": {
+                "days": briefing.get("days", safe_days),
+                "weight_change_kg": briefing.get("weight_change_kg", 0.0),
+                "average_calories": briefing.get("average_calories", 0.0),
+                "average_protein_g": briefing.get("average_protein_g", 0.0),
+                "missing_meal_days": briefing.get("missing_meal_days", 0),
+            },
+            "risk_flags": risk_flags,
+            "tomorrow_strategy": tomorrow_strategy,
+            "needs_confirmation": confirmations,
+            "next_actions": [
+                "确认后可调用 nutrition_day_summary 保存今日汇总。",
+                "如需要明日计划，确认后调用 diet_plan_generate。",
+                "如需要补体重，确认后调用 weight_log_add。",
+            ],
+            "note": "这是饮食日总结和明日建议草稿，不会自动生成计划、写入体重或补记餐食。",
+        }
+
     def _target_calories(self, profile: dict[str, Any]) -> float:
         current = _as_float(profile.get("current_weight_kg"))
         target = _as_float(profile.get("target_weight_kg"))
@@ -682,6 +751,60 @@ class DietStore:
             reminders.append("今日记录闭环正常")
         return reminders
 
+    @staticmethod
+    def _diet_day_review_summary(
+        *,
+        actual: float,
+        target: float,
+        protein: float,
+        missing_meals: list[str],
+    ) -> str:
+        if actual <= 0:
+            return "今日餐食记录不足，无法判断摄入是否贴近目标。"
+        delta = actual - target
+        if abs(delta) <= 150:
+            calorie_text = "热量基本贴近目标"
+        elif delta > 0:
+            calorie_text = f"热量高于目标约 {delta:.0f} kcal"
+        else:
+            calorie_text = f"热量低于目标约 {abs(delta):.0f} kcal"
+        protein_text = f"蛋白质约 {protein:.0f}g" if protein > 0 else "蛋白质记录不足"
+        missing_text = "，缺失餐次：" + "、".join(missing_meals) if missing_meals else "，三餐记录基本闭环"
+        return f"{calorie_text}，{protein_text}{missing_text}。"
+
+    @staticmethod
+    def _tomorrow_strategy(
+        *,
+        risk_flags: list[str],
+        missing_meals: list[str],
+        briefing: dict[str, Any],
+    ) -> dict[str, Any]:
+        focus = "保持记录闭环，优先稳定三餐和蛋白质。"
+        actions: list[str] = []
+        if "missing_meals" in risk_flags or missing_meals:
+            actions.append("明天先把早餐、午餐、晚餐都记录下来，不追求估算完美。")
+        if "protein_low" in risk_flags:
+            focus = "明天优先补足蛋白质。"
+            actions.append("每餐安排一掌蛋白质：鸡蛋、牛肉、鱼虾、鸡胸、豆腐或无糖酸奶。")
+        if "calories_over_target" in risk_flags:
+            focus = "明天控制晚餐油脂和含糖饮料。"
+            actions.append("晚餐减少油炸、重酱汁和奶茶，主食控制在半拳到一拳。")
+        if "calories_too_low" in risk_flags:
+            focus = "明天避免极端低热量。"
+            actions.append("不要继续硬饿，优先补足蛋白质、蔬菜和适量主食。")
+        for action in briefing.get("suggested_actions", []):
+            text = str(action).strip()
+            if text and text not in actions:
+                actions.append(text)
+        if not actions:
+            actions.append("延续当前节奏，晚餐后做一次简短复盘。")
+        return {
+            "focus": focus,
+            "actions": actions[:5],
+            "breakfast_hint": "固定早餐：鸡蛋 + 无糖豆浆/酸奶 + 一份水果。",
+            "dinner_hint": "晚餐优先清淡蛋白质 + 两拳蔬菜 + 半拳主食。",
+        }
+
     def _backend_get(self, table: str, key: str) -> dict[str, Any] | None:
         backend = self.read_backend
         if backend is None or not hasattr(backend, "get"):
@@ -912,6 +1035,21 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "loop": diet_store.daily_loop(scope, date=date, days=days)})
 
+    def diet_day_review_plan_generate(
+        *,
+        date: str = "",
+        days: int = 7,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json(
+            {
+                "status": "ok",
+                "review_plan": diet_store.generate_day_review_plan(scope, date=date, days=days),
+            }
+        )
+
     registry.register(
         RegisteredTool(
             name="profile_get",
@@ -1078,5 +1216,24 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_daily_loop_generate,
             tags=("diet", "daily", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_day_review_plan_generate",
+            description=(
+                "Generate a diet day review and tomorrow strategy draft from today's records "
+                "and recent trends without writing new meals, weight, or plans."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "days": {"type": "integer"},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_day_review_plan_generate,
+            tags=("diet", "review", "planning", "read"),
         )
     )

@@ -353,3 +353,40 @@ def test_diet_daily_loop_reports_missing_plan_without_auto_generating(tmp_path: 
     assert store.get_plan("user:wework:diet", plan_date="2026-07-06") is None
     assert "今日计划缺失" in loop["reminders"]
     assert any("生成今日饮食计划" in action for action in loop["next_actions"])
+
+
+def test_diet_day_review_plan_generates_tomorrow_strategy_without_writing(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=1783290000.0)
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="炸鸡饭和奶茶",
+        estimated_calories=1200,
+        protein_g=20,
+    )
+
+    review_plan = json.loads(
+        registry.dispatch(
+            "diet_day_review_plan_generate",
+            {"date": "2026-07-06", "days": 7},
+            runtime_context=context,
+        )
+    )["review_plan"]
+
+    assert review_plan["type"] == "diet_day_review_plan"
+    assert review_plan["user_scope"] == "user:wework:diet"
+    assert review_plan["date"] == "2026-07-06"
+    assert review_plan["review"]["actual_calories"] == 1200
+    assert review_plan["review"]["missing_meals"] == ["breakfast", "dinner"]
+    assert "missing_meals" in review_plan["risk_flags"]
+    assert "明天先把早餐、午餐、晚餐都记录下来" in review_plan["tomorrow_strategy"]["actions"][0]
+    assert "是否生成明日饮食计划？" in review_plan["needs_confirmation"]
+    assert store.get_plan("user:wework:diet", plan_date="2026-07-06") is None
+    assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None

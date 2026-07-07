@@ -187,6 +187,7 @@
           "progress_summary",
           "diet_coach_briefing",
           "diet_daily_loop_generate",
+          "diet_day_review_plan_generate",
           "memory_search",
           "memory_write"
         ]
