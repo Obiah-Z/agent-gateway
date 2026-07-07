@@ -333,6 +333,109 @@ class PersonalStore:
             "note": "这是个人日复盘和明日计划草稿，不会自动写入复盘、待办或长期记忆。",
         }
 
+    def generate_weekly_plan(
+        self,
+        *,
+        user_scope: str = "",
+        week_goal: str = "",
+        focus_areas: list[str] | None = None,
+        constraints: list[str] | None = None,
+        todo_limit: int = 12,
+        review_limit: int = 5,
+    ) -> dict[str, Any]:
+        """生成个人周计划草稿，不写入待办或复盘。"""
+
+        briefing = self.generate_briefing(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        open_todos = sorted(briefing.get("open_todos", []), key=self._todo_sort_key)
+        urgent_todos = sorted(briefing.get("urgent_todos", []), key=self._todo_sort_key)
+        recent_reviews = briefing.get("recent_reviews", [])
+        focus_items = self._clean_list(focus_areas or [])
+        constraint_items = self._clean_list(constraints or [])
+        if not focus_items:
+            focus_items = [
+                str(todo.get("title", "")).strip()
+                for todo in (urgent_todos or open_todos)[:3]
+                if str(todo.get("title", "")).strip()
+            ]
+        if not focus_items and week_goal.strip():
+            focus_items = [week_goal.strip()]
+
+        weekly_priorities = []
+        for todo in (urgent_todos or open_todos)[:5]:
+            weekly_priorities.append(
+                {
+                    "title": str(todo.get("title", "")),
+                    "priority": str(todo.get("priority", "")),
+                    "due_at": str(todo.get("due_at", "")),
+                }
+            )
+        review_signals = []
+        for review in recent_reviews:
+            next_step = str(review.get("next_step", "")).strip()
+            summary = str(review.get("summary", "")).strip()
+            if next_step:
+                review_signals.append(next_step)
+            elif summary:
+                review_signals.append(summary)
+
+        milestones = []
+        for index, item in enumerate(focus_items[:3], start=1):
+            milestones.append(
+                {
+                    "name": f"里程碑 {index}",
+                    "focus": item,
+                    "done": f"围绕「{item}」完成至少一个可验证产出。",
+                }
+            )
+        if not milestones:
+            milestones.append(
+                {
+                    "name": "里程碑 1",
+                    "focus": "确认本周最重要目标",
+                    "done": "本周目标、优先级和第一步均已明确。",
+                }
+            )
+
+        needs_confirmation = []
+        if not week_goal.strip():
+            needs_confirmation.append("本周最重要目标是什么？")
+        if not open_todos:
+            needs_confirmation.append("是否需要先补充本周待办？")
+        if constraint_items:
+            needs_confirmation.append("这些限制是否需要拆成避坑动作或求助事项？")
+
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "type": "personal_weekly_plan",
+            "week_goal": week_goal.strip() or briefing.get("suggested_focus", ""),
+            "focus_areas": focus_items[:5],
+            "weekly_priorities": weekly_priorities,
+            "milestones": milestones,
+            "review_signals": review_signals[:5],
+            "constraints": constraint_items,
+            "first_action": (
+                f"先推进「{weekly_priorities[0]['title']}」。"
+                if weekly_priorities
+                else "先确认本周最重要目标，再拆第一步。"
+            ),
+            "needs_confirmation": needs_confirmation,
+            "next_actions": [
+                "确认后可把关键里程碑拆成 personal_todo_add 待办。",
+                "周末复盘时可用 personal_review_add 写入本周总结。",
+            ],
+            "source": {
+                "open_todo_count": len(open_todos),
+                "urgent_todo_count": len(urgent_todos),
+                "recent_review_count": len(recent_reviews),
+            },
+            "note": "这是个人周计划草稿，不会自动写入待办、复盘或长期记忆。",
+        }
+
     def triage_inbox(
         self,
         text: str,
@@ -794,6 +897,26 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(plan, ensure_ascii=False, indent=2)
 
+    def personal_weekly_plan_generate(
+        week_goal: str = "",
+        focus_areas: list[str] | None = None,
+        constraints: list[str] | None = None,
+        todo_limit: int = 12,
+        review_limit: int = 5,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        plan = personal_store.generate_weekly_plan(
+            user_scope=_scope(__runtime_context, user_scope),
+            week_goal=week_goal,
+            focus_areas=focus_areas or [],
+            constraints=constraints or [],
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        return json.dumps(plan, ensure_ascii=False, indent=2)
+
     def personal_inbox_triage(
         text: str,
         context: str = "",
@@ -957,6 +1080,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_day_review_plan_generate,
             tags=("personal", "review", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_weekly_plan_generate",
+            description=(
+                "Generate a structured personal weekly plan draft from open todos, "
+                "recent reviews, optional week goal, focus areas, and constraints without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "week_goal": {"type": "string"},
+                    "focus_areas": {"type": "array", "items": {"type": "string"}},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "todo_limit": {"type": "integer"},
+                    "review_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_weekly_plan_generate,
+            tags=("personal", "weekly", "planning", "read"),
         )
     )
     registry.register(

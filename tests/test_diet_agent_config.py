@@ -487,6 +487,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_time_blocks_generate",
         "personal_daily_workflow_generate",
         "personal_day_review_plan_generate",
+        "personal_weekly_plan_generate",
         "personal_inbox_triage",
     }.issubset(tools[SECRETARY_AGENT_ID])
 
@@ -511,6 +512,9 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "personal_day_review_plan_generate" in identity
     assert "personal_day_review_plan_generate" in soul
     assert "personal_day_review_plan_generate" in tools_md
+    assert "personal_weekly_plan_generate" in identity
+    assert "personal_weekly_plan_generate" in soul
+    assert "personal_weekly_plan_generate" in tools_md
     assert "personal_inbox_triage" in identity
     assert "personal_inbox_triage" in soul
     assert "personal_inbox_triage" in tools_md

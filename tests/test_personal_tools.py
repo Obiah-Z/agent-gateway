@@ -254,6 +254,63 @@ def test_personal_day_review_plan_generates_draft_without_writing(tmp_path: Path
     assert store.list_todos(user_scope="user:alice")[0]["status"] == "open"
 
 
+def test_personal_weekly_plan_generates_draft_without_writing(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "完成项目难点表达", "priority": "urgent", "due_at": "this_week"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练三道场景题", "priority": "high", "due_at": "this_week"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "上周 Redis 表达更清楚了",
+            "completed": ["Redis 技术栈复盘"],
+            "next_step": "本周补 RabbitMQ 和系统设计表达",
+        },
+        runtime_context=context,
+    )
+
+    plan = json.loads(
+        registry.dispatch(
+            "personal_weekly_plan_generate",
+            {
+                "week_goal": "本周完成面试项目表达闭环",
+                "focus_areas": ["项目难点", "RabbitMQ 选型", "系统设计题"],
+                "constraints": ["每天晚上最多 2 小时"],
+            },
+            runtime_context=context,
+        )
+    )
+
+    assert plan["type"] == "personal_weekly_plan"
+    assert plan["user_scope"] == "user:alice"
+    assert plan["week_goal"] == "本周完成面试项目表达闭环"
+    assert plan["focus_areas"] == ["项目难点", "RabbitMQ 选型", "系统设计题"]
+    assert plan["weekly_priorities"][0]["title"] == "完成项目难点表达"
+    assert plan["milestones"][0]["done"] == "围绕「项目难点」完成至少一个可验证产出。"
+    assert plan["review_signals"] == ["本周补 RabbitMQ 和系统设计表达"]
+    assert plan["constraints"] == ["每天晚上最多 2 小时"]
+    assert plan["first_action"] == "先推进「完成项目难点表达」。"
+    assert "这些限制是否需要拆成避坑动作或求助事项？" in plan["needs_confirmation"]
+    assert plan["source"] == {
+        "open_todo_count": 2,
+        "urgent_todo_count": 2,
+        "recent_review_count": 1,
+    }
+    assert store.recent_reviews(user_scope="user:alice")[0]["summary"] == "上周 Redis 表达更清楚了"
+    assert [todo["status"] for todo in store.list_todos(user_scope="user:alice")] == ["open", "open"]
+
+
 def test_personal_inbox_triage_suggests_actions_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")
