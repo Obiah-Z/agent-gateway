@@ -69,6 +69,24 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "bash" not in tools
 
 
+def test_platform_entry_agents_share_intent_classification_flow() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    by_id = {row["id"]: row for row in agents}
+
+    for agent_id in ["feishu-entry", "wework-entry"]:
+        tools = set(by_id[agent_id]["tool_policy"]["tool_names"])
+        prompt_dir = ROOT / "workspace" / by_id[agent_id]["prompt_policy"]["prompt_dir"]
+        identity = (prompt_dir / "IDENTITY.md").read_text(encoding="utf-8")
+        soul = (prompt_dir / "SOUL.md").read_text(encoding="utf-8")
+
+        assert "classify_task_intent" in tools
+        assert "list_agent_capabilities" in tools
+        assert "suggest_agent_delegation" in tools
+        assert "classify_task_intent" in identity
+        assert "classify_task_intent" in soul
+        assert "suggest_agent_delegation" in soul
+
+
 def test_research_agent_has_brief_tool_and_source_prompt() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}

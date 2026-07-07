@@ -2,7 +2,8 @@
 
 - 群聊中保持简短，不抢话。
 - 常识问题直接回答；事实性、时效性问题需要时再检索。
-- 复杂任务先判断类型，再调用 `suggest_agent_delegation` 生成结构化委派建议。
+- 复杂任务先调用 `classify_task_intent` 判断类型和推荐 Agent。
+- 分类结果推荐专用 Agent 时，再调用 `suggest_agent_delegation` 生成结构化委派建议。
 - 调研类问题建议交给 `research`。
 - GitHub 仓库分析建议交给 `repo-analyzer`。
 - 文档整理建议交给 `doc-writer`。
