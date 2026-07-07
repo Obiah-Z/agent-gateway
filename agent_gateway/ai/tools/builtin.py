@@ -191,6 +191,12 @@ def _normalize_severity(value: str) -> str:
     return aliases.get(severity, "medium")
 
 
+def _clean_strings(items: list[str] | None) -> list[str]:
+    """清理字符串列表中的空值。"""
+
+    return [str(item).strip() for item in items or [] if str(item).strip()]
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -286,6 +292,81 @@ def register_builtin_tools(
             content=content,
             category="plans",
             file_name=file_name or title,
+        )
+
+    def structure_task_breakdown(
+        goal: str,
+        scope: str = "",
+        phases: list[dict[str, str]] | None = None,
+        constraints: list[str] | None = None,
+        risks: list[str] | None = None,
+        current_state: str = "",
+    ) -> str:
+        """把计划草稿整理成稳定的阶段、缺口和下一步。"""
+
+        normalized_phases = []
+        missing_acceptance = []
+        missing_outputs = []
+        for index, phase in enumerate(phases or [], start=1):
+            name = str(phase.get("name", "") or f"阶段 {index}").strip()
+            task = str(phase.get("task", "")).strip()
+            output = str(phase.get("output", "")).strip()
+            done = str(phase.get("done", "") or phase.get("acceptance", "")).strip()
+            row = {
+                "name": name,
+                "task": task or "待明确",
+                "output": output or "待明确",
+                "done": done or "待明确",
+            }
+            if not output:
+                missing_outputs.append(name)
+            if not done:
+                missing_acceptance.append(name)
+            normalized_phases.append(row)
+
+        if not normalized_phases:
+            normalized_phases = [
+                {
+                    "name": "阶段一",
+                    "task": "明确目标、边界、输入材料和完成标准",
+                    "output": "可执行任务定义",
+                    "done": "目标、边界、依赖和验收标准均已写清",
+                }
+            ]
+
+        next_steps = []
+        first = normalized_phases[0]
+        next_steps.append(f"先执行「{first['name']}」：{first['task']}")
+        if missing_outputs:
+            next_steps.append(f"补齐这些阶段的输出物：{', '.join(missing_outputs[:3])}")
+        if missing_acceptance:
+            next_steps.append(f"补齐这些阶段的完成标准：{', '.join(missing_acceptance[:3])}")
+
+        readiness = "ready"
+        if missing_acceptance or missing_outputs:
+            readiness = "needs_refinement"
+        if not goal.strip():
+            readiness = "blocked"
+            next_steps.insert(0, "先补充明确目标。")
+
+        return json.dumps(
+            {
+                "type": "task_breakdown",
+                "goal": goal.strip(),
+                "scope": scope.strip(),
+                "current_state": current_state.strip(),
+                "constraints": _clean_strings(constraints),
+                "risks": _clean_strings(risks),
+                "phases": normalized_phases,
+                "readiness": readiness,
+                "gaps": {
+                    "missing_outputs": missing_outputs,
+                    "missing_acceptance": missing_acceptance,
+                },
+                "next_steps": next_steps[:5],
+            },
+            ensure_ascii=False,
+            indent=2,
         )
 
     def save_review_report(
@@ -737,6 +818,41 @@ def register_builtin_tools(
             },
             handler=save_task_plan,
             tags=("filesystem", "write", "report", "plan"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="structure_task_breakdown",
+            description=(
+                "Normalize a planning draft into phases, outputs, acceptance "
+                "criteria, gaps, readiness, and next steps."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["goal"],
+                "properties": {
+                    "goal": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "current_state": {"type": "string"},
+                    "constraints": {"type": "array", "items": {"type": "string"}},
+                    "risks": {"type": "array", "items": {"type": "string"}},
+                    "phases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "task": {"type": "string"},
+                                "output": {"type": "string"},
+                                "done": {"type": "string"},
+                                "acceptance": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+            handler=structure_task_breakdown,
+            tags=("plan", "structure", "task"),
         )
     )
     registry.register(

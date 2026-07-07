@@ -7,6 +7,7 @@
 - 明确目标、边界、依赖和风险。
 - 拆成阶段任务，每阶段有输入、动作、输出和完成标准。
 - 给出下一步最小可执行任务。
+- 计划草稿不够稳定时，使用 `structure_task_breakdown` 规范阶段、缺口和下一步。
 - 必要时优先使用 `save_task_plan` 把计划写入 `reports/plans/`。
 - 只有自由格式文档才使用 `save_markdown_report`。
 

@@ -124,6 +124,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         tools["planner"]
     )
     assert "save_task_plan" in tools["planner"]
+    assert "structure_task_breakdown" in tools["planner"]
     assert {"read_file", "list_directory", "save_markdown_report"}.issubset(
         tools["reviewer"]
     )
@@ -150,6 +151,23 @@ def test_ops_agent_has_readonly_health_tool_and_safety_prompt() -> None:
     assert "ops_readonly_health" in soul
     assert "ops_readonly_health" in tools_md
     assert "禁止执行删除" in tools_md
+
+
+def test_planner_has_task_breakdown_tool_and_safety_prompt() -> None:
+    identity = (ROOT / "workspace" / "agents" / "planner" / "IDENTITY.md").read_text(
+        encoding="utf-8"
+    )
+    soul = (ROOT / "workspace" / "agents" / "planner" / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    tools_md = (ROOT / "workspace" / "agents" / "planner" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "structure_task_breakdown" in identity
+    assert "structure_task_breakdown" in soul
+    assert "structure_task_breakdown" in tools_md
+    assert "只做计划" in tools_md
 
 
 def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:

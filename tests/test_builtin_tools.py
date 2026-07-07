@@ -109,6 +109,48 @@ def test_save_task_plan_writes_structured_plan(tmp_path: Path) -> None:
     assert "## 下一步\n- 先跑单测" in content
 
 
+def test_structure_task_breakdown_reports_gaps_and_next_steps(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "structure_task_breakdown",
+        {
+            "goal": "增强 Agent 能力",
+            "scope": "先不做自动多 Agent 调度",
+            "current_state": "已有入口 Agent 和能力 Agent",
+            "constraints": ["每阶段提交一次"],
+            "risks": ["工具权限过宽"],
+            "phases": [
+                {
+                    "name": "阶段一",
+                    "task": "补结构化工具",
+                    "output": "工具 schema 和测试",
+                    "done": "测试通过",
+                },
+                {
+                    "name": "阶段二",
+                    "task": "更新提示词",
+                },
+            ],
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "task_breakdown"
+    assert data["readiness"] == "needs_refinement"
+    assert data["phases"][0] == {
+        "name": "阶段一",
+        "task": "补结构化工具",
+        "output": "工具 schema 和测试",
+        "done": "测试通过",
+    }
+    assert data["phases"][1]["output"] == "待明确"
+    assert data["gaps"]["missing_outputs"] == ["阶段二"]
+    assert data["gaps"]["missing_acceptance"] == ["阶段二"]
+    assert data["next_steps"][0] == "先执行「阶段一」：补结构化工具"
+
+
 def test_save_review_report_writes_structured_review(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
