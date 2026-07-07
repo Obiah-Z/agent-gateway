@@ -416,6 +416,7 @@
           "review_task_plan_gate",
           "format_task_plan_gate_review",
           "review_agent_collaboration_gate",
+          "format_agent_collaboration_gate_review",
           "review_agent_handoff_package_gate",
           "review_collaboration_progress_gate",
           "review_collaboration_final_summary_gate",

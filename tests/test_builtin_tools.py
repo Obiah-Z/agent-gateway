@@ -782,6 +782,41 @@ def test_review_agent_collaboration_gate_blocks_missing_contracts(tmp_path: Path
     assert "明确说明该结果只生成协作路线，不代表任何 Agent 已经执行。" in data["next_actions"]
 
 
+def test_format_agent_collaboration_gate_review_outputs_user_facing_summary(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    plan = {
+        "type": "agent_collaboration_plan",
+        "task_type": "repo-adoption",
+        "user_goal": "评估仓库并沉淀采纳方案。",
+        "handoff_sequence": [
+            {
+                "step": 1,
+                "agent_id": "repo-analyzer",
+                "purpose": "分析仓库。",
+            }
+        ],
+    }
+    review = registry.dispatch(
+        "review_agent_collaboration_gate",
+        {"collaboration_json": json.dumps(plan, ensure_ascii=False)},
+    )
+
+    summary = registry.dispatch(
+        "format_agent_collaboration_gate_review",
+        {"gate_review_json": review},
+    )
+
+    assert "## 协作路线门禁审查" in summary
+    assert "- 结论：不建议继续" in summary
+    assert "- 参与 Agent：repo-analyzer" in summary
+    assert "| 交接输入契约完整 | 未通过 | 缺少输入契约阶段数：1 |" in summary
+    assert "## 下一步" in summary
+    assert "- 为每个阶段补充 input_contract，明确上游结果和必要输入。" in summary
+
+
 def test_review_agent_handoff_package_gate_allows_complete_package(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

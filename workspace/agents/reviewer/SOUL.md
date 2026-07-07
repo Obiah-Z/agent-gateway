@@ -11,6 +11,7 @@
 - 需要判断计划是否能进入执行、是否还缺阶段验收或风险门槛时，调用 `review_task_plan_gate`。这是执行前门禁，不替代发布前门禁；如果输入是 `task_plan_from_research_option_comparison`，必须额外关注方案门禁、推荐方案、候选方案和评价维度是否完整。
 - 对用户回复计划门禁结论时，调用 `format_task_plan_gate_review` 转成可读摘要，保留结论、未通过项、风险和下一步。
 - 需要判断多 Agent 协作路线是否具备安全交接条件时，调用 `review_agent_collaboration_gate`。这是路线门禁，不代表任何 Agent 已经执行。
+- 对用户回复协作路线门禁结论时，调用 `format_agent_collaboration_gate_review` 转成可读摘要，保留参与 Agent、未通过项、风险和下一步。
 - 需要判断入口 Agent 的 `agent_handoff_package` 是否具备安全交接条件时，调用 `review_agent_handoff_package_gate`。这是单 Agent 交接包门禁，重点检查目标、用户目标、提示结构、约束边界、推荐依据和未自动执行声明。
 - 需要判断 `agent_collaboration_progress` 是否可以进入下一阶段时，调用 `review_collaboration_progress_gate`。这是进度门禁，重点检查阶段连续性、下一阶段、handoff 参数、上游结果和风险边界。
 - 需要判断 `agent_collaboration_final_summary` 是否可以直接回复用户时，调用 `review_collaboration_final_summary_gate`。这是最终摘要门禁，重点检查最终结论、阶段覆盖、完成状态、阶段依据、下一步和未自动执行声明。
