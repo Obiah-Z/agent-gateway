@@ -668,6 +668,61 @@ def test_render_repo_analysis_markdown_can_be_saved_as_report(tmp_path: Path) ->
     assert "## 建议下一步" in content
 
 
+def test_render_research_evidence_markdown_formats_sources_and_gaps(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    evidence = {
+        "type": "research_evidence_pack",
+        "topic": "Redis 看门狗",
+        "research_question": "Redis 锁续期是否适合 Gateway session lane？",
+        "conclusion": "适合长任务互斥，但需要 owner token 和续期失败处理。",
+        "evidence_quality": "strong",
+        "source_count": 2,
+        "primary_source_count": 1,
+        "sources": [
+            {
+                "title": "Redisson Lock Docs",
+                "url": "https://redisson.org/docs/data-and-services/locks-and-synchronizers/",
+                "source_type": "docs",
+                "fact": "Redisson 支持 watchdog 自动续期。",
+            },
+            {
+                "title": "Redis SET NX PX",
+                "url": "https://redis.io/docs/latest/commands/set/",
+                "source_type": "docs",
+                "fact": "锁需要设置过期时间和唯一值。",
+            },
+        ],
+        "key_facts": ["看门狗适合任务耗时不可预测的场景。"],
+        "source_conflicts": [],
+        "uncertainty": ["需要验证 Python 客户端实现质量。"],
+        "freshness": "2026-07-07 检索。",
+        "downstream_use": "供 planner 和 reviewer 复用。",
+        "reusable_payload": {
+            "topic": "Redis 看门狗",
+            "question": "是否适合 session lane？",
+            "conclusion": "可作为锁续期方案候选。",
+        },
+        "next_actions": ["补一个锁续期 smoke test。"],
+    }
+
+    markdown = registry.dispatch(
+        "render_research_evidence_markdown",
+        {
+            "evidence_json": json.dumps(evidence, ensure_ascii=False),
+            "include_raw_metadata": True,
+        },
+    )
+
+    assert markdown.startswith("# 调研证据包：Redis 看门狗")
+    assert "- 证据质量：strong" in markdown
+    assert "| 1 | Redisson Lock Docs | docs | Redisson 支持 watchdog 自动续期。 | https://redisson.org/docs/data-and-services/locks-and-synchronizers/ |" in markdown
+    assert "- 看门狗适合任务耗时不可预测的场景。" in markdown
+    assert "- 需要验证 Python 客户端实现质量。" in markdown
+    assert "- conclusion：可作为锁续期方案候选。" in markdown
+    assert "```json" in markdown
+
+
 def test_render_execution_record_markdown_formats_plan_and_gate_review(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

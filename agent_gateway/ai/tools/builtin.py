@@ -1129,6 +1129,84 @@ def register_builtin_tools(
             ]
         ) + metadata
 
+    def render_research_evidence_markdown(
+        evidence_json: str,
+        title: str = "",
+        include_raw_metadata: bool = False,
+    ) -> str:
+        """把 research 证据包渲染成正式 Markdown 调研记录。"""
+
+        if not evidence_json.strip():
+            return "Error: evidence_json is required"
+        evidence = json.loads(evidence_json)
+        if not isinstance(evidence, dict):
+            return "Error: evidence_json must be a JSON object"
+        if evidence.get("type") != "research_evidence_pack":
+            return "Error: evidence_json type must be research_evidence_pack"
+
+        topic = str(evidence.get("topic") or "调研记录").strip()
+        document_title = title.strip() or f"调研证据包：{topic}"
+        quality = str(evidence.get("evidence_quality") or "unknown").strip()
+        summary = "\n".join(
+            [
+                f"- 主题：{topic}",
+                f"- 问题：{evidence.get('research_question') or '待补充'}",
+                f"- 结论：{evidence.get('conclusion') or '待补充'}",
+                f"- 证据质量：{quality}",
+                f"- 来源数量：{evidence.get('source_count', 0)}，一手来源：{evidence.get('primary_source_count', 0)}",
+                f"- 时效说明：{evidence.get('freshness') or '未说明'}",
+                f"- 下游用途：{evidence.get('downstream_use') or '未说明'}",
+            ]
+        )
+
+        source_rows = []
+        for index, source in enumerate(evidence.get("sources") or [], start=1):
+            if not isinstance(source, dict):
+                continue
+            source_rows.append(
+                [
+                    index,
+                    source.get("title") or "未命名来源",
+                    source.get("source_type") or "unknown",
+                    source.get("fact") or "未摘录事实",
+                    source.get("url") or "未提供",
+                ]
+            )
+
+        reusable_payload = evidence.get("reusable_payload") if isinstance(evidence.get("reusable_payload"), dict) else {}
+        reusable_lines = [
+            f"- topic：{reusable_payload.get('topic') or topic}",
+            f"- question：{reusable_payload.get('question') or evidence.get('research_question') or '待补充'}",
+            f"- conclusion：{reusable_payload.get('conclusion') or evidence.get('conclusion') or '待补充'}",
+        ]
+
+        metadata = ""
+        if include_raw_metadata:
+            metadata = "\n\n" + _markdown_section(
+                "结构化元数据",
+                "```json\n" + json.dumps(evidence, ensure_ascii=False, indent=2) + "\n```",
+            )
+
+        return "\n\n".join(
+            [
+                f"# {document_title}",
+                _markdown_section("摘要", summary),
+                _markdown_section("关键事实", _markdown_bullets(evidence.get("key_facts"))),
+                _markdown_section(
+                    "来源证据",
+                    _markdown_table(["序号", "来源", "类型", "事实摘录", "URL"], source_rows),
+                ),
+                _markdown_section("冲突与不确定点", _markdown_bullets(
+                    [
+                        *_clean_strings(evidence.get("source_conflicts") if isinstance(evidence.get("source_conflicts"), list) else []),
+                        *_clean_strings(evidence.get("uncertainty") if isinstance(evidence.get("uncertainty"), list) else []),
+                    ]
+                )),
+                _markdown_section("可复用摘要", "\n".join(reusable_lines)),
+                _markdown_section("建议下一步", _markdown_bullets(evidence.get("next_actions"))),
+            ]
+        ) + metadata
+
     def render_execution_record_markdown(
         task_plan_json: str,
         gate_review_json: str = "",
@@ -2823,6 +2901,35 @@ def register_builtin_tools(
             },
             handler=render_repo_analysis_markdown,
             tags=("document", "markdown", "github", "report"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="render_research_evidence_markdown",
+            description=(
+                "Render a research_evidence_pack JSON object from research into "
+                "a formal Chinese Markdown research evidence document."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["evidence_json"],
+                "properties": {
+                    "evidence_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_evidence_pack.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional Markdown H1 title.",
+                    },
+                    "include_raw_metadata": {
+                        "type": "boolean",
+                        "description": "Whether to append the raw evidence metadata.",
+                    },
+                },
+            },
+            handler=render_research_evidence_markdown,
+            tags=("document", "markdown", "research", "evidence"),
         )
     )
     registry.register(
