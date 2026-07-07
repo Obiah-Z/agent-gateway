@@ -71,7 +71,8 @@
           "get_current_time",
           "memory_search",
           "web_search",
-          "fetch_url"
+          "fetch_url",
+          "suggest_agent_delegation"
         ]
       },
       "memory_policy": {
@@ -98,7 +99,8 @@
           "get_current_time",
           "memory_search",
           "web_search",
-          "fetch_url"
+          "fetch_url",
+          "suggest_agent_delegation"
         ]
       },
       "memory_policy": {

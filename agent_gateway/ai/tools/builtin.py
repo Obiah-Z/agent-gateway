@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -318,6 +319,32 @@ def register_builtin_tools(
             file_name=file_name or title,
         )
 
+    def suggest_agent_delegation(
+        task_type: str,
+        target_agent_id: str,
+        reason: str,
+        context_summary: str,
+        handoff_prompt: str,
+        confidence: float = 0.7,
+        can_answer_briefly: bool = True,
+    ) -> str:
+        """生成入口 Agent 到能力 Agent 的结构化委派建议。"""
+
+        normalized_confidence = max(0.0, min(1.0, float(confidence)))
+        suggestion = {
+            "type": "agent_delegation_suggestion",
+            "task_type": task_type.strip(),
+            "target_agent_id": target_agent_id.strip(),
+            "reason": reason.strip(),
+            "context_summary": context_summary.strip(),
+            "handoff_prompt": handoff_prompt.strip(),
+            "confidence": normalized_confidence,
+            "can_answer_briefly": bool(can_answer_briefly),
+            "status": "suggested",
+            "note": "这是委派建议，不会自动调用目标 Agent。",
+        }
+        return json.dumps(suggestion, ensure_ascii=False, indent=2)
+
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
 
@@ -508,6 +535,60 @@ def register_builtin_tools(
             },
             handler=save_structured_document,
             tags=("filesystem", "write", "report", "document"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="suggest_agent_delegation",
+            description=(
+                "Create a structured delegation suggestion from an entry agent "
+                "to a specialized capability or personal agent. This does not "
+                "execute the target agent."
+            ),
+            input_schema={
+                "type": "object",
+                "required": [
+                    "task_type",
+                    "target_agent_id",
+                    "reason",
+                    "context_summary",
+                    "handoff_prompt",
+                ],
+                "properties": {
+                    "task_type": {
+                        "type": "string",
+                        "description": "Task category, for example repo-analysis, planning, review, personal-secretary.",
+                    },
+                    "target_agent_id": {
+                        "type": "string",
+                        "description": "Recommended target agent id.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Short reason why the target agent is better suited.",
+                    },
+                    "context_summary": {
+                        "type": "string",
+                        "description": "Relevant user intent and context to pass to the target agent.",
+                    },
+                    "handoff_prompt": {
+                        "type": "string",
+                        "description": "A ready-to-send prompt for the target agent.",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Confidence of the routing suggestion.",
+                    },
+                    "can_answer_briefly": {
+                        "type": "boolean",
+                        "description": "Whether the entry agent can provide a short interim answer.",
+                    },
+                },
+            },
+            handler=suggest_agent_delegation,
+            tags=("agent", "delegation", "routing"),
         )
     )
     registry.register(

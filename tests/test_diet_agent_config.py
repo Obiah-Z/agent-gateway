@@ -131,6 +131,23 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     assert "bash" not in tools["reviewer"]
 
 
+def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> None:
+    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
+
+    assert "suggest_agent_delegation" in tools["feishu-entry"]
+    assert "suggest_agent_delegation" in tools["wework-entry"]
+    for agent_id in {
+        "repo-analyzer",
+        "doc-writer",
+        "planner",
+        "reviewer",
+        SECRETARY_AGENT_ID,
+        AGENT_ID,
+    }:
+        assert "suggest_agent_delegation" not in tools[agent_id]
+
+
 def test_personal_secretary_has_structured_personal_tools() -> None:
     agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}

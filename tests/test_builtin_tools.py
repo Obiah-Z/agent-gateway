@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from agent_gateway.ai.tools.builtin import register_builtin_tools
@@ -186,6 +187,38 @@ def test_save_structured_document_writes_retrospective(tmp_path: Path) -> None:
     )
     assert "## 完成情况\n完成工具和提示词增强。" in content
     assert "## 后续行动\n- 继续补协作编排" in content
+
+
+def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "suggest_agent_delegation",
+        {
+            "task_type": "repo-analysis",
+            "target_agent_id": "repo-analyzer",
+            "reason": "需要读取仓库元数据并生成分析报告。",
+            "context_summary": "用户给了一个 GitHub 仓库链接，希望了解项目用途。",
+            "handoff_prompt": "请分析 https://github.com/example/repo 并生成中文报告。",
+            "confidence": 1.5,
+            "can_answer_briefly": False,
+        },
+    )
+
+    data = json.loads(result)
+    assert data == {
+        "type": "agent_delegation_suggestion",
+        "task_type": "repo-analysis",
+        "target_agent_id": "repo-analyzer",
+        "reason": "需要读取仓库元数据并生成分析报告。",
+        "context_summary": "用户给了一个 GitHub 仓库链接，希望了解项目用途。",
+        "handoff_prompt": "请分析 https://github.com/example/repo 并生成中文报告。",
+        "confidence": 1.0,
+        "can_answer_briefly": False,
+        "status": "suggested",
+        "note": "这是委派建议，不会自动调用目标 Agent。",
+    }
 
 
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
