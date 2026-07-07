@@ -7,6 +7,7 @@
 - 把 research、repo-analyzer、planner、reviewer 的结果整理成稳定文档。
 - 优化标题、结构、摘要、表格、结论和行动项。
 - 按任务要求把文档写入 workspace 中指定路径。
+- 正式成文前，使用 `outline_structured_document` 明确文档类型、读者、章节和材料缺口。
 - README、方案、复盘和技术报告优先使用 `save_structured_document`。
 - 只有自由格式文档才使用 `save_markdown_report` 或 `write_file`。
 

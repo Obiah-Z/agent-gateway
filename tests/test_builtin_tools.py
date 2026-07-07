@@ -207,6 +207,32 @@ def test_save_structured_document_writes_technical_report(tmp_path: Path) -> Non
     assert "## 结论\n- Redis 适合做轻量协调层" in content
 
 
+def test_outline_structured_document_reports_sections_and_material_gaps(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "outline_structured_document",
+        {
+            "title": "Gateway README 重构",
+            "document_type": "readme",
+            "target_audience": "新接触项目的开发者",
+            "source_material_summary": "已有部署方式和架构说明。",
+            "missing_materials": ["缺少端口表", "缺少健康检查说明"],
+            "tone": "正式、清晰",
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "document_outline"
+    assert data["document_type"] == "readme"
+    assert data["readiness"] == "needs_material"
+    assert data["recommended_tool"] == "save_structured_document"
+    assert "架构预览" in data["sections"]
+    assert data["missing_materials"] == ["缺少端口表", "缺少健康检查说明"]
+    assert data["next_steps"][0] == "补齐缺失材料后再成文。"
+
+
 def test_save_structured_document_writes_retrospective(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

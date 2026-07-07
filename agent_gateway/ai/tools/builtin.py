@@ -478,6 +478,59 @@ def register_builtin_tools(
             file_name=file_name or title,
         )
 
+    def outline_structured_document(
+        title: str,
+        document_type: str,
+        target_audience: str = "",
+        source_material_summary: str = "",
+        required_sections: list[str] | None = None,
+        missing_materials: list[str] | None = None,
+        tone: str = "正式、清晰",
+    ) -> str:
+        """生成文档写作前的大纲和材料缺口检查。"""
+
+        normalized_type = _normalize_document_type(document_type)
+        default_sections = {
+            "readme": ["项目简介", "核心能力", "架构预览", "快速开始", "配置说明", "运行与部署", "限制与注意事项"],
+            "proposal": ["摘要", "背景", "目标", "方案", "实施计划", "风险与限制", "下一步"],
+            "retrospective": ["摘要", "完成情况", "问题与卡点", "经验沉淀", "后续行动"],
+            "technical-report": ["摘要", "背景", "技术分析", "权衡取舍", "结论", "风险与限制", "下一步"],
+        }
+        sections = _clean_strings(required_sections) or default_sections.get(
+            normalized_type,
+            ["摘要", "背景", "主要内容", "结论", "下一步"],
+        )
+        missing = _clean_strings(missing_materials)
+        readiness = "ready" if not missing and source_material_summary.strip() else "needs_material"
+        if not title.strip() or not normalized_type:
+            readiness = "blocked"
+        recommended_tool = (
+            "save_structured_document"
+            if normalized_type in {"readme", "proposal", "retrospective", "technical-report"}
+            else "save_markdown_report"
+        )
+        return json.dumps(
+            {
+                "type": "document_outline",
+                "title": title.strip(),
+                "document_type": normalized_type,
+                "target_audience": target_audience.strip(),
+                "tone": tone.strip(),
+                "source_material_summary": source_material_summary.strip(),
+                "sections": sections,
+                "missing_materials": missing,
+                "readiness": readiness,
+                "recommended_tool": recommended_tool,
+                "next_steps": (
+                    ["补齐缺失材料后再成文。", *missing[:4]]
+                    if readiness == "needs_material"
+                    else [f"按大纲成文，并使用 {recommended_tool} 落盘。"]
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def suggest_agent_delegation(
         task_type: str,
         target_agent_id: str,
@@ -913,6 +966,30 @@ def register_builtin_tools(
             },
             handler=save_structured_document,
             tags=("filesystem", "write", "report", "document"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="outline_structured_document",
+            description=(
+                "Create a writing outline and material gap check before saving "
+                "a structured document."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title", "document_type"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "document_type": {"type": "string"},
+                    "target_audience": {"type": "string"},
+                    "source_material_summary": {"type": "string"},
+                    "required_sections": {"type": "array", "items": {"type": "string"}},
+                    "missing_materials": {"type": "array", "items": {"type": "string"}},
+                    "tone": {"type": "string"},
+                },
+            },
+            handler=outline_structured_document,
+            tags=("document", "outline", "write-planning"),
         )
     )
     registry.register(

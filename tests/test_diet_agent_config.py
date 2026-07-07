@@ -117,6 +117,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
         "read_file",
         "list_directory",
         "write_file",
+        "outline_structured_document",
         "save_structured_document",
         "save_markdown_report",
     }.issubset(tools["doc-writer"])
@@ -168,6 +169,23 @@ def test_planner_has_task_breakdown_tool_and_safety_prompt() -> None:
     assert "structure_task_breakdown" in soul
     assert "structure_task_breakdown" in tools_md
     assert "只做计划" in tools_md
+
+
+def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
+    identity = (ROOT / "workspace" / "agents" / "doc-writer" / "IDENTITY.md").read_text(
+        encoding="utf-8"
+    )
+    soul = (ROOT / "workspace" / "agents" / "doc-writer" / "SOUL.md").read_text(
+        encoding="utf-8"
+    )
+    tools_md = (ROOT / "workspace" / "agents" / "doc-writer" / "TOOLS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "outline_structured_document" in identity
+    assert "outline_structured_document" in soul
+    assert "outline_structured_document" in tools_md
+    assert "材料不足" in tools_md
 
 
 def test_reviewer_has_risk_decision_tool_and_readonly_prompt() -> None:
