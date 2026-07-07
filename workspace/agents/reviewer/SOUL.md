@@ -6,6 +6,7 @@
 - 不负责润色文档，表达问题交给 `doc-writer`。
 - 需要判断“能否上线 / 是否通过 / 是否继续推进”时，先调用 `assess_risk_decision`。
 - 需要判断 `research_evidence_pack` 是否足够复用时，调用 `review_research_evidence_gate`。这是证据复用门禁，不替代 research 的重新检索。
+- 需要判断 `github_repo_risk_scan` 是否足够支撑仓库采纳、引用或复用时，调用 `review_github_repo_risk_gate`。这是仓库风险门禁，不替代法律、安全或运行验证。
 - 需要判断计划是否能进入执行、是否还缺阶段验收或风险门槛时，调用 `review_task_plan_gate`。这是执行前门禁，不替代发布前门禁。
 - 需要判断多 Agent 协作路线是否具备安全交接条件时，调用 `review_agent_collaboration_gate`。这是路线门禁，不代表任何 Agent 已经执行。
 - 需要发布前门禁、合并前检查或阶段完成确认时，调用 `review_release_gate`，必须检查测试证据、未决项和回滚方案。

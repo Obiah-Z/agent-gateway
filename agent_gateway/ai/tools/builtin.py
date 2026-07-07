@@ -1109,6 +1109,140 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def review_github_repo_risk_gate(
+        risk_scan_json: str = "",
+        review_target: str = "",
+        intended_action: str = "",
+        require_license_clear: bool = True,
+    ) -> str:
+        """审查 GitHub 仓库风险扫描是否足够支撑采纳或复用决策。"""
+
+        scan: dict[str, Any] = {}
+        if risk_scan_json.strip():
+            parsed = json.loads(risk_scan_json)
+            if not isinstance(parsed, dict):
+                return "Error: risk_scan_json must be a JSON object"
+            scan = parsed
+        if scan and scan.get("type") != "github_repo_risk_scan":
+            return "Error: risk_scan_json type must be github_repo_risk_scan"
+
+        target = review_target.strip() or str(scan.get("repository") or "").strip()
+        risk_items = [item for item in scan.get("risk_items") or [] if isinstance(item, dict)]
+        summary = scan.get("summary") if isinstance(scan.get("summary"), dict) else {}
+        license_id = str(summary.get("license") or "").strip().lower()
+        risk_level = str(scan.get("risk_level") or "").strip().lower()
+        source_decision = str(scan.get("decision") or "").strip().lower()
+        next_actions = _clean_strings(
+            scan.get("next_actions") if isinstance(scan.get("next_actions"), list) else []
+        )
+        high_or_critical = 0
+        medium_count = 0
+        license_blocked = False
+        archived = bool(summary.get("archived"))
+        normalized_risks = []
+
+        for item in risk_items:
+            severity = _normalize_severity(str(item.get("severity") or ""))
+            area = str(item.get("area") or "unknown").strip()
+            issue = str(item.get("issue") or "未说明风险项").strip()
+            impact = str(item.get("impact") or "待评估").strip()
+            mitigation = str(item.get("mitigation") or "补充缓解措施。").strip()
+            if severity in {"critical", "high"}:
+                high_or_critical += 1
+            if severity == "medium":
+                medium_count += 1
+            if area == "license" and require_license_clear:
+                license_blocked = True
+            normalized_risks.append(
+                {
+                    "severity": severity,
+                    "area": area,
+                    "issue": issue,
+                    "impact": impact,
+                    "mitigation": mitigation,
+                }
+            )
+
+        checklist = [
+            {
+                "item": "风险扫描类型正确",
+                "passed": bool(scan) and scan.get("type") == "github_repo_risk_scan",
+                "evidence": str(scan.get("type") or "缺少 github_repo_risk_scan。"),
+            },
+            {
+                "item": "仓库和用途已明确",
+                "passed": bool(target)
+                and bool(str(scan.get("intended_use") or intended_action).strip()),
+                "evidence": (
+                    f"{target or '缺少仓库'}；用途："
+                    f"{scan.get('intended_use') or intended_action or '未说明'}"
+                ),
+            },
+            {
+                "item": "许可证风险可接受",
+                "passed": (not require_license_clear)
+                or (bool(license_id) and license_id != "unknown" and not license_blocked),
+                "evidence": license_id or "unknown",
+            },
+            {
+                "item": "维护状态可接受",
+                "passed": not archived,
+                "evidence": "仓库已归档。" if archived else "仓库未标记为归档。",
+            },
+            {
+                "item": "无高危阻塞风险",
+                "passed": high_or_critical == 0 and risk_level not in {"critical", "high"},
+                "evidence": f"高危风险数：{high_or_critical}；risk_level={risk_level or 'unknown'}。",
+            },
+            {
+                "item": "缓解动作已给出",
+                "passed": bool(next_actions) and all(risk.get("mitigation") for risk in normalized_risks),
+                "evidence": "；".join(next_actions[:3]) if next_actions else "缺少 next_actions。",
+            },
+        ]
+
+        failed = [item for item in checklist if not item["passed"]]
+        if license_blocked or archived or high_or_critical > 0 or source_decision in {"hold", "block"}:
+            decision = "no-go"
+        elif failed or medium_count > 0 or source_decision in {"conditional", "watch"}:
+            decision = "conditional-go"
+        else:
+            decision = "go"
+
+        remediation = []
+        for item in failed:
+            if item["item"] == "仓库和用途已明确":
+                remediation.append(
+                    "补充 intended_use，明确是学习、引用文档、复用代码还是作为运行依赖。"
+                )
+            elif item["item"] == "许可证风险可接受":
+                remediation.append("人工复核 LICENSE、README 授权说明或联系作者后再复用。")
+            elif item["item"] == "维护状态可接受":
+                remediation.append("归档仓库只作为设计参考；如需采用，先寻找活跃 fork 或替代实现。")
+            elif item["item"] == "无高危阻塞风险":
+                remediation.append("先处理高危风险，未缓解前不要进入采纳或复用。")
+            elif item["item"] == "缓解动作已给出":
+                remediation.append("为每个风险项补充可执行缓解动作和人工确认点。")
+        remediation.extend(next_actions[:3])
+        if not remediation:
+            remediation.append("风险扫描可进入下一阶段，但仍需保留来源和人工复核记录。")
+
+        return json.dumps(
+            {
+                "type": "github_repo_risk_gate_review",
+                "review_target": target,
+                "intended_action": str(scan.get("intended_use") or intended_action).strip(),
+                "source_decision": source_decision or "unknown",
+                "decision": decision,
+                "checklist": checklist,
+                "risks": normalized_risks[:12],
+                "next_actions": list(dict.fromkeys(remediation))[:8],
+                "note": "这是仓库风险扫描门禁审查，不代表已经完成法律、安全或运行验证。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -3198,6 +3332,36 @@ def register_builtin_tools(
             },
             handler=review_research_evidence_gate,
             tags=("review", "research", "evidence", "gate", "risk"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="review_github_repo_risk_gate",
+            description=(
+                "Review whether a github_repo_risk_scan is acceptable for repository "
+                "adoption or reuse: license, maintenance, high-risk blockers, "
+                "mitigations, and go/conditional-go/no-go decision."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "risk_scan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_risk_scan.",
+                    },
+                    "review_target": {"type": "string"},
+                    "intended_action": {
+                        "type": "string",
+                        "description": "Fallback intended use if the scan does not include intended_use.",
+                    },
+                    "require_license_clear": {
+                        "type": "boolean",
+                        "description": "Whether unknown or blocked license risk should fail the gate.",
+                    },
+                },
+            },
+            handler=review_github_repo_risk_gate,
+            tags=("review", "github", "repository", "gate", "risk"),
         )
     )
     registry.register(

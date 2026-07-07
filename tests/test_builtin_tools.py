@@ -589,6 +589,48 @@ def test_review_research_evidence_gate_blocks_weak_pack(tmp_path: Path) -> None:
     assert "补充检索日期、发布时间或最后更新时间。" in data["next_actions"]
 
 
+def test_review_github_repo_risk_gate_blocks_unclear_license(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    risk_scan = {
+        "type": "github_repo_risk_scan",
+        "repository": "demo/risky",
+        "intended_use": "复用提示词模板",
+        "risk_level": "high",
+        "decision": "hold",
+        "risk_items": [
+            {
+                "severity": "high",
+                "area": "license",
+                "issue": "许可证缺失或未识别。",
+                "impact": "复用边界不清晰。",
+                "mitigation": "复用前人工确认 LICENSE。",
+            }
+        ],
+        "summary": {
+            "license": "unknown",
+            "archived": False,
+            "open_issues": 1,
+            "stars": 20,
+        },
+        "next_actions": ["复核许可证和 README。"],
+    }
+
+    data = json.loads(
+        registry.dispatch(
+            "review_github_repo_risk_gate",
+            {"risk_scan_json": json.dumps(risk_scan, ensure_ascii=False)},
+        )
+    )
+
+    assert data["type"] == "github_repo_risk_gate_review"
+    assert data["review_target"] == "demo/risky"
+    assert data["decision"] == "no-go"
+    assert data["source_decision"] == "hold"
+    assert any(not item["passed"] for item in data["checklist"])
+    assert "人工复核 LICENSE、README 授权说明或联系作者后再复用。" in data["next_actions"]
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
