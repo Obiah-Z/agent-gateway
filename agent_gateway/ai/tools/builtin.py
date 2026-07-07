@@ -113,6 +113,30 @@ def _normalize_document_type(value: str) -> str:
     return aliases.get(document_type, document_type)
 
 
+def _extract_markdown_section(content: str, heading: str) -> str:
+    """从 Markdown 中提取指定二级标题下的内容。"""
+
+    pattern = re.compile(rf"^##\s+{re.escape(heading)}\s*$", re.MULTILINE)
+    match = pattern.search(content)
+    if not match:
+        return ""
+    start = match.end()
+    next_heading = re.search(r"^##\s+", content[start:], re.MULTILINE)
+    end = start + next_heading.start() if next_heading else len(content)
+    return content[start:end].strip()
+
+
+def _extract_markdown_list_items(section: str) -> list[str]:
+    """从 Markdown 章节中提取一层列表项。"""
+
+    items: list[str] = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            items.append(stripped[2:].strip())
+    return items
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
@@ -344,6 +368,54 @@ def register_builtin_tools(
             "note": "这是委派建议，不会自动调用目标 Agent。",
         }
         return json.dumps(suggestion, ensure_ascii=False, indent=2)
+
+    def list_agent_capabilities(
+        include_tools: bool = False,
+        agent_ids: list[str] | None = None,
+    ) -> str:
+        """读取当前配置中的 Agent 能力目录，供入口 Agent 做委派判断。"""
+
+        config_path = workspace_root.parent / "config" / "agents.json"
+        if not config_path.exists():
+            return "Error: config/agents.json not found"
+
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        wanted = {agent_id.strip() for agent_id in agent_ids or [] if agent_id.strip()}
+        capabilities = []
+        for agent in data.get("agents", []):
+            agent_id = str(agent.get("id", "")).strip()
+            if wanted and agent_id not in wanted:
+                continue
+            prompt_dir = str(agent.get("prompt_policy", {}).get("prompt_dir", "")).strip()
+            identity_path = workspace_root / prompt_dir / "IDENTITY.md" if prompt_dir else None
+            identity = ""
+            if identity_path and identity_path.exists():
+                identity = identity_path.read_text(encoding="utf-8")
+            duties = _extract_markdown_list_items(_extract_markdown_section(identity, "职责"))
+            handoff_inputs = _extract_markdown_list_items(
+                _extract_markdown_section(identity, "委派输入")
+            )
+            row = {
+                "id": agent_id,
+                "name": agent.get("name", ""),
+                "personality": agent.get("personality", ""),
+                "prompt_dir": prompt_dir,
+                "duties": duties[:8],
+                "handoff_inputs": handoff_inputs[:8],
+            }
+            if include_tools:
+                row["tools"] = agent.get("tool_policy", {}).get("tool_names", [])
+            capabilities.append(row)
+
+        return json.dumps(
+            {
+                "type": "agent_capability_catalog",
+                "count": len(capabilities),
+                "agents": capabilities,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     def list_directory(directory: str = ".") -> str:
         """列出 workspace 子目录内容。"""
@@ -589,6 +661,31 @@ def register_builtin_tools(
             },
             handler=suggest_agent_delegation,
             tags=("agent", "delegation", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="list_agent_capabilities",
+            description=(
+                "List configured agent capabilities and handoff input fields "
+                "from config/agents.json and workspace/agents/* prompts."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "include_tools": {
+                        "type": "boolean",
+                        "description": "Whether to include each agent's allowed tool names.",
+                    },
+                    "agent_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional agent ids to filter.",
+                    },
+                },
+            },
+            handler=list_agent_capabilities,
+            tags=("agent", "catalog", "routing"),
         )
     )
     registry.register(

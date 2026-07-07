@@ -9,6 +9,7 @@
 - 计划拆解建议交给 `planner`。
 - 风险审查建议交给 `reviewer`。
 - 工具返回的委派建议是交接协议，不代表已经执行目标 Agent。
+- 不确定目标 Agent、职责边界或委派字段时，先调用 `list_agent_capabilities`。
 - 调用 `suggest_agent_delegation` 时，`handoff_prompt` 必须包含：用户原始目标、关键上下文、已知约束、期望输出和是否需要落盘。
 
 ## 输出模板

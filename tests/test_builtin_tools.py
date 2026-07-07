@@ -221,6 +221,67 @@ def test_suggest_agent_delegation_outputs_structured_json(tmp_path: Path) -> Non
     }
 
 
+def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config = tmp_path / "config"
+    agent_dir = workspace / "agents" / "planner"
+    agent_dir.mkdir(parents=True)
+    config.mkdir()
+    (agent_dir / "IDENTITY.md").write_text(
+        "\n".join(
+            [
+                "# 计划拆解 Agent",
+                "",
+                "## 职责",
+                "",
+                "- 明确目标、边界、依赖和风险。",
+                "- 拆成阶段任务。",
+                "",
+                "## 委派输入",
+                "",
+                "- `goal`：用户最终想达成的结果。",
+                "- `constraints`：时间、环境、权限或风险。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config / "agents.json").write_text(
+        json.dumps(
+            {
+                "agents": [
+                    {
+                        "id": "planner",
+                        "name": "TaskPlanner",
+                        "personality": "清晰",
+                        "tool_policy": {"tool_names": ["save_task_plan"]},
+                        "prompt_policy": {"prompt_dir": "agents/planner"},
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = ToolRegistry()
+    register_builtin_tools(registry, workspace)
+
+    result = registry.dispatch(
+        "list_agent_capabilities",
+        {"include_tools": True, "agent_ids": ["planner"]},
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "agent_capability_catalog"
+    assert data["count"] == 1
+    assert data["agents"][0]["id"] == "planner"
+    assert data["agents"][0]["duties"] == ["明确目标、边界、依赖和风险。", "拆成阶段任务。"]
+    assert data["agents"][0]["handoff_inputs"] == [
+        "`goal`：用户最终想达成的结果。",
+        "`constraints`：时间、环境、权限或风险。",
+    ]
+    assert data["agents"][0]["tools"] == ["save_task_plan"]
+
+
 def test_bash_rewrites_host_workspace_absolute_path(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

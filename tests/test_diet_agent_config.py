@@ -153,6 +153,7 @@ def test_entry_agents_require_structured_handoff_prompt() -> None:
             encoding="utf-8"
         )
         assert "suggest_agent_delegation" in soul
+        assert "list_agent_capabilities" in soul
         assert "handoff_prompt" in soul
         assert "用户原始目标" in soul
         assert "期望输出" in soul
@@ -164,6 +165,8 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
 
     assert "suggest_agent_delegation" in tools["feishu-entry"]
     assert "suggest_agent_delegation" in tools["wework-entry"]
+    assert "list_agent_capabilities" in tools["feishu-entry"]
+    assert "list_agent_capabilities" in tools["wework-entry"]
     for agent_id in {
         "repo-analyzer",
         "doc-writer",
@@ -173,6 +176,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         AGENT_ID,
     }:
         assert "suggest_agent_delegation" not in tools[agent_id]
+        assert "list_agent_capabilities" not in tools[agent_id]
 
 
 def test_personal_secretary_has_structured_personal_tools() -> None:

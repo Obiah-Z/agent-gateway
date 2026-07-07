@@ -72,6 +72,7 @@
           "memory_search",
           "web_search",
           "fetch_url",
+          "list_agent_capabilities",
           "suggest_agent_delegation"
         ]
       },
@@ -100,6 +101,7 @@
           "memory_search",
           "web_search",
           "fetch_url",
+          "list_agent_capabilities",
           "suggest_agent_delegation"
         ]
       },
