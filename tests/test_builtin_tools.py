@@ -2215,6 +2215,124 @@ def test_prepare_entry_route_response_builds_research_option_validation_reply(
     assert data["handoff_prompt"] == ""
 
 
+def test_prepare_entry_route_response_formats_agent_capability_catalog(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    config = tmp_path / "config"
+    agent_dir = workspace / "agents" / "doc-writer"
+    agent_dir.mkdir(parents=True)
+    config.mkdir()
+    (agent_dir / "IDENTITY.md").write_text(
+        "\n".join(
+            [
+                "# 文档整理 Agent",
+                "",
+                "## 职责",
+                "",
+                "- 生成 README、报告、手册和 Markdown 文档。",
+                "- 整理已有材料。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config / "agents.json").write_text(
+        json.dumps(
+            {
+                "agents": [
+                    {
+                        "id": "doc-writer",
+                        "name": "DocWriter",
+                        "personality": "正式、清晰",
+                        "tool_policy": {"tool_names": ["save_markdown_report"]},
+                        "prompt_policy": {"prompt_dir": "agents/doc-writer"},
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = ToolRegistry()
+    register_builtin_tools(registry, workspace)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {"user_text": "当前系统有哪些 Agent？每个 Agent 能做什么？"},
+        )
+    )
+
+    assert data["type"] == "entry_route_preparation"
+    assert data["classification"]["intent"] == "agent-capabilities"
+    assert data["capability_catalog"]["count"] == 1
+    assert data["capability_match"] is None
+    assert data["collaboration_plan"] is None
+    assert "# Agent 能力目录" in data["formatted_response"]
+    assert "doc-writer" in data["formatted_response"]
+    assert data["handoff_prompt"] == ""
+
+
+def test_prepare_entry_route_response_matches_agent_capability(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    config = tmp_path / "config"
+    doc_dir = workspace / "agents" / "doc-writer"
+    ops_dir = workspace / "agents" / "ops"
+    doc_dir.mkdir(parents=True)
+    ops_dir.mkdir(parents=True)
+    config.mkdir()
+    (doc_dir / "IDENTITY.md").write_text(
+        "\n".join(["# 文档整理 Agent", "", "## 职责", "", "- 生成 Markdown 报告和项目文档。"]),
+        encoding="utf-8",
+    )
+    (ops_dir / "IDENTITY.md").write_text(
+        "\n".join(["# 运维 Agent", "", "## 职责", "", "- 查看 Docker、日志和运行状态。"]),
+        encoding="utf-8",
+    )
+    (config / "agents.json").write_text(
+        json.dumps(
+            {
+                "agents": [
+                    {
+                        "id": "doc-writer",
+                        "name": "DocWriter",
+                        "personality": "正式、清晰",
+                        "tool_policy": {"tool_names": ["save_markdown_report"]},
+                        "prompt_policy": {"prompt_dir": "agents/doc-writer"},
+                    },
+                    {
+                        "id": "ops",
+                        "name": "GatewayOps",
+                        "personality": "只读排障",
+                        "tool_policy": {"tool_names": ["ops_readonly_health"]},
+                        "prompt_policy": {"prompt_dir": "agents/ops"},
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = ToolRegistry()
+    register_builtin_tools(registry, workspace)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {"user_text": "把已有材料整理成 Markdown 报告，这个任务交给谁处理？"},
+        )
+    )
+
+    assert data["classification"]["intent"] == "agent-capabilities"
+    assert data["capability_catalog"]["count"] == 2
+    assert data["capability_match"]["recommended_agent_id"] == "doc-writer"
+    assert "# Agent 推荐" in data["formatted_response"]
+    assert "推荐 Agent：`doc-writer`" in data["formatted_response"]
+    assert "不代表目标 Agent 已经自动执行" in data["formatted_response"]
+
+
 def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"

@@ -3648,6 +3648,8 @@ def register_builtin_tools(
 
         def intent_score(row: dict[str, Any]) -> int:
             score_value = _keyword_score(normalized, row["keywords"])
+            if row.get("intent") == "agent-capabilities" and score_value > 0:
+                return score_value + 5
             if row.get("intent") == "repo-adoption":
                 has_repo = _keyword_score(normalized, repo_triggers) > 0
                 has_adoption = _keyword_score(normalized, adoption_triggers) > 0
@@ -4161,6 +4163,9 @@ def register_builtin_tools(
         constraints_clean = _clean_strings(constraints)
         collaboration_plan_json = ""
         handoff_prompt = ""
+        capability_catalog_json = ""
+        capability_match_json = ""
+        capability_response = ""
         if classification.get("requires_collaboration"):
             collaboration_plan_json = plan_agent_collaboration(
                 user_goal=goal,
@@ -4169,6 +4174,34 @@ def register_builtin_tools(
                 expected_output=expected_output,
                 should_persist=should_persist,
             )
+        elif classification.get("intent") == "agent-capabilities":
+            capability_catalog_json = list_agent_capabilities(include_tools=False)
+            wants_match = any(
+                marker in goal.lower()
+                for marker in (
+                    "交给谁",
+                    "谁处理",
+                    "谁来处理",
+                    "适合哪个",
+                    "推荐哪个",
+                    "which agent",
+                    "recommend",
+                )
+            )
+            if wants_match:
+                capability_match_json = match_agent_capability(
+                    user_goal=goal,
+                    catalog_json=capability_catalog_json,
+                )
+                capability_response = format_agent_capability_match(
+                    match_json=capability_match_json,
+                    include_alternatives=True,
+                )
+            else:
+                capability_response = format_agent_capability_catalog(
+                    catalog_json=capability_catalog_json,
+                    include_tools=False,
+                )
         elif classification.get("recommended_agent_id") not in {"", "main"}:
             handoff_prompt = build_agent_handoff_prompt(
                 user_goal=goal,
@@ -4191,7 +4224,7 @@ def register_builtin_tools(
             collaboration_plan_json=collaboration_plan_json,
             next_step=str(classification.get("suggested_next_step") or ""),
         )
-        formatted_response = format_entry_response(
+        formatted_response = capability_response or format_entry_response(
             intent=str(classification.get("intent") or "unknown"),
             recommended_agent_id=str(classification.get("recommended_agent_id") or "main"),
             reason=str(classification.get("reason") or ""),
@@ -4209,6 +4242,8 @@ def register_builtin_tools(
                 "type": "entry_route_preparation",
                 "classification": classification,
                 "collaboration_plan": json.loads(collaboration_plan_json) if collaboration_plan_json else None,
+                "capability_catalog": json.loads(capability_catalog_json) if capability_catalog_json else None,
+                "capability_match": json.loads(capability_match_json) if capability_match_json else None,
                 "route_explanation": json.loads(route_explanation_json),
                 "handoff_prompt": handoff_prompt,
                 "formatted_response": formatted_response,

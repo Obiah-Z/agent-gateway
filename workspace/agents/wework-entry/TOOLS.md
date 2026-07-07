@@ -6,6 +6,8 @@
 
 如果用户只需要入口层判断、协作路线和下一步说明，优先调用 `prepare_entry_route_response`。该工具会输出可直接回复用户的 `formatted_response`，但不会自动执行目标 Agent。
 
+用户询问 Agent 能力目录或某个任务该交给谁时，也可以优先调用 `prepare_entry_route_response`，读取其中的 `capability_catalog`、可选 `capability_match` 和 `formatted_response`。
+
 不确定当前有哪些协作路线、别名或阶段顺序时，先调用 `list_agent_collaboration_routes` 查询路线目录。
 
 如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
