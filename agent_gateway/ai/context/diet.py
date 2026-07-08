@@ -1549,6 +1549,69 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         row = diet_store.generate_plan(scope, plan_date=plan_date)
         return _json({"status": "ok", "plan": row})
 
+    def format_diet_plan(plan_json: str) -> str:
+        if not plan_json.strip():
+            return "Error: plan_json is required"
+        data = json.loads(plan_json)
+        if not isinstance(data, dict):
+            return "Error: plan_json must be a JSON object"
+        plan = data.get("plan") if isinstance(data.get("plan"), dict) else data
+        if not isinstance(plan, dict):
+            return "Error: plan_json must contain a plan object"
+        if not {"plan_date", "target_calories", "meals", "generated_reason"}.issubset(plan):
+            return "Error: plan_json must be a diet_plan_generate object"
+
+        meals = plan.get("meals") if isinstance(plan.get("meals"), dict) else {}
+        meal_labels = {
+            "breakfast": "早餐",
+            "lunch": "午餐",
+            "dinner": "晚餐",
+            "snack": "加餐",
+        }
+        meal_lines = []
+        for meal_key, label in meal_labels.items():
+            suggestions = meals.get(meal_key)
+            if not isinstance(suggestions, list):
+                suggestions = []
+            cleaned = [str(item).strip() for item in suggestions if str(item).strip()]
+            if cleaned:
+                meal_lines.append(f"- {label}：" + "；".join(cleaned[:3]))
+            else:
+                meal_lines.append(f"- {label}：暂无建议")
+
+        metadata = plan.get("metadata") if isinstance(plan.get("metadata"), dict) else {}
+        adjustment = (
+            metadata.get("adjustment")
+            if isinstance(metadata.get("adjustment"), dict)
+            else {}
+        )
+        adjustment_lines = []
+        if adjustment.get("breakfast_simple"):
+            adjustment_lines.append("- 早餐：近期早餐可能不稳定，优先固定简单早餐。")
+        if adjustment.get("protein_focus"):
+            adjustment_lines.append("- 蛋白质：近期蛋白质偏低，午餐和加餐优先补蛋白。")
+        if adjustment.get("lighter_dinner"):
+            adjustment_lines.append("- 晚餐：近期晚餐偏重，今天晚餐降低油脂和重口味。")
+
+        sections = [
+            "## 今日饮食计划",
+            f"- 日期：{plan.get('plan_date') or '待确认'}",
+            f"- 目标热量：约 {_as_float(plan.get('target_calories')):.0f} kcal",
+            f"- 生成原因：{plan.get('generated_reason') or '基于当前档案和保守减脂原则生成。'}",
+            "",
+            "## 餐次建议",
+            "\n".join(meal_lines),
+            "",
+            "## 调整重点",
+            "\n".join(adjustment_lines) if adjustment_lines else "- 暂无额外调整，按基础计划执行。",
+            "",
+            "## 采购准备",
+            f"- {plan.get('shopping_tips') or '优先准备高蛋白、蔬菜和低糖水果。'}",
+            "",
+            "> 边界：这是当天饮食计划，会保存计划记录，但不会自动补记餐食、体重或执行结果。",
+        ]
+        return "\n".join(sections).strip()
+
     def weight_log_add(
         *,
         weight_kg: float,
@@ -2293,6 +2356,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_plan_generate,
             tags=("diet", "plan", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_plan",
+            description=(
+                "Format a diet_plan_generate JSON object into a concise Chinese "
+                "Markdown daily diet plan for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["plan_json"],
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_plan_generate.",
+                    },
+                },
+            },
+            handler=format_diet_plan,
+            tags=("diet", "plan", "format", "user-facing"),
         )
     )
     registry.register(

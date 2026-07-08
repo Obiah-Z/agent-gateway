@@ -171,6 +171,44 @@ def test_diet_plan_adjusts_for_low_protein_and_missing_breakfast(tmp_path: Path)
     assert "双蛋白" in plan["meals"]["lunch"][0]
 
 
+def test_format_diet_plan_outputs_user_facing_daily_plan(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    for day in range(1, 7):
+        registry.dispatch(
+            "meal_log_add",
+            {
+                "meal_date": f"2026-07-0{day}",
+                "meal_type": "lunch" if day % 2 else "dinner",
+                "raw_text": "普通简餐",
+                "estimated_calories": 520,
+                "protein_g": 12,
+            },
+            runtime_context=context,
+        )
+    plan_json = registry.dispatch(
+        "diet_plan_generate",
+        {"plan_date": "2026-07-07"},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_plan", {"plan_json": plan_json})
+
+    assert "## 今日饮食计划" in formatted
+    assert "- 日期：2026-07-07" in formatted
+    assert "- 目标热量：约" in formatted
+    assert "## 餐次建议" in formatted
+    assert "- 早餐：固定早餐" in formatted
+    assert "- 午餐：优先选双蛋白" in formatted
+    assert "## 调整重点" in formatted
+    assert "蛋白质：近期蛋白质偏低" in formatted
+    assert "## 采购准备" in formatted
+    assert "不会自动补记餐食、体重或执行结果" in formatted
+
+
 def test_diet_today_status_reports_meals_plan_weight_and_flags(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     scope = "user:wework:diet"
