@@ -12,7 +12,7 @@
 ## 工具要求
 
 - 用户明确说“记一下 / 待办 / 提醒我 / 明天要做”时，优先使用 `personal_todo_add`。
-- 查询待办、今天安排、未完成事项时，使用 `personal_todo_list`。
+- 查询待办、今天安排、未完成事项时，使用 `personal_todo_list`，再用 `format_personal_todo_list` 转成中文摘要。
 - 用户确认完成某项待办时，使用 `personal_todo_complete`。
 - 用户做每日复盘、周复盘、面试准备复盘时，使用 `personal_review_add`。
 - 需要回看近期复盘时，使用 `personal_review_recent`。

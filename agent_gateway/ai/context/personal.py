@@ -967,6 +967,49 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps({"items": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
 
+    def format_personal_todo_list(todo_list_json: str) -> str:
+        if not todo_list_json.strip():
+            return "Error: todo_list_json is required"
+        data = json.loads(todo_list_json)
+        if not isinstance(data, dict):
+            return "Error: todo_list_json must be a JSON object"
+        items = data.get("items")
+        if not isinstance(items, list):
+            return "Error: todo_list_json must contain an items list"
+
+        sorted_items = sorted(
+            [item for item in items if isinstance(item, dict)],
+            key=PersonalStore._todo_sort_key,
+        )
+        todo_lines = []
+        for index, item in enumerate(sorted_items[:12], start=1):
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            details = []
+            if item.get("status"):
+                details.append(f"状态：{item.get('status')}")
+            if item.get("priority"):
+                details.append(f"优先级：{item.get('priority')}")
+            if item.get("due_at"):
+                details.append(f"时间：{item.get('due_at')}")
+            notes = str(item.get("notes") or "").strip()
+            if notes:
+                details.append(f"备注：{notes}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            todo_lines.append(f"{index}. {title}{suffix}")
+
+        sections = [
+            "## 待办列表",
+            f"- 当前显示：{len(sorted_items)} 项",
+            "",
+            "## 明细",
+            "\n".join(todo_lines) if todo_lines else "暂无符合条件的待办。",
+            "",
+            "> 边界：这是待办查询结果，只读取结构化待办，不会自动新增、完成或修改待办。",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_todo_complete(
         todo_id: str,
         result: str = "",
@@ -1662,6 +1705,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_todo_list,
             tags=("personal", "todo", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_list",
+            description=(
+                "Format a personal_todo_list JSON object into a concise Chinese "
+                "Markdown todo list for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["todo_list_json"],
+                "properties": {
+                    "todo_list_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_list.",
+                    },
+                },
+            },
+            handler=format_personal_todo_list,
+            tags=("personal", "todo", "format", "user-facing"),
         )
     )
     registry.register(

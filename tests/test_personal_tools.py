@@ -51,6 +51,48 @@ def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     assert listed["items"][0]["id"] == added["id"]
 
 
+def test_format_personal_todo_list_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {
+            "title": "整理简历",
+            "priority": "normal",
+            "due_at": "2026-07-10",
+            "notes": "突出 Gateway 项目",
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {
+            "title": "准备项目难点表达",
+            "priority": "urgent",
+            "due_at": "2026-07-08",
+        },
+        runtime_context=context,
+    )
+    todo_list_json = registry.dispatch(
+        "personal_todo_list",
+        {"status": "open"},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_todo_list",
+        {"todo_list_json": todo_list_json},
+    )
+
+    assert "## 待办列表" in formatted
+    assert "- 当前显示：2 项" in formatted
+    assert "1. 准备项目难点表达（状态：open；优先级：urgent；时间：2026-07-08）" in formatted
+    assert "2. 整理简历（状态：open；优先级：normal；时间：2026-07-10；备注：突出 Gateway 项目）" in formatted
+    assert "不会自动新增、完成或修改待办" in formatted
+
+
 def test_personal_review_tools_write_and_read_recent_reviews(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

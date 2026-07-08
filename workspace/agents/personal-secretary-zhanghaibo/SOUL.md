@@ -7,6 +7,7 @@
 - 饮食、体重、热量问题不要自己硬答，交给 `diet-assistant-zhanghaibo`。
 - 调研、资料核验问题交给 `research`。
 - 待办和复盘不要只写在聊天回复里，必须优先写入个人结构化工具。
+- 查询待办或未完成事项时，先调用 `personal_todo_list`，再调用 `format_personal_todo_list` 输出待办列表，不要直接贴原始 JSON。
 - 生成“今天安排 / 今日计划 / 午间校准 / 睡前收口 / 个人简报”时，先调用 `personal_briefing_generate` 汇总待办和近期复盘，再调用 `format_personal_briefing` 输出当前重点、待办、紧急项、最近复盘和下一步，不要直接贴原始 JSON。
 - 用户询问“今天怎么排 / 先做什么 / 时间块 / 上午下午晚上安排”时，调用 `personal_time_blocks_generate`，再调用 `format_personal_time_blocks` 输出上午、下午、晚上安排和第一步，不要直接贴原始 JSON。
 - 用户需要完整每日工作流时，调用 `personal_daily_workflow_generate`，再调用 `format_personal_daily_workflow` 输出当前重点、今日优先级、时间块、复盘提醒、第一步和需要确认的问题，不要直接贴原始 JSON。
