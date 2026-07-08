@@ -1454,6 +1454,84 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             )
         return _json({"status": "ok", "profile": profile})
 
+    def diet_today_status(
+        date: str = "",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json({"status": "ok", "today_status": diet_store.today_status(scope, date=date)})
+
+    def format_diet_today_status(status_json: str) -> str:
+        if not status_json.strip():
+            return "Error: status_json is required"
+        data = json.loads(status_json)
+        if not isinstance(data, dict):
+            return "Error: status_json must be a JSON object"
+        status = data.get("today_status") if isinstance(data.get("today_status"), dict) else data
+        if not isinstance(status, dict) or "actual_calories" not in status:
+            return "Error: status_json must contain a diet today status object"
+
+        target = _as_float(status.get("target_calories"))
+        actual = _as_float(status.get("actual_calories"))
+        protein = _as_float(status.get("protein_g"))
+        remaining = target - actual if target else 0.0
+        calorie_state = "热量仍有空间" if remaining >= 0 else "热量已超出目标"
+        latest_weight = status.get("latest_weight") if isinstance(status.get("latest_weight"), dict) else {}
+        plan = status.get("plan") if isinstance(status.get("plan"), dict) else {}
+        trend = status.get("trend_7d") if isinstance(status.get("trend_7d"), dict) else {}
+
+        missing_meals = _clean_strings(_as_list(status.get("missing_meals")))
+        risk_flags = _clean_strings(_as_list(status.get("risk_flags")))
+        action_lines = []
+        if missing_meals:
+            action_lines.append("优先补齐未记录餐次：" + "、".join(missing_meals))
+        if not status.get("profile_complete"):
+            action_lines.append("饮食档案还不完整，先补身高、当前体重、目标体重或活动水平。")
+        if not plan:
+            action_lines.append("今天还没有饮食计划，如需安排可生成当天计划。")
+        if remaining < 0:
+            action_lines.append("后续餐次建议清淡控油，优先补蛋白和蔬菜。")
+        if not action_lines:
+            action_lines.append("继续按当前计划记录餐食和体重即可。")
+
+        weight_line = (
+            f"- 最新体重：{_as_float(latest_weight.get('weight_kg')):.1f} kg"
+            if latest_weight
+            else "- 最新体重：暂无记录"
+        )
+        plan_line = (
+            f"- 今日计划：已生成（目标约 {target:.0f} kcal）"
+            if plan
+            else "- 今日计划：暂无"
+        )
+
+        sections = [
+            "## 今日饮食状态",
+            f"- 日期：{status.get('date') or '今天'}",
+            f"- 热量：{actual:.0f} / {target:.0f} kcal（{calorie_state} {abs(remaining):.0f} kcal）"
+            if target
+            else f"- 热量：已记录约 {actual:.0f} kcal",
+            f"- 蛋白质：约 {protein:.0f}g",
+            f"- 餐食记录：{int(_as_float(status.get('meal_count')))} 条",
+            weight_line,
+            plan_line,
+            "",
+            "## 风险与缺口",
+            _markdown_bullets([*risk_flags, *[f"缺少 {meal}" for meal in missing_meals]]),
+            "",
+            "## 近 7 天概览",
+            f"- 平均热量：约 {_as_float(trend.get('average_calories')):.0f} kcal",
+            f"- 餐食记录：{int(_as_float(trend.get('meal_count')))} 条",
+            "",
+            "## 建议动作",
+            _markdown_bullets(action_lines),
+            "",
+            "> 边界：这是只读状态卡，只汇总已有餐食、体重、计划和趋势，不会自动补记餐食、写体重或生成新计划。",
+        ]
+        return "\n".join(sections).strip()
+
     def format_diet_profile(profile_json: str) -> str:
         if not profile_json.strip():
             return "Error: profile_json is required"
@@ -2631,6 +2709,45 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             input_schema={"type": "object", "properties": {"user_scope": {"type": "string"}}},
             handler=profile_get,
             tags=("diet", "profile", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_today_status",
+            description=(
+                "Read today's diet status, including calories, meals, latest weight, "
+                "plan, 7-day trend, missing meals, and risk flags without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "Optional YYYY-MM-DD date."},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_today_status,
+            tags=("diet", "status", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_today_status",
+            description=(
+                "Format a diet_today_status JSON object into a concise Chinese "
+                "Markdown daily diet status card for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["status_json"],
+                "properties": {
+                    "status_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_today_status.",
+                    },
+                },
+            },
+            handler=format_diet_today_status,
+            tags=("diet", "status", "format", "user-facing"),
         )
     )
     registry.register(

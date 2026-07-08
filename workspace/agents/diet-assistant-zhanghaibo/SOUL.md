@@ -32,6 +32,8 @@
 
 用户询问本周怎么吃、周饮食计划、本周减脂安排或这周饮食重点时，调用 `diet_weekly_plan_generate`，再调用 `format_diet_weekly_plan` 输出本周目标、趋势、重点、动作和每日规则，不要直接贴原始 JSON。该工具只生成周计划草稿，不会自动生成每日计划、写体重或补记餐食。
 
+用户询问今天饮食状态、今天吃得怎么样、今天还差什么或今天记录了什么时，调用 `diet_today_status`，再调用 `format_diet_today_status` 输出今日状态卡，不要直接贴原始 JSON。该工具只读已有记录，不会自动补记餐食、写体重或生成计划。
+
 用户一次性输入“吃了什么、体重、目标、忌口、明天怎么吃”等混合内容时，先调用 `diet_inbox_triage`，再调用 `format_diet_inbox_triage` 输出餐食候选、体重候选、档案/偏好候选和确认项。它只整理候选餐食、体重和档案更新，不会写入；确认餐次、热量估算和档案字段后，优先调用 `diet_inbox_commit` 批量写入明确餐食、体重和安全档案字段，再调用 `format_diet_inbox_commit` 输出写入确认。长期偏好候选仍需单独确认；确认写入长期记忆后必须调用 `format_memory_write` 输出中文确认，不要自动写 memory。
 
 用户询问已保存饮食偏好、忌口或长期饮食习惯时，先调用 `memory_search`，再调用 `format_memory_search` 输出中文摘要。

@@ -466,6 +466,45 @@ def test_diet_today_status_reports_meals_plan_weight_and_flags(tmp_path: Path) -
     assert "missing_meals" in status["risk_flags"]
 
 
+def test_format_diet_today_status_outputs_user_facing_status_card(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=100.0)
+    store.generate_plan("user:wework:diet", plan_date="2026-07-06")
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭一份",
+        estimated_calories=780,
+        protein_g=30,
+    )
+
+    status_json = registry.dispatch(
+        "diet_today_status",
+        {"date": "2026-07-06"},
+        runtime_context=context,
+    )
+    formatted = registry.dispatch(
+        "format_diet_today_status",
+        {"status_json": status_json},
+    )
+
+    assert "## 今日饮食状态" in formatted
+    assert "- 日期：2026-07-06" in formatted
+    assert "780 /" in formatted
+    assert "- 蛋白质：约 30g" in formatted
+    assert "- 餐食记录：1 条" in formatted
+    assert "- 最新体重：81.5 kg" in formatted
+    assert "- 今日计划：已生成" in formatted
+    assert "缺少 breakfast" in formatted
+    assert "优先补齐未记录餐次" in formatted
+    assert "不会自动补记餐食、写体重或生成新计划" in formatted
+
+
 def test_diet_progress_summary_reports_daily_trends(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     scope = "user:wework:diet"

@@ -243,6 +243,8 @@
           "get_current_time",
           "profile_get",
           "format_diet_profile",
+          "diet_today_status",
+          "format_diet_today_status",
           "profile_update",
           "format_diet_profile_update",
           "meal_log_add",
