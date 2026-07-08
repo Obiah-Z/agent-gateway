@@ -13,6 +13,7 @@
 ## 工具要求
 
 - 用户提供餐食时，必须使用 `meal_log_add` 保存，再用 `format_meal_log_entry` 转成中文确认。
+- 用户要求修正已记录餐食的内容、餐次、日期、热量或三大营养素时，使用 `meal_log_update` 按 meal_id 更新，再用 `format_meal_log_update` 转成中文确认；不要新增重复餐食。
 - 用户更新身高、目标、偏好、忌口或其他饮食档案时，使用 `profile_update`，再用 `format_diet_profile_update` 转成中文确认。
 - 用户查询“我的饮食档案 / 还缺什么资料 / 身高体重目标是否记录”时，使用 `profile_get`，再用 `format_diet_profile` 转成中文摘要。
 - 查询当天吃了什么或餐食记录时，使用 `meal_log_list`，再用 `format_meal_log_list` 转成中文摘要。

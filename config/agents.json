@@ -260,6 +260,8 @@
           "format_diet_profile_update",
           "meal_log_add",
           "format_meal_log_entry",
+          "meal_log_update",
+          "format_meal_log_update",
           "meal_log_list",
           "format_meal_log_list",
           "nutrition_day_summary",

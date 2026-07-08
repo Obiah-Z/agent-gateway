@@ -213,6 +213,62 @@ def test_format_meal_log_entry_outputs_user_facing_confirmation(tmp_path: Path) 
     assert store.list_meal_logs("user:wework:diet")[0]["raw_text"] == "鸡胸肉沙拉一份"
 
 
+def test_meal_log_update_corrects_existing_meal_without_duplicate(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+    meal = json.loads(
+        registry.dispatch(
+            "meal_log_add",
+            {
+                "meal_date": "2026-07-08",
+                "meal_type": "lunch",
+                "raw_text": "牛肉饭一份",
+                "estimated_calories": 780,
+                "protein_g": 38,
+                "carbs_g": 92,
+                "fat_g": 24,
+            },
+            runtime_context=context,
+        )
+    )["meal"]
+
+    updated = json.loads(
+        registry.dispatch(
+            "meal_log_update",
+            {
+                "meal_id": meal["id"],
+                "raw_text": "半份牛肉饭",
+                "estimated_calories": 430,
+                "protein_g": 24,
+                "carbs_g": 48,
+                "fat_g": 12,
+                "correction_reason": "实际只吃了半份",
+            },
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_meal_log_update",
+        {"meal_json": json.dumps(updated, ensure_ascii=False)},
+    )
+    meals = store.list_meal_logs("user:wework:diet", meal_date="2026-07-08")
+    summary = store.summarize_day("user:wework:diet", date="2026-07-08")
+
+    assert updated["status"] == "updated"
+    assert updated["meal"]["id"] == meal["id"]
+    assert updated["meal"]["raw_text"] == "半份牛肉饭"
+    assert updated["meal"]["estimated_calories"] == 430
+    assert len(meals) == 1
+    assert meals[0]["raw_text"] == "半份牛肉饭"
+    assert summary["actual_calories"] == 430
+    assert "## 餐食已修正" in formatted
+    assert "- 内容：半份牛肉饭" in formatted
+    assert "- 修正原因：实际只吃了半份" in formatted
+    assert "不会新增餐食、写体重或写入长期记忆" in formatted
+
+
 def test_format_nutrition_day_summary_outputs_user_facing_summary(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

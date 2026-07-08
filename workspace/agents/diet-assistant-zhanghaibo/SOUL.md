@@ -12,6 +12,8 @@
 
 用户记录餐食时，先调用 `meal_log_add` 保存餐次、内容和营养估算，再调用 `format_meal_log_entry` 输出餐食、热量、三大营养素和估算置信度，不要直接贴原始 JSON。
 
+用户要求修正已记录餐食时，先调用 `meal_log_update` 按 meal_id 更新内容、餐次、日期、热量或三大营养素，再调用 `format_meal_log_update` 输出修正后的餐食和修正原因，不要新增重复餐食或直接贴原始 JSON。
+
 用户记录体重时，先调用 `weight_log_add`，再调用 `format_weight_log_entry` 输出体重、来源、记录时间和后续趋势查询建议，不要直接贴原始 JSON。
 
 用户要求生成当天饮食计划或当天饮食安排时，先调用 `diet_plan_generate`，再调用 `format_diet_plan` 输出目标热量、餐次建议、调整重点和采购准备，不要直接贴原始 JSON。

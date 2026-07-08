@@ -197,6 +197,58 @@ class DietStore:
         rows.sort(key=lambda row: str(row.get("logged_at", "")))
         return rows
 
+    def update_meal_log(
+        self,
+        user_scope: str,
+        meal_id: str,
+        *,
+        meal_type: str | None = None,
+        raw_text: str | None = None,
+        meal_date: str | None = None,
+        items: list[dict[str, Any]] | None = None,
+        estimated_calories: float | None = None,
+        protein_g: float | None = None,
+        carbs_g: float | None = None,
+        fat_g: float | None = None,
+        confidence: float | None = None,
+        correction_reason: str = "",
+    ) -> dict[str, Any] | None:
+        """修正一条已保存餐食记录，保留原 meal_id。"""
+
+        scope = self._require_scope(user_scope)
+        target_id = str(meal_id or "").strip()
+        if not target_id:
+            return None
+        rows = self._list("meal_logs", filters={"user_scope": scope}, limit=1000)
+        current = next((row for row in rows if str(row.get("id", "")) == target_id), None)
+        if current is None:
+            return None
+
+        updated = dict(current)
+        if meal_type is not None and meal_type.strip():
+            updated["meal_type"] = meal_type.strip()
+        if raw_text is not None and raw_text.strip():
+            updated["raw_text"] = raw_text.strip()
+        if meal_date is not None and meal_date.strip():
+            updated["meal_date"] = meal_date.strip()
+        if items is not None:
+            updated["items"] = list(items)
+        if estimated_calories is not None:
+            updated["estimated_calories"] = _as_float(estimated_calories)
+        if protein_g is not None:
+            updated["protein_g"] = _as_float(protein_g)
+        if carbs_g is not None:
+            updated["carbs_g"] = _as_float(carbs_g)
+        if fat_g is not None:
+            updated["fat_g"] = _as_float(fat_g)
+        if confidence is not None:
+            updated["confidence"] = _as_float(confidence, 0.5)
+        updated["updated_at"] = _now()
+        if correction_reason.strip():
+            updated["correction_reason"] = correction_reason.strip()
+        self._upsert("meal_logs", updated)
+        return updated
+
     def triage_inbox(
         self,
         user_scope: str,
@@ -1219,10 +1271,22 @@ class DietStore:
             try:
                 rows = backend.list(table, limit=limit, filters=filters)
                 if rows:
-                    return [row for row in rows if isinstance(row, dict)]
+                    return self._latest_rows_by_id([row for row in rows if isinstance(row, dict)])[:limit]
             except Exception:
                 pass
-        return self._local_rows(table, **filters)[:limit]
+        return self._latest_rows_by_id(self._local_rows(table, **filters))[:limit]
+
+    @staticmethod
+    def _latest_rows_by_id(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        latest: dict[str, dict[str, Any]] = {}
+        anonymous: list[dict[str, Any]] = []
+        for row in rows:
+            row_id = str(row.get("id", "")).strip()
+            if not row_id:
+                anonymous.append(row)
+                continue
+            latest[row_id] = row
+        return anonymous + list(latest.values())
 
     def _write_local(self, table: str, row: dict[str, Any]) -> None:
         path = self._local_path(table, self._normalize_scope(str(row.get("user_scope", ""))))
@@ -1756,6 +1820,80 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             "- 查询今天摄入时可使用今日营养汇总。",
             "",
             "> 边界：这是餐食记录确认，只格式化已保存结果，不会自动生成饮食计划、写体重或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
+    def meal_log_update(
+        meal_id: str,
+        *,
+        meal_type: str | None = None,
+        raw_text: str | None = None,
+        meal_date: str | None = None,
+        items: list[dict[str, Any]] | None = None,
+        estimated_calories: float | None = None,
+        protein_g: float | None = None,
+        carbs_g: float | None = None,
+        fat_g: float | None = None,
+        confidence: float | None = None,
+        correction_reason: str = "",
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        row = diet_store.update_meal_log(
+            scope,
+            meal_id,
+            meal_type=meal_type,
+            raw_text=raw_text,
+            meal_date=meal_date,
+            items=items,
+            estimated_calories=estimated_calories,
+            protein_g=protein_g,
+            carbs_g=carbs_g,
+            fat_g=fat_g,
+            confidence=confidence,
+            correction_reason=correction_reason,
+        )
+        if row is None:
+            return f"Error: meal not found: {meal_id}"
+        return _json({"status": "updated", "meal": row})
+
+    def format_meal_log_update(meal_json: str) -> str:
+        if not meal_json.strip():
+            return "Error: meal_json is required"
+        data = json.loads(meal_json)
+        if not isinstance(data, dict):
+            return "Error: meal_json must be a JSON object"
+        meal = data.get("meal") if isinstance(data.get("meal"), dict) else data
+        if not isinstance(meal, dict):
+            return "Error: meal_json must contain a meal object"
+        if "raw_text" not in meal or not meal.get("updated_at"):
+            return "Error: meal_json must be a meal_log_update object"
+
+        details = [
+            f"meal_id：{meal.get('id') or 'unknown'}",
+            f"日期：{meal.get('meal_date') or '今天'}",
+            f"餐次：{meal.get('meal_type') or 'unknown'}",
+            f"内容：{meal.get('raw_text') or '未填写'}",
+            f"热量：约 {_as_float(meal.get('estimated_calories')):.0f} kcal",
+            f"蛋白质：约 {_as_float(meal.get('protein_g')):.0f}g",
+            f"碳水：约 {_as_float(meal.get('carbs_g')):.0f}g",
+            f"脂肪：约 {_as_float(meal.get('fat_g')):.0f}g",
+        ]
+        reason = str(meal.get("correction_reason") or "").strip()
+        if reason:
+            details.append(f"修正原因：{reason}")
+        details.append(f"更新时间：{meal.get('updated_at')}")
+
+        sections = [
+            "## 餐食已修正",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 今日营养汇总和后续建议会读取修正后的餐食记录。",
+            "- 如果还有其他餐食估算不准，可以继续按 meal_id 修正。",
+            "",
+            "> 边界：这是餐食修正确认，只更新已匹配的餐食记录，不会新增餐食、写体重或写入长期记忆。",
         ]
         return "\n".join(sections).strip()
 
@@ -2872,6 +3010,53 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
                 },
             },
             handler=format_meal_log_entry,
+            tags=("diet", "meal", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="meal_log_update",
+            description="Update one existing meal record by meal_id with corrected nutrition.",
+            input_schema={
+                "type": "object",
+                "required": ["meal_id"],
+                "properties": {
+                    "meal_id": {"type": "string"},
+                    "meal_type": {"type": "string"},
+                    "raw_text": {"type": "string"},
+                    "meal_date": {"type": "string"},
+                    "items": {"type": "array"},
+                    "estimated_calories": {"type": "number"},
+                    "protein_g": {"type": "number"},
+                    "carbs_g": {"type": "number"},
+                    "fat_g": {"type": "number"},
+                    "confidence": {"type": "number"},
+                    "correction_reason": {"type": "string"},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=meal_log_update,
+            tags=("diet", "meal", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_meal_log_update",
+            description=(
+                "Format a meal_log_update JSON object into a concise Chinese "
+                "Markdown meal correction confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["meal_json"],
+                "properties": {
+                    "meal_json": {
+                        "type": "string",
+                        "description": "JSON string returned by meal_log_update.",
+                    },
+                },
+            },
+            handler=format_meal_log_update,
             tags=("diet", "meal", "format", "user-facing"),
         )
     )

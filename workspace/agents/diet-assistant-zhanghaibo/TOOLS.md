@@ -4,7 +4,7 @@
 
 长期稳定偏好才可以写入 memory，例如不吃香菜、常在公司吃早餐、偏好中餐、目标体重等。
 
-用户记录一餐时，优先调用 `meal_log_add`；直接回复用户前使用 `format_meal_log_entry` 转成中文 Markdown 确认，不要直接输出原始 JSON。用户更新身高、目标、忌口、活动水平或饮食偏好时，调用 `profile_update`；直接回复用户前使用 `format_diet_profile_update` 转成中文 Markdown 确认，不要直接输出原始 JSON。如果是记录当天体重，调用 `weight_log_add`，并使用 `format_weight_log_entry` 转成中文 Markdown 确认。
+用户记录一餐时，优先调用 `meal_log_add`；直接回复用户前使用 `format_meal_log_entry` 转成中文 Markdown 确认，不要直接输出原始 JSON。用户修正已记录餐食时，使用 `meal_log_update` 按 meal_id 更新；直接回复用户前使用 `format_meal_log_update` 转成中文 Markdown 确认，不要新增重复餐食或直接输出原始 JSON。用户更新身高、目标、忌口、活动水平或饮食偏好时，调用 `profile_update`；直接回复用户前使用 `format_diet_profile_update` 转成中文 Markdown 确认，不要直接输出原始 JSON。如果是记录当天体重，调用 `weight_log_add`，并使用 `format_weight_log_entry` 转成中文 Markdown 确认。
 
 用户自述中出现年龄、性别、身高、体重、目标体重、活动水平等个人档案信息时，要主动调用 `profile_update` 做增量更新。不要只回答问题而不保存档案。
 
