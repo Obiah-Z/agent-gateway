@@ -182,6 +182,52 @@ class DietStore:
         rows.sort(key=lambda row: str(row.get("logged_at", "")))
         return rows
 
+    def triage_inbox(
+        self,
+        user_scope: str,
+        text: str,
+        *,
+        context: str = "",
+    ) -> dict[str, Any]:
+        """把混合饮食输入整理成候选记录，不直接写入数据。"""
+
+        scope = self._require_scope(user_scope)
+        normalized = " ".join(str(text or "").strip().split())
+        context_text = " ".join(str(context or "").strip().split())
+        fragments = self._split_diet_fragments(normalized)
+        suggested_meals = self._suggest_meals_from_fragments(fragments)
+        weight_candidate = self._suggest_weight_from_text(normalized)
+        profile_updates = self._suggest_profile_updates_from_text(normalized)
+        needs_confirmation = self._diet_inbox_confirmations(
+            normalized,
+            suggested_meals=suggested_meals,
+            weight_candidate=weight_candidate,
+            profile_updates=profile_updates,
+        )
+        return {
+            "generated_at": _now(),
+            "user_scope": scope,
+            "type": "diet_inbox_triage",
+            "source_text": normalized,
+            "context": context_text,
+            "intent": self._diet_inbox_intent(
+                suggested_meals=suggested_meals,
+                weight_candidate=weight_candidate,
+                profile_updates=profile_updates,
+            ),
+            "suggested_meals": suggested_meals,
+            "suggested_weight": weight_candidate,
+            "suggested_profile_updates": profile_updates,
+            "needs_confirmation": needs_confirmation,
+            "next_actions": self._diet_inbox_next_actions(
+                suggested_meals=suggested_meals,
+                weight_candidate=weight_candidate,
+                profile_updates=profile_updates,
+                confirmations=needs_confirmation,
+            ),
+            "note": "这是饮食输入整理建议，不会自动写入餐食、体重、档案或长期记忆。",
+        }
+
     def summarize_day(self, user_scope: str, *, date: str = "") -> dict[str, Any]:
         scope = self._require_scope(user_scope)
         target_date = date or _today()
@@ -1111,6 +1157,173 @@ class DietStore:
             raise ValueError("diet tools require user_scope")
         return scope
 
+    @staticmethod
+    def _split_diet_fragments(text: str) -> list[str]:
+        raw_parts: list[str] = []
+        for line in text.replace("；", "\n").replace("。", "\n").replace("，", "\n").splitlines():
+            raw_parts.extend(line.split(";"))
+        return [part.strip(" -\t") for part in raw_parts if part.strip(" -\t")]
+
+    @classmethod
+    def _suggest_meal_from_fragment(cls, fragment: str) -> dict[str, Any] | None:
+        meal_type = cls._infer_meal_type(fragment)
+        if meal_type == "unknown" and not any(
+            word in fragment
+            for word in ["吃", "喝", "餐", "饭", "面", "肉", "鸡蛋", "牛奶", "酸奶", "豆浆", "沙拉", "水果", "零食"]
+        ):
+            return None
+        calories = cls._extract_number_before_units(fragment, ["kcal", "千卡", "大卡"])
+        protein = cls._extract_protein_g(fragment)
+        return {
+            "meal_type": meal_type,
+            "raw_text": fragment,
+            "meal_date": cls._infer_meal_date(fragment),
+            "estimated_calories": calories,
+            "protein_g": protein,
+            "confidence": 0.7 if calories > 0 else 0.45,
+            "needs_estimation": calories <= 0,
+        }
+
+    @classmethod
+    def _suggest_meals_from_fragments(cls, fragments: list[str]) -> list[dict[str, Any]]:
+        meals: list[dict[str, Any]] = []
+        for fragment in fragments:
+            meal = cls._suggest_meal_from_fragment(fragment)
+            if meal is not None:
+                meals.append(meal)
+                continue
+            if not meals:
+                continue
+            calories = cls._extract_number_before_units(fragment, ["kcal", "千卡", "大卡"])
+            protein = cls._extract_protein_g(fragment)
+            if calories > 0:
+                meals[-1]["estimated_calories"] = calories
+                meals[-1]["confidence"] = max(_as_float(meals[-1].get("confidence")), 0.7)
+                meals[-1]["needs_estimation"] = False
+            if protein > 0:
+                meals[-1]["protein_g"] = protein
+        return meals[:5]
+
+    @staticmethod
+    def _suggest_weight_from_text(text: str) -> dict[str, Any] | None:
+        match = re.search(r"(?:体重|称重|今天|早上)?\s*(\d{2,3}(?:\.\d+)?)\s*(kg|公斤|斤)", text, re.I)
+        if not match:
+            return None
+        value = _as_float(match.group(1))
+        unit = match.group(2).lower()
+        weight_kg = round(value / 2, 2) if unit == "斤" else value
+        return {"weight_kg": weight_kg, "source": "user", "raw_text": match.group(0).strip()}
+
+    @staticmethod
+    def _suggest_profile_updates_from_text(text: str) -> dict[str, Any]:
+        updates: dict[str, Any] = {}
+        height_match = re.search(r"(\d{3})\s*(?:cm|厘米)", text, re.I)
+        if height_match:
+            updates["height_cm"] = _as_float(height_match.group(1))
+        target_match = re.search(r"目标(?:体重)?(?:是|到|降到)?\s*(\d{2,3}(?:\.\d+)?)\s*(kg|公斤|斤)?", text)
+        if target_match:
+            value = _as_float(target_match.group(1))
+            updates["target_weight_kg"] = round(value / 2, 2) if target_match.group(2) == "斤" else value
+        preferences = []
+        for keyword in ["不吃", "忌口", "过敏", "喜欢", "偏好"]:
+            if keyword in text:
+                preferences.append(text[:120])
+                break
+        if preferences:
+            updates["diet_preferences"] = preferences
+        return updates
+
+    @staticmethod
+    def _infer_meal_type(fragment: str) -> str:
+        if any(word in fragment for word in ["早餐", "早饭", "早上"]):
+            return "breakfast"
+        if any(word in fragment for word in ["午餐", "午饭", "中午"]):
+            return "lunch"
+        if any(word in fragment for word in ["晚餐", "晚饭", "晚上"]):
+            return "dinner"
+        if any(word in fragment for word in ["加餐", "零食", "夜宵", "下午茶"]):
+            return "snack"
+        return "unknown"
+
+    @staticmethod
+    def _infer_meal_date(fragment: str) -> str:
+        if any(word in fragment for word in ["今天", "早上", "中午", "晚上"]):
+            return _today()
+        return ""
+
+    @staticmethod
+    def _extract_number_before_units(text: str, units: list[str]) -> float:
+        unit_pattern = "|".join(re.escape(unit) for unit in units)
+        match = re.search(rf"(\d{{1,4}}(?:\.\d+)?)\s*(?:{unit_pattern})", text, re.I)
+        return _as_float(match.group(1)) if match else 0.0
+
+    @staticmethod
+    def _extract_protein_g(text: str) -> float:
+        after_label = re.search(r"蛋白(?:质)?\s*(\d{1,3}(?:\.\d+)?)\s*(?:g|克)?", text, re.I)
+        if after_label:
+            return _as_float(after_label.group(1))
+        return DietStore._extract_number_before_units(text, ["g蛋白", "克蛋白", "蛋白"])
+
+    @staticmethod
+    def _diet_inbox_confirmations(
+        text: str,
+        *,
+        suggested_meals: list[dict[str, Any]],
+        weight_candidate: dict[str, Any] | None,
+        profile_updates: dict[str, Any],
+    ) -> list[str]:
+        confirmations: list[str] = []
+        if not text:
+            confirmations.append("需要补充要整理的饮食内容。")
+        if not suggested_meals and weight_candidate is None and not profile_updates:
+            confirmations.append("这段内容未识别出明确餐食、体重或档案信息。")
+        if any(meal.get("meal_type") == "unknown" for meal in suggested_meals):
+            confirmations.append("部分餐食未识别出餐次，需要确认是早餐、午餐、晚餐还是加餐。")
+        if any(meal.get("needs_estimation") for meal in suggested_meals):
+            confirmations.append("部分餐食缺少热量估算，需要确认是否由模型估算后再写入。")
+        if profile_updates:
+            confirmations.append("档案或偏好更新需要确认后再调用 profile_update 或 memory_write。")
+        return confirmations
+
+    @staticmethod
+    def _diet_inbox_next_actions(
+        *,
+        suggested_meals: list[dict[str, Any]],
+        weight_candidate: dict[str, Any] | None,
+        profile_updates: dict[str, Any],
+        confirmations: list[str],
+    ) -> list[str]:
+        actions: list[str] = []
+        if suggested_meals:
+            actions.append("确认餐次和估算后调用 meal_log_add 写入餐食。")
+        if weight_candidate is not None:
+            actions.append("确认体重数值后调用 weight_log_add 写入体重。")
+        if profile_updates:
+            actions.append("确认档案字段后调用 profile_update；长期偏好可再确认后写入 memory。")
+        if confirmations:
+            actions.append("先向用户确认不确定项，再写入结构化数据。")
+        if not actions:
+            actions.append("直接简短回复，不需要写入饮食结构化数据。")
+        return actions
+
+    @staticmethod
+    def _diet_inbox_intent(
+        *,
+        suggested_meals: list[dict[str, Any]],
+        weight_candidate: dict[str, Any] | None,
+        profile_updates: dict[str, Any],
+    ) -> str:
+        hits = sum(bool(item) for item in [suggested_meals, weight_candidate, profile_updates])
+        if hits >= 2:
+            return "mixed"
+        if suggested_meals:
+            return "meal"
+        if weight_candidate is not None:
+            return "weight"
+        if profile_updates:
+            return "profile"
+        return "chat"
+
 
 def _runtime_scope(runtime_context: dict[str, Any] | None, explicit: str = "") -> str:
     return str(explicit or (runtime_context or {}).get("memory_user_scope", "")).strip()
@@ -1319,6 +1532,25 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
                     days=days,
                     focus_areas=focus_areas or [],
                     constraints=constraints or [],
+                ),
+            }
+        )
+
+    def diet_inbox_triage(
+        *,
+        text: str,
+        context: str = "",
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json(
+            {
+                "status": "ok",
+                "triage": diet_store.triage_inbox(
+                    scope,
+                    text,
+                    context=context,
                 ),
             }
         )
@@ -1551,5 +1783,25 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_weekly_plan_generate,
             tags=("diet", "weekly", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_inbox_triage",
+            description=(
+                "Triage a messy diet message into candidate meals, weight, profile updates, "
+                "confirmation questions, and next actions without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "context": {"type": "string"},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_inbox_triage,
+            tags=("diet", "inbox", "planning", "read"),
         )
     )

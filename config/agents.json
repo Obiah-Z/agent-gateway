@@ -237,6 +237,7 @@
           "diet_next_meal_card_generate",
           "diet_day_review_plan_generate",
           "diet_weekly_plan_generate",
+          "diet_inbox_triage",
           "memory_search",
           "memory_write"
         ]

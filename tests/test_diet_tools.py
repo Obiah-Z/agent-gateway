@@ -492,3 +492,36 @@ def test_diet_weekly_plan_generates_draft_without_writing(tmp_path: Path) -> Non
     assert "这些限制是否需要转成具体避坑规则？" in weekly["needs_confirmation"]
     assert store.get_plan("user:wework:diet", plan_date="2026-07-06") is None
     assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
+
+
+def test_diet_inbox_triage_suggests_records_without_writing(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    triage = json.loads(
+        registry.dispatch(
+            "diet_inbox_triage",
+            {
+                "text": (
+                    "今天早餐吃了鸡蛋豆浆约 320 kcal，蛋白 22g；"
+                    "体重 81.5kg；目标降到 75kg；我不吃香菜。"
+                )
+            },
+            runtime_context=context,
+        )
+    )["triage"]
+
+    assert triage["type"] == "diet_inbox_triage"
+    assert triage["user_scope"] == "user:wework:diet"
+    assert triage["intent"] == "mixed"
+    assert triage["suggested_meals"][0]["meal_type"] == "breakfast"
+    assert triage["suggested_meals"][0]["estimated_calories"] == 320
+    assert triage["suggested_meals"][0]["protein_g"] == 22
+    assert triage["suggested_weight"]["weight_kg"] == 81.5
+    assert triage["suggested_profile_updates"]["target_weight_kg"] == 75
+    assert triage["suggested_profile_updates"]["diet_preferences"]
+    assert any("profile_update" in action for action in triage["next_actions"])
+    assert store.list_meal_logs("user:wework:diet") == []
+    assert store.get_profile("user:wework:diet") is None

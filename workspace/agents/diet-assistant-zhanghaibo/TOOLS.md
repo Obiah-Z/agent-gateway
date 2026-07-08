@@ -20,4 +20,6 @@
 
 用户询问“本周怎么吃”“周饮食计划”“本周减脂安排”“这周饮食重点”时，调用 `diet_weekly_plan_generate`。该工具只读取近期餐食、体重趋势和用户给出的周目标，生成周计划草稿；用户确认后再按具体日期调用 `diet_plan_generate`，或继续用 `meal_log_add`、`weight_log_add` 记录执行情况。
 
+用户一次性输入多个饮食碎片，或者把“今天吃了什么、体重、目标、忌口、明天建议”混在一起时，先调用 `diet_inbox_triage`。该工具只返回候选餐食、体重、档案更新、确认问题和下一步动作，不会写入数据。确认后再调用 `meal_log_add`、`weight_log_add`、`profile_update` 或 `memory_write`。
+
 用户询问“最近减脂怎么样”“这周饮食如何”“下一步怎么调整”“近 7 天趋势”时，优先调用 `diet_coach_briefing`，不要只凭记忆总结。
