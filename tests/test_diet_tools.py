@@ -402,6 +402,49 @@ def test_diet_next_meal_card_uses_today_plan_without_writing(tmp_path: Path) -> 
     assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
 
 
+def test_format_diet_next_meal_card_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.generate_plan("user:wework:diet", plan_date="2026-07-06")
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="breakfast",
+        raw_text="鸡蛋和豆浆",
+        estimated_calories=320,
+        protein_g=22,
+    )
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭",
+        estimated_calories=760,
+        protein_g=30,
+    )
+    card_json = registry.dispatch(
+        "diet_next_meal_card_generate",
+        {"date": "2026-07-06"},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_next_meal_card", {"card_json": card_json})
+
+    assert "## 下一餐建议" in formatted
+    assert "- 餐次：晚餐" in formatted
+    assert "- 今日摄入：约 1080 / 1550 kcal" in formatted
+    assert "- 剩余热量：约 470 kcal" in formatted
+    assert "- 已记录蛋白质：约 52g" in formatted
+    assert "- 清淡蛋白质 + 大量蔬菜 + 半拳主食" in formatted
+    assert "- 蛋白质偏低，下一餐优先补一掌蛋白质。" in formatted
+    assert "- 晚餐还未记录，吃完后补记。" in formatted
+    assert "不会自动写入餐食或生成新计划" in formatted
+
+
 def test_diet_day_review_plan_generates_tomorrow_strategy_without_writing(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

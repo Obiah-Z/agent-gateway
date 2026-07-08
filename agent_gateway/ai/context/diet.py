@@ -67,6 +67,21 @@ def _provided_fields(fields: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value is not None}
 
 
+def _clean_strings(items: list[object] | None) -> list[str]:
+    """清洗用于聊天回复的字符串列表。"""
+
+    return [str(item).strip() for item in items or [] if str(item).strip()]
+
+
+def _markdown_bullets(items: list[object] | None) -> str:
+    """把列表渲染成 Markdown bullet list。"""
+
+    cleaned = _clean_strings(items)
+    if not cleaned:
+        return "- 暂无"
+    return "\n".join(f"- {item}" for item in cleaned)
+
+
 @dataclass(slots=True)
 class DietStore:
     """个人饮食数据存储。
@@ -1592,6 +1607,48 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             }
         )
 
+    def format_diet_next_meal_card(card_json: str) -> str:
+        if not card_json.strip():
+            return "Error: card_json is required"
+        data = json.loads(card_json)
+        if not isinstance(data, dict):
+            return "Error: card_json must be a JSON object"
+        card = data.get("next_meal_card") if isinstance(data.get("next_meal_card"), dict) else data
+        if not isinstance(card, dict):
+            return "Error: card_json must contain a next_meal_card object"
+        if card.get("type") != "diet_next_meal_card":
+            return "Error: card_json type must be diet_next_meal_card"
+
+        remaining = _as_float(card.get("remaining_calories"))
+        actual = _as_float(card.get("actual_calories"))
+        target = _as_float(card.get("target_calories"))
+        protein = _as_float(card.get("protein_g"))
+        sections = [
+            "## 下一餐建议",
+            f"- 餐次：{card.get('next_meal_label') or '下一餐'}",
+            f"- 第一步：{card.get('first_action') or '按清淡高蛋白模板选择。'}",
+            f"- 今日摄入：约 {actual:.0f} / {target:.0f} kcal",
+            f"- 剩余热量：约 {remaining:.0f} kcal",
+            f"- 已记录蛋白质：约 {protein:.0f}g",
+            f"- 计划状态：{card.get('plan_status') or 'unknown'}",
+            "",
+            "## 推荐选择",
+            _markdown_bullets(
+                card.get("recommended_options")
+                if isinstance(card.get("recommended_options"), list)
+                else []
+            ),
+            "",
+            "## 边界",
+            _markdown_bullets(card.get("guardrails") if isinstance(card.get("guardrails"), list) else []),
+            "",
+            "## 吃完后",
+            _markdown_bullets(card.get("reminders") if isinstance(card.get("reminders"), list) else []),
+            "",
+            f"> 边界：{card.get('note') or '这是下一餐建议卡片，不会自动写入餐食或生成新计划。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_day_review_plan_generate(
         *,
         date: str = "",
@@ -1866,6 +1923,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_next_meal_card_generate,
             tags=("diet", "meal", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_next_meal_card",
+            description=(
+                "Format a diet_next_meal_card JSON object into a concise Chinese "
+                "Markdown next-meal recommendation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["card_json"],
+                "properties": {
+                    "card_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_next_meal_card_generate.",
+                    },
+                },
+            },
+            handler=format_diet_next_meal_card,
+            tags=("diet", "meal", "format", "user-facing"),
         )
     )
     registry.register(

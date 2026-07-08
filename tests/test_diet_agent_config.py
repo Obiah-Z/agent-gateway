@@ -21,6 +21,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "diet_coach_briefing" in agent["tool_policy"]["tool_names"]
     assert "diet_daily_loop_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_next_meal_card_generate" in agent["tool_policy"]["tool_names"]
+    assert "format_diet_next_meal_card" in agent["tool_policy"]["tool_names"]
     assert "diet_day_review_plan_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_weekly_plan_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_inbox_triage" in agent["tool_policy"]["tool_names"]
@@ -272,6 +273,8 @@ def test_diet_agent_cron_targets_single_wework_peer() -> None:
 
 
 def test_diet_agent_prompt_requires_gender_inference() -> None:
+    identity = (ROOT / "workspace" / "agents" / AGENT_ID / "IDENTITY.md").read_text(encoding="utf-8")
+    soul = (ROOT / "workspace" / "agents" / AGENT_ID / "SOUL.md").read_text(encoding="utf-8")
     tools_md = (ROOT / "workspace" / "agents" / AGENT_ID / "TOOLS.md").read_text(encoding="utf-8")
 
     assert "gender=male" in tools_md
@@ -280,6 +283,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "diet_coach_briefing" in tools_md
     assert "diet_daily_loop_generate" in tools_md
     assert "diet_next_meal_card_generate" in tools_md
+    assert "format_diet_next_meal_card" in tools_md
+    assert "format_diet_next_meal_card" in identity
+    assert "format_diet_next_meal_card" in soul
     assert "diet_day_review_plan_generate" in tools_md
     assert "diet_weekly_plan_generate" in tools_md
     assert "diet_inbox_triage" in tools_md
@@ -829,6 +835,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "personal_focus_card_generate",
         "personal_day_review_plan_generate",
         "diet_next_meal_card_generate",
+        "format_diet_next_meal_card",
         "diet_day_review_plan_generate",
         "diet_inbox_triage",
         "diet_inbox_commit",
