@@ -372,6 +372,52 @@ class PersonalStore:
             "note": "这是待办状态只读概览，不会新增、修改、完成、取消或恢复待办。",
         }
 
+    def generate_due_todo_digest(
+        self,
+        *,
+        user_scope: str = "",
+        today: str = "",
+        limit: int = 6,
+    ) -> dict[str, Any]:
+        """按 due_at 汇总已到期、今天、明天和近期待办，只读不修改数据。"""
+
+        safe_limit = max(1, min(int(limit), 20))
+        reference_date = self._normalize_due_reference_date(today)
+        open_todos = self.list_todos(status="open", limit=100, user_scope=user_scope)
+        buckets: dict[str, list[dict[str, Any]]] = {
+            "overdue": [],
+            "today": [],
+            "tomorrow": [],
+            "this_week": [],
+            "next_week": [],
+            "unscheduled": [],
+        }
+        for todo in open_todos:
+            bucket = self._due_bucket(str(todo.get("due_at", "")), reference_date)
+            buckets[bucket].append(todo)
+        for items in buckets.values():
+            items.sort(key=self._todo_sort_key)
+        next_action = "暂无到期待办。"
+        for key in ("overdue", "today", "tomorrow", "this_week", "next_week", "unscheduled"):
+            if buckets[key]:
+                next_action = f"先处理：{buckets[key][0].get('title') or '未命名待办'}"
+                break
+        return {
+            "type": "personal_due_todo_digest",
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "reference_date": reference_date,
+            "counts": {key: len(value) for key, value in buckets.items()},
+            "overdue": buckets["overdue"][:safe_limit],
+            "today": buckets["today"][:safe_limit],
+            "tomorrow": buckets["tomorrow"][:safe_limit],
+            "this_week": buckets["this_week"][:safe_limit],
+            "next_week": buckets["next_week"][:safe_limit],
+            "unscheduled": buckets["unscheduled"][:safe_limit],
+            "next_action": next_action,
+            "note": "这是按待办 due_at 生成的只读提醒摘要，不会新增、修改、完成、取消或恢复待办。",
+        }
+
     def generate_time_blocks(
         self,
         *,
@@ -916,6 +962,51 @@ class PersonalStore:
             if isinstance(items, list) and items:
                 return f"先处理「{items[0].get('title', '')}」。"
         return "先确认今天最重要的一件事，再开始执行。"
+
+    @staticmethod
+    def _normalize_due_reference_date(value: str) -> str:
+        raw = value.strip()
+        if raw:
+            try:
+                return datetime.fromisoformat(raw[:10]).date().isoformat()
+            except ValueError:
+                return raw[:10]
+        return datetime.now(timezone.utc).date().isoformat()
+
+    @staticmethod
+    def _due_bucket(due_at: str, reference_date: str) -> str:
+        value = due_at.strip().lower()
+        if not value:
+            return "unscheduled"
+        aliases = {
+            "today": "today",
+            "今天": "today",
+            "tomorrow": "tomorrow",
+            "明天": "tomorrow",
+            "this_week": "this_week",
+            "本周": "this_week",
+            "next_week": "next_week",
+            "下周": "next_week",
+        }
+        if value in aliases:
+            return aliases[value]
+        try:
+            due_date = datetime.fromisoformat(value[:10]).date()
+            ref_date = datetime.fromisoformat(reference_date[:10]).date()
+        except ValueError:
+            return "unscheduled"
+        if due_date < ref_date:
+            return "overdue"
+        if due_date == ref_date:
+            return "today"
+        days = (due_date - ref_date).days
+        if days == 1:
+            return "tomorrow"
+        if days <= 7:
+            return "this_week"
+        if days <= 14:
+            return "next_week"
+        return "unscheduled"
 
     @staticmethod
     def _inbox_signals(text: str) -> set[str]:
@@ -1879,6 +1970,75 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             f"- {data.get('next_action') or '暂无建议。'}",
             "",
             f"> 边界：{data.get('note') or '这是待办状态只读概览。'}",
+        ]
+        return "\n".join(sections).strip()
+
+    def personal_due_todo_digest_generate(
+        today: str = "",
+        limit: int = 6,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        digest = personal_store.generate_due_todo_digest(
+            user_scope=_scope(__runtime_context, user_scope),
+            today=today,
+            limit=limit,
+        )
+        return json.dumps(digest, ensure_ascii=False, indent=2)
+
+    def format_personal_due_todo_digest(digest_json: str) -> str:
+        if not digest_json.strip():
+            return "Error: digest_json is required"
+        data = json.loads(digest_json)
+        if not isinstance(data, dict):
+            return "Error: digest_json must be a JSON object"
+        if data.get("type") != "personal_due_todo_digest":
+            return "Error: digest_json must be a personal_due_todo_digest object"
+
+        counts = data.get("counts") if isinstance(data.get("counts"), dict) else {}
+
+        def _todo_line(todo: object, index: int) -> str:
+            if not isinstance(todo, dict):
+                return f"{index}. 未知待办"
+            title = str(todo.get("title") or "未命名待办").strip()
+            details = []
+            if todo.get("priority"):
+                details.append(f"优先级：{todo.get('priority')}")
+            if todo.get("due_at"):
+                details.append(f"时间：{todo.get('due_at')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            return f"{index}. {title}{suffix}"
+
+        def _section(key: str) -> str:
+            rows = data.get(key) if isinstance(data.get(key), list) else []
+            lines = [_todo_line(todo, index) for index, todo in enumerate(rows[:6], start=1)]
+            return "\n".join(lines) if lines else "暂无"
+
+        sections = [
+            "## 待办提醒摘要",
+            f"- 参考日期：{data.get('reference_date') or '未指定'}",
+            f"- 已到期：{counts.get('overdue', 0)} 项",
+            f"- 今天：{counts.get('today', 0)} 项",
+            f"- 明天：{counts.get('tomorrow', 0)} 项",
+            f"- 本周：{counts.get('this_week', 0)} 项",
+            "",
+            "## 已到期",
+            _section("overdue"),
+            "",
+            "## 今天",
+            _section("today"),
+            "",
+            "## 明天",
+            _section("tomorrow"),
+            "",
+            "## 本周",
+            _section("this_week"),
+            "",
+            "## 下一步",
+            f"- {data.get('next_action') or '暂无建议。'}",
+            "",
+            f"> 边界：{data.get('note') or '这是待办提醒只读摘要。'}",
         ]
         return "\n".join(sections).strip()
 
@@ -2919,6 +3079,48 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=format_personal_todo_status_card,
             tags=("personal", "todo", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_due_todo_digest_generate",
+            description=(
+                "Generate a read-only digest of due personal todos grouped by overdue, "
+                "today, tomorrow, this week, next week, and unscheduled."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "today": {
+                        "type": "string",
+                        "description": "Optional reference date in YYYY-MM-DD format.",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 6},
+                },
+            },
+            handler=personal_due_todo_digest_generate,
+            tags=("personal", "todo", "reminder", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_due_todo_digest",
+            description=(
+                "Format a personal_due_todo_digest JSON object into a concise Chinese "
+                "Markdown reminder digest for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["digest_json"],
+                "properties": {
+                    "digest_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_due_todo_digest_generate.",
+                    },
+                },
+            },
+            handler=format_personal_due_todo_digest,
+            tags=("personal", "todo", "reminder", "format", "user-facing"),
         )
     )
     registry.register(

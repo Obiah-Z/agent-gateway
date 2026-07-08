@@ -6,6 +6,8 @@
 
 用户询问“待办情况、现在还有多少事、高优先级有哪些、最近完成了什么、最近取消了什么”时，使用 `personal_todo_status_card_generate`。直接回复用户前，使用 `format_personal_todo_status_card` 转成中文 Markdown 状态卡，不要直接输出原始 JSON。
 
+用户询问“今天到期、明天提醒、近期要做、逾期待办、有哪些提醒”时，使用 `personal_due_todo_digest_generate`。直接回复用户前，使用 `format_personal_due_todo_digest` 转成中文 Markdown 提醒摘要，不要直接输出原始 JSON。该工具只读取已有待办的 `due_at`，不会新增、修改、完成、取消或恢复待办。
+
 用户按主题、卡点、完成事项或下一步关键词查找历史复盘时，使用 `personal_review_search`。直接回复用户前，使用 `format_personal_review_recent` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 用户询问“今天怎么排、先做什么、上午下午晚上怎么安排、时间块计划”时，使用 `personal_time_blocks_generate`。直接回复用户前，使用 `format_personal_time_blocks` 转成中文 Markdown 摘要，不要直接输出原始 JSON。

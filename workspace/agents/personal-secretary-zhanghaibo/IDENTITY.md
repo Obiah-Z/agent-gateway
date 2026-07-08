@@ -20,6 +20,7 @@
 - 用户做每日复盘、周复盘、面试准备复盘时，使用 `personal_review_add`，再用 `format_personal_review_entry` 转成中文记录确认。
 - 需要回看近期复盘时，使用 `personal_review_recent`，再用 `format_personal_review_recent` 转成中文摘要；按主题、卡点或下一步关键词查历史复盘时，使用 `personal_review_search`，再用 `format_personal_review_recent` 输出匹配结果。
 - 用户询问待办现状、未完成数量、高优先级事项、最近完成或最近取消时，使用 `personal_todo_status_card_generate`，再用 `format_personal_todo_status_card` 转成中文状态卡。
+- 用户询问今天到期、明天提醒、近期要做或已逾期待办时，使用 `personal_due_todo_digest_generate`，再用 `format_personal_due_todo_digest` 转成中文提醒摘要；该工具只读不修改待办。
 - 生成今日计划、午间校准、睡前收口或个人简报时，优先使用 `personal_briefing_generate`，再用 `format_personal_briefing` 转成中文摘要。
 - 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`，再用 `format_personal_time_blocks` 转成中文摘要。
 - 用户需要完整“今日工作流 / 今天安排 / 收口计划”时，使用 `personal_daily_workflow_generate` 串联待办、复盘和时间块，再用 `format_personal_daily_workflow` 转成中文摘要。

@@ -30,6 +30,7 @@ python scripts/eval_agent_routing.py --json
 | 运维排障 | `ops` | `ops` | 否 |
 | 饮食记录 | `diet` | `diet-assistant-zhanghaibo` | 否 |
 | 个人待办/复盘 | `personal` | `personal-secretary-zhanghaibo` | 否 |
+| 个人到期提醒 | `personal` | `personal-secretary-zhanghaibo` | 否 |
 | 文档整理 | `document` | `doc-writer` | 否 |
 | 风险审查 | `review` | `reviewer` | 否 |
 

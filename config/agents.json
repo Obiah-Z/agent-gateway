@@ -207,6 +207,8 @@
           "format_personal_briefing",
           "personal_todo_status_card_generate",
           "format_personal_todo_status_card",
+          "personal_due_todo_digest_generate",
+          "format_personal_due_todo_digest",
           "personal_time_blocks_generate",
           "format_personal_time_blocks",
           "personal_daily_workflow_generate",

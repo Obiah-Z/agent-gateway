@@ -111,6 +111,13 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_requires_collaboration=False,
     ),
     RoutingCase(
+        name="personal-due-reminders",
+        user_text="今天有哪些到期提醒和逾期待办？",
+        expected_intent="personal",
+        expected_agent_id="personal-secretary-zhanghaibo",
+        expected_requires_collaboration=False,
+    ),
+    RoutingCase(
         name="document",
         user_text="把这段材料整理成 Markdown 报告",
         expected_intent="document",

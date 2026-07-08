@@ -413,6 +413,55 @@ def test_personal_todo_status_card_summarizes_todo_queue(tmp_path: Path) -> None
     assert "废弃临时计划" in formatted
 
 
+def test_personal_due_todo_digest_groups_due_todos(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    for title, priority, due_at in [
+        ("补交日报", "urgent", "2026-07-07"),
+        ("今天背项目", "high", "today"),
+        ("明天模拟面试", "normal", "tomorrow"),
+        ("本周整理简历", "normal", "this_week"),
+        ("下周复盘计划", "low", "next_week"),
+        ("无时间待办", "normal", ""),
+    ]:
+        registry.dispatch(
+            "personal_todo_add",
+            {"title": title, "priority": priority, "due_at": due_at},
+            runtime_context=context,
+        )
+
+    digest = json.loads(
+        registry.dispatch(
+            "personal_due_todo_digest_generate",
+            {"today": "2026-07-08", "limit": 5},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_due_todo_digest",
+        {"digest_json": json.dumps(digest, ensure_ascii=False)},
+    )
+
+    assert digest["type"] == "personal_due_todo_digest"
+    assert digest["reference_date"] == "2026-07-08"
+    assert digest["counts"]["overdue"] == 1
+    assert digest["counts"]["today"] == 1
+    assert digest["counts"]["tomorrow"] == 1
+    assert digest["counts"]["this_week"] == 1
+    assert digest["counts"]["next_week"] == 1
+    assert digest["counts"]["unscheduled"] == 1
+    assert digest["overdue"][0]["title"] == "补交日报"
+    assert digest["next_action"] == "先处理：补交日报"
+    assert "## 待办提醒摘要" in formatted
+    assert "- 已到期：1 项" in formatted
+    assert "补交日报" in formatted
+    assert "今天背项目" in formatted
+    assert "明天模拟面试" in formatted
+    assert "这是按待办 due_at 生成的只读提醒摘要" in formatted
+
+
 def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

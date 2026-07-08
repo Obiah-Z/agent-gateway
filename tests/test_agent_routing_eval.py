@@ -19,6 +19,7 @@ def test_default_routing_eval_cases_cover_key_agents() -> None:
         "ops",
         "diet",
         "personal",
+        "personal-due-reminders",
         "document",
         "review",
     }
@@ -35,6 +36,7 @@ def test_default_routing_eval_cases_pass() -> None:
     assert by_name["repo-reading-guide"].actual_intent == "repo-reading-guide"
     assert by_name["repo-adoption"].actual_requires_collaboration is True
     assert by_name["personal"].actual_agent_id == "personal-secretary-zhanghaibo"
+    assert by_name["personal-due-reminders"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["diet"].actual_agent_id == "diet-assistant-zhanghaibo"
 
 
@@ -46,5 +48,6 @@ def test_agent_routing_eval_cli_outputs_summary() -> None:
         text=True,
     )
 
-    assert "Summary: 12/12 passed" in completed.stdout
+    assert "Summary: 13/13 passed" in completed.stdout
     assert "repo-reading-guide" in completed.stdout
+    assert "personal-due-reminders" in completed.stdout
