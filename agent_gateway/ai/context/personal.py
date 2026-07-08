@@ -1110,6 +1110,36 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def format_personal_review_entry(review_json: str) -> str:
+        if not review_json.strip():
+            return "Error: review_json is required"
+        data = json.loads(review_json)
+        if not isinstance(data, dict):
+            return "Error: review_json must be a JSON object"
+        if not data.get("summary"):
+            return "Error: review_json must be a personal_review_add object"
+
+        completed = data.get("completed") if isinstance(data.get("completed"), list) else []
+        blockers = data.get("blockers") if isinstance(data.get("blockers"), list) else []
+        next_step = str(data.get("next_step") or "").strip()
+
+        sections = [
+            "## 复盘已记录",
+            f"- 摘要：{data.get('summary')}",
+            "",
+            "## 完成事项",
+            _markdown_bullets(completed),
+            "",
+            "## 卡点",
+            _markdown_bullets(blockers),
+            "",
+            "## 下一步",
+            f"- {next_step}" if next_step else "- 暂无明确下一步",
+            "",
+            "> 边界：这是复盘记录确认，只格式化已保存结果，不会自动新增待办、完成待办或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_review_recent(
         limit: int = 5,
         *,
@@ -1914,6 +1944,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_review_add,
             tags=("personal", "review", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_review_entry",
+            description=(
+                "Format a personal_review_add JSON object into a concise Chinese "
+                "Markdown review creation confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["review_json"],
+                "properties": {
+                    "review_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_review_add.",
+                    },
+                },
+            },
+            handler=format_personal_review_entry,
+            tags=("personal", "review", "format", "user-facing"),
         )
     )
     registry.register(

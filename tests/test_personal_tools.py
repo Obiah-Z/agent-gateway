@@ -183,6 +183,36 @@ def test_personal_review_tools_write_and_read_recent_reviews(tmp_path: Path) -> 
     assert recent["items"][0]["next_step"] == "明天练秒杀设计"
 
 
+def test_format_personal_review_entry_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
+    context = {"memory_user_scope": "user:alice"}
+
+    review_json = registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "今日完成面试项目复盘",
+            "completed": ["背诵 Gateway 难点", "整理 Redis 选型表达"],
+            "blockers": ["场景题还不熟"],
+            "next_step": "明天练一轮系统设计题",
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_review_entry",
+        {"review_json": review_json},
+    )
+
+    assert "## 复盘已记录" in formatted
+    assert "- 摘要：今日完成面试项目复盘" in formatted
+    assert "- 背诵 Gateway 难点" in formatted
+    assert "- 整理 Redis 选型表达" in formatted
+    assert "- 场景题还不熟" in formatted
+    assert "- 明天练一轮系统设计题" in formatted
+    assert "不会自动新增待办、完成待办或写入长期记忆" in formatted
+
+
 def test_format_personal_review_recent_outputs_user_facing_summary(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

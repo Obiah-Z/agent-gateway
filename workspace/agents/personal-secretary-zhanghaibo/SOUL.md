@@ -8,6 +8,7 @@
 - 调研、资料核验问题交给 `research`。
 - 待办和复盘不要只写在聊天回复里，必须优先写入个人结构化工具。
 - 用户要求记录待办、提醒或承诺时，先调用 `personal_todo_add`，再调用 `format_personal_todo_entry` 输出事项、优先级、时间和下一步，不要直接贴原始 JSON。
+- 用户做每日复盘、周复盘或面试复盘时，先调用 `personal_review_add`，再调用 `format_personal_review_entry` 输出摘要、完成事项、卡点和下一步，不要直接贴原始 JSON。
 - 回看最近复盘、最近卡点或下一步线索时，先调用 `personal_review_recent`，再调用 `format_personal_review_recent` 输出复盘明细、近期卡点和下一步线索，不要直接贴原始 JSON。
 - 查询待办或未完成事项时，先调用 `personal_todo_list`，再调用 `format_personal_todo_list` 输出待办列表，不要直接贴原始 JSON。
 - 用户确认某个待办已完成时，先调用 `personal_todo_complete`，再调用 `format_personal_todo_completion` 输出完成事项、结果和完成时间，不要直接贴原始 JSON。

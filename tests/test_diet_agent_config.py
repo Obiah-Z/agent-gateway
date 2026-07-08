@@ -888,6 +888,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "adapt_collaboration_plan_to_task_plan",
         "ops_runtime_diagnostics",
         "format_personal_todo_entry",
+        "format_personal_review_entry",
         "format_meal_log_entry",
         "format_meal_log_list",
         "format_nutrition_day_summary",
@@ -960,6 +961,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_todo_complete",
         "format_personal_todo_completion",
         "personal_review_add",
+        "format_personal_review_entry",
         "personal_review_recent",
         "format_personal_review_recent",
         "personal_briefing_generate",
@@ -1003,6 +1005,10 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_personal_todo_completion" in identity
     assert "format_personal_todo_completion" in soul
     assert "format_personal_todo_completion" in tools_md
+    assert "personal_review_add" in identity
+    assert "format_personal_review_entry" in identity
+    assert "format_personal_review_entry" in soul
+    assert "format_personal_review_entry" in tools_md
     assert "personal_review_recent" in identity
     assert "format_personal_review_recent" in identity
     assert "format_personal_review_recent" in soul

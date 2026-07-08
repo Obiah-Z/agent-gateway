@@ -191,6 +191,7 @@
           "personal_todo_complete",
           "format_personal_todo_completion",
           "personal_review_add",
+          "format_personal_review_entry",
           "personal_review_recent",
           "format_personal_review_recent",
           "personal_briefing_generate",
