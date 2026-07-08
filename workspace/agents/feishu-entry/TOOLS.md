@@ -6,11 +6,13 @@
 
 如果用户只需要入口层判断、协作路线和下一步说明，优先调用 `prepare_entry_route_response`。该工具会输出可直接回复用户的 `formatted_response`，但不会自动执行目标 Agent。
 
+如果用户要求实际完成复杂任务，例如“分析仓库是否适合引入 Gateway，并给风险审查、采纳计划和正式报告”，优先调用 `start_agent_orchestration`。该工具会把任务提交给后台主控协作，由 `main` 持续规划下一步并委托专家 Agent 执行。调用后只回复“已启动主控协作任务”，不要声称报告已经完成。
+
 用户询问 Agent 能力目录或某个任务该交给谁时，也可以优先调用 `prepare_entry_route_response`，读取其中的 `capability_catalog`、可选 `capability_match`、可选 `capability_handoff_package` 和 `formatted_response`。
 
 不确定当前有哪些协作路线、别名或阶段顺序时，先调用 `list_agent_collaboration_routes` 查询路线目录。
 
-如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
+如果任务需要多个 Agent 串联但用户只要求路线或规划，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
 
 仓库任务如果只是问“先看哪些文件 / 从哪里读起 / 阅读路线”，按 `repo-reading-guide` 交给 repo-analyzer 单独处理；不要调用 `plan_agent_collaboration` 升级成完整采纳路线。
 

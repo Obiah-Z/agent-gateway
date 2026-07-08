@@ -105,6 +105,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "request_agent_handoff" in tools
     assert "list_agent_collaboration_routes" in tools
     assert "plan_agent_collaboration" in tools
+    assert "compose_collaboration_execution_blueprint" not in tools
     assert "explain_agent_route" in tools
     assert "prepare_entry_route_response" in tools
     assert by_id["main"]["prompt_policy"]["prompt_dir"] == "agents/main"
@@ -137,6 +138,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "request_agent_handoff" in combined_prompt
     assert "list_agent_collaboration_routes" in combined_prompt
     assert "plan_agent_collaboration" in combined_prompt
+    assert "compose_collaboration_execution_blueprint" not in combined_prompt
     assert "explain_agent_route" in combined_prompt
     assert "prepare_entry_route_response" in combined_prompt
     assert "不假装已经完成多 Agent 自动协作" in combined_prompt
@@ -178,6 +180,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "compose_collaboration_final_summary" in tools
         assert "format_collaboration_final_summary" in tools
         assert "plan_agent_collaboration" in tools
+        assert "compose_collaboration_execution_blueprint" not in tools
         assert "explain_agent_route" in tools
         assert "prepare_entry_route_response" in tools
         assert "classify_task_intent" in identity
@@ -236,6 +239,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_handoff_package" in tools_md
         assert "list_agent_collaboration_routes" in tools_md
         assert "plan_agent_collaboration" in tools_md
+        assert "compose_collaboration_execution_blueprint" not in tools_md
         assert "explain_agent_route" in tools_md
         assert "prepare_entry_route_response" in tools_md
         assert "suggest_agent_delegation" in tools_md
@@ -650,6 +654,10 @@ def test_doc_writer_has_outline_tool_and_material_gap_prompt() -> None:
     assert "render_collaboration_final_summary_gate_markdown" in soul
     assert "render_collaboration_final_summary_gate_markdown" in tools_md
     assert "collaboration_final_summary_gate_review" in tools_md
+    assert "render_collaboration_execution_blueprint_markdown" not in identity
+    assert "render_collaboration_execution_blueprint_markdown" not in soul
+    assert "render_collaboration_execution_blueprint_markdown" not in tools_md
+    assert "agent_collaboration_execution_blueprint" not in tools_md
     assert "不代表任何 Agent 已经执行" in soul
     assert "材料不足" in tools_md
 
@@ -899,6 +907,9 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "format_collaboration_final_summary" in tools["wework-entry"]
     assert "plan_agent_collaboration" in tools["feishu-entry"]
     assert "plan_agent_collaboration" in tools["wework-entry"]
+    assert "compose_collaboration_execution_blueprint" not in tools["main"]
+    assert "compose_collaboration_execution_blueprint" not in tools["feishu-entry"]
+    assert "compose_collaboration_execution_blueprint" not in tools["wework-entry"]
     assert "explain_agent_route" in tools["feishu-entry"]
     assert "explain_agent_route" in tools["wework-entry"]
     assert "prepare_entry_route_response" in tools["feishu-entry"]
@@ -928,6 +939,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "compose_collaboration_final_summary" not in tools[agent_id]
         assert "format_collaboration_final_summary" not in tools[agent_id]
         assert "plan_agent_collaboration" not in tools[agent_id]
+        assert "compose_collaboration_execution_blueprint" not in tools[agent_id]
         assert "explain_agent_route" not in tools[agent_id]
         assert "prepare_entry_route_response" not in tools[agent_id]
 

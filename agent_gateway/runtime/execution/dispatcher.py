@@ -8,6 +8,8 @@ dispatcher 是入站消息进入 Agent Loop 前的核心编排点：负责路由
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from typing import Any
 
 from agent_gateway.runtime.domain.agents import AgentManager
 from agent_gateway.gateways.messaging.manager import ChannelManager
@@ -35,6 +37,7 @@ class GatewayDispatcher:
         command_queue: CommandQueue,
         delivery_queue: DeliveryQueue,
         event_store: RuntimeEventStore | None = None,
+        task_queue: Any | None = None,
     ) -> None:
         self.agents = agents
         self.bindings = bindings
@@ -42,6 +45,7 @@ class GatewayDispatcher:
         self.command_queue = command_queue
         self.delivery_queue = delivery_queue
         self.event_store = event_store
+        self.task_queue = task_queue
         self.runner.event_store = event_store
 
     async def dispatch_inbound(
@@ -92,6 +96,14 @@ class GatewayDispatcher:
                 else "",
             },
         )
+        orchestration_reply = self._maybe_enqueue_orchestration(
+            inbound,
+            route_agent_id=route.agent_id,
+            route_session_key=route.session_key,
+            correlation_id=correlation_id,
+        )
+        if orchestration_reply is not None:
+            return DispatchResult(inbound=inbound, route=route, reply=orchestration_reply)
         final_route = route
         try:
             reply = await self._execute_lane_task(
@@ -126,6 +138,98 @@ class GatewayDispatcher:
             )
             raise
         return DispatchResult(inbound=inbound, route=final_route, reply=reply)
+
+    def _maybe_enqueue_orchestration(
+        self,
+        inbound: InboundMessage,
+        *,
+        route_agent_id: str,
+        route_session_key: str,
+        correlation_id: str,
+    ) -> AgentReply | None:
+        """对高置信复杂任务直接启动主控协作，避免依赖入口 Agent 自觉调用工具。"""
+
+        if self.task_queue is None:
+            return None
+        if not self._should_auto_orchestrate(inbound.text, route_agent_id):
+            return None
+        run_id = self._orchestration_run_id(route_agent_id, inbound.text)
+        task = self.task_queue.enqueue(
+            task_type="agent_collaboration",
+            source="auto_orchestration",
+            agent_id="main",
+            session_key=f"orchestration:{run_id}:controller:main",
+            priority=80,
+            idempotency_key=f"auto_orchestration:{route_agent_id}:{run_id}",
+            payload={
+                "user_goal": inbound.text,
+                "controller_agent_id": "main",
+                "run_id": run_id,
+                "channel": inbound.channel,
+                "mode": "minimal",
+                "max_iterations": 8,
+                "disabled_tools": ["memory_write"],
+                "correlation_id": correlation_id,
+                "response_target": {
+                    "channel": inbound.channel,
+                    "account_id": inbound.account_id,
+                    "peer_id": inbound.peer_id,
+                    "source_session_key": route_session_key,
+                    "source_agent_id": route_agent_id,
+                },
+            },
+            metadata={
+                "origin": "dispatcher_auto_orchestration",
+                "source_agent_id": route_agent_id,
+                "source_session_key": route_session_key,
+                "correlation_id": correlation_id,
+            },
+        )
+        self._record(
+            "agent.orchestration.enqueued",
+            status="ok",
+            component="dispatcher",
+            message="Auto orchestration task enqueued",
+            correlation_id=correlation_id,
+            agent_id=route_agent_id,
+            session_key=route_session_key,
+            channel=inbound.channel,
+            account_id=inbound.account_id,
+            peer_id=inbound.peer_id,
+            metadata={"task_id": task.id, "run_id": run_id, "controller_agent_id": "main"},
+        )
+        return AgentReply(
+            agent_id=route_agent_id,
+            session_key=route_session_key,
+            text=(
+                "已启动主控协作任务。主 Agent 会持续规划下一步、委托专家 Agent 执行，"
+                "完成后会把最终结果继续推送到当前会话。"
+            ),
+            stop_reason="orchestration_enqueued",
+            tool_calls=["start_agent_orchestration"],
+        )
+
+    def _should_auto_orchestrate(self, text: str, route_agent_id: str) -> bool:
+        """判断是否应跳过入口 Agent，直接进入主控协作。"""
+
+        if route_agent_id not in {"main", "feishu-entry", "wework-entry"}:
+            return False
+        normalized = text.lower()
+        has_repo = "github.com/" in normalized or "仓库" in text or "repo" in normalized
+        if not has_repo:
+            return False
+        adoption_signals = ("引入 gateway", "适合引入", "采纳计划", "风险审查", "正式报告")
+        if any(signal in normalized for signal in adoption_signals):
+            return True
+        chinese_signals = ("引入", "风险", "采纳", "报告")
+        return sum(1 for signal in chinese_signals if signal in text) >= 3
+
+    @staticmethod
+    def _orchestration_run_id(agent_id: str, user_goal: str) -> str:
+        """生成稳定 run_id，用于自动编排任务幂等。"""
+
+        seed = f"{agent_id}:{user_goal}".encode("utf-8")
+        return hashlib.sha256(seed).hexdigest()[:12]
 
     async def _execute_handoff(
         self,

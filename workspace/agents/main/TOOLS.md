@@ -16,10 +16,24 @@
 使用后：
 
 - 如果 `can_answer_directly=true`，可以直接回答。
-- 如果 `requires_collaboration=true`，先调用 `plan_agent_collaboration`，并把 `collaboration_task_type` 作为 `task_type`。
+- 如果 `requires_collaboration=true` 且用户要求实际完成任务，优先调用 `start_agent_orchestration`，由主控 Agent 持续规划下一步并驱动专家 Agent 执行。
+- 只有用户明确要求“先给路线 / 先规划 / 不执行”时，才调用 `plan_agent_collaboration`，并把 `collaboration_task_type` 作为 `task_type`。
 - 如果结果是 `repo-reading-guide`，只生成 repo-analyzer 交接提示；目标 Agent 应使用 `github_repo_reading_guide`，不要走完整 `repo-adoption` 协作路线。
 - 如果推荐了专用 Agent，说明推荐对象和原因，并给出可复制的交接提示。
 - 不要把分类结果当成已经完成的执行结果。
+
+## `start_agent_orchestration`
+
+用于启动类似 Claude Code 的主控协作执行。主控 Agent 会根据用户目标和每一步观察结果，持续决定下一步是委托专家、继续验证、生成报告还是结束。
+
+使用规则：
+
+- 用户要求“分析仓库是否适合引入 Gateway / 风险审查 / 采纳计划 / 正式报告 / 多 Agent 协作执行”时，优先调用该工具。
+- `user_goal` 保留用户原始请求，不要压缩掉仓库 URL、风险范围、产物要求和平台上下文。
+- `controller_agent_id` 默认使用 `main`。
+- `channel` 使用当前入口通道，例如 `wework` 或 `feishu`。
+- 工具只负责把协作任务入队；回复用户时说明“已启动主控协作任务”，不要声称最终报告已经完成。
+- 如果用户只是询问路线，不要启动任务，改用 `plan_agent_collaboration`。
 
 ## `prepare_entry_route_response`
 
@@ -85,6 +99,7 @@
 - 该工具只输出 `handoff_sequence`，不会自动调用任何 Agent。
 - 每个阶段完成后，上一阶段结构化输出应作为下一阶段 `upstream_result`。
 - 给用户说明时必须强调这是协作路线，不代表已经执行。
+- 如果用户要求实际执行复杂协作任务，改用 `start_agent_orchestration`，不要生成静态执行蓝图。
 
 ## `build_collaboration_stage_handoff`
 

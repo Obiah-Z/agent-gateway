@@ -79,6 +79,15 @@ class HandoffRunner(FakeRunner):
         )
 
 
+class FakeTaskQueue:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def enqueue(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("Task", (), {"id": "task-auto-1"})()
+
+
 def test_dispatcher_routes_executes_and_enqueues_reply(tmp_path) -> None:
     agents = AgentManager()
     agents.register(AgentConfig(id="main", name="Main"))
@@ -108,6 +117,88 @@ def test_dispatcher_routes_executes_and_enqueues_reply(tmp_path) -> None:
     assert queued[0].text == "echo:hello"
     assert queued[0].metadata["account_id"] == "cli-local"
     assert queued[0].metadata["session_key"] == result.reply.session_key
+
+
+def test_dispatcher_auto_orchestrates_complex_repo_adoption_request(tmp_path) -> None:
+    agents = AgentManager()
+    agents.register(AgentConfig(id="wework-entry", name="WeWork", dm_scope="per-account-channel-peer"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="wework-entry", tier=5, match_key="default", match_value="*"))
+    queue = DeliveryQueue(tmp_path / "delivery")
+    runner = FakeRunner()
+    task_queue = FakeTaskQueue()
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        runner,
+        CommandQueue(),
+        queue,
+        task_queue=task_queue,
+    )
+    inbound = InboundMessage(
+        text=(
+            "分析这个仓库是否适合引入 Gateway，并给我风险审查、采纳计划和正式报告："
+            "https://github.com/Obiah-Z/smart-trip"
+        ),
+        sender_id="zhanghaibo",
+        channel="wework",
+        account_id="wework-main",
+        peer_id="zhanghaibo",
+    )
+
+    result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+
+    assert runner.calls == []
+    assert result.reply.stop_reason == "orchestration_enqueued"
+    assert result.reply.tool_calls == ["start_agent_orchestration"]
+    assert "已启动主控协作任务" in result.reply.text
+    assert len(task_queue.calls) == 1
+    call = task_queue.calls[0]
+    assert call["task_type"] == "agent_collaboration"
+    assert call["source"] == "auto_orchestration"
+    assert call["agent_id"] == "main"
+    assert call["payload"]["controller_agent_id"] == "main"
+    assert call["payload"]["channel"] == "wework"
+    assert call["payload"]["response_target"] == {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "zhanghaibo",
+        "source_session_key": (
+            "agent:wework-entry:wework:wework-main:direct:zhanghaibo"
+        ),
+        "source_agent_id": "wework-entry",
+    }
+
+
+def test_dispatcher_does_not_auto_orchestrate_simple_repo_question(tmp_path) -> None:
+    agents = AgentManager()
+    agents.register(AgentConfig(id="wework-entry", name="WeWork", dm_scope="per-account-channel-peer"))
+    bindings = BindingTable()
+    bindings.add(Binding(agent_id="wework-entry", tier=5, match_key="default", match_value="*"))
+    queue = DeliveryQueue(tmp_path / "delivery")
+    runner = FakeRunner()
+    task_queue = FakeTaskQueue()
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        runner,
+        CommandQueue(),
+        queue,
+        task_queue=task_queue,
+    )
+    inbound = InboundMessage(
+        text="帮我看看这个 GitHub 仓库先读哪些文件：https://github.com/example/repo",
+        sender_id="zhanghaibo",
+        channel="wework",
+        account_id="wework-main",
+        peer_id="zhanghaibo",
+    )
+
+    result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+
+    assert len(task_queue.calls) == 0
+    assert len(runner.calls) == 1
+    assert result.reply.text.startswith("echo:")
 
 
 def test_dispatcher_executes_one_shot_agent_handoff(tmp_path) -> None:

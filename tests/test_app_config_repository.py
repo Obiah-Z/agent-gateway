@@ -7,7 +7,7 @@ from agent_gateway.app import build_application
 from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.state.factory import StateRepositoryBundle
 from agent_gateway.runtime.state.repository import StateReadRepository
-from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
+from agent_gateway.runtime.tasks.handlers import AgentCollaborationTaskHandler, AgentInboundTaskHandler
 
 
 class FakeConfigReadRepository(StateReadRepository):
@@ -174,6 +174,10 @@ def test_build_application_injects_primary_write_backend_only_when_enabled(
     agent_handler = enabled_app.task_worker.handlers["agent_inbound"]
     assert isinstance(agent_handler, AgentInboundTaskHandler)
     assert agent_handler.lane_coordinator.state_repository is enabled_app.task_store.write_backend
+    assert isinstance(
+        enabled_app.task_worker.handlers["agent_collaboration"],
+        AgentCollaborationTaskHandler,
+    )
 
 
 def test_build_application_uses_configured_task_worker_identity(
@@ -201,3 +205,7 @@ def test_build_application_uses_configured_task_worker_identity(
     assert application.task_worker.concurrency == 5
     assert isinstance(agent_handler, AgentInboundTaskHandler)
     assert agent_handler.worker_id == "worker-east-1"
+    assert isinstance(
+        application.task_worker.handlers["agent_collaboration"],
+        AgentCollaborationTaskHandler,
+    )

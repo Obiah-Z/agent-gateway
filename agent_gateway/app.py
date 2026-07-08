@@ -39,6 +39,7 @@ from agent_gateway.runtime.domain.models import ProactiveTarget
 from agent_gateway.runtime.domain.router import BindingTable
 from agent_gateway.runtime.execution.autonomy import AutonomyRuntime
 from agent_gateway.runtime.execution.channel_runtime import ChannelRuntime
+from agent_gateway.runtime.execution.collaboration import CollaborationRuntime
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
@@ -58,7 +59,7 @@ from agent_gateway.runtime.tasks import (
     RedisSessionReadyScheduler,
     TaskWorkerRuntime,
 )
-from agent_gateway.runtime.tasks.handlers import AgentInboundTaskHandler
+from agent_gateway.runtime.tasks.handlers import AgentCollaborationTaskHandler, AgentInboundTaskHandler
 from agent_gateway.gateways.feishu.http import FeishuWebhookServer
 from agent_gateway.gateways.feishu.long_connection import FeishuLongConnectionRuntime
 from agent_gateway.gateways.control.websocket_server import GatewayServer
@@ -98,6 +99,7 @@ class GatewayApplication:
     profile_manager: ProfileManager  # 模型 Profile 管理器，负责主备模型和冷却状态。
     channel_manager: ChannelManager  # 多通道管理器，保存 CLI、飞书、Telegram 等通道实例。
     dispatcher: GatewayDispatcher  # 入站/后台任务调度器，连接路由、Agent Loop 和投递队列。
+    collaboration_runtime: CollaborationRuntime  # 多 Agent 协作蓝图执行器。
     autonomy_runtime: AutonomyRuntime  # 主动任务运行时，包含 Heartbeat 和 Cron。
     delivery_queue: DeliveryQueue  # 可靠投递磁盘队列。
     delivery_runtime: DeliveryRuntime  # 出站投递运行时，负责重试、失败归档和成功回调。
@@ -290,11 +292,18 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     tools = ToolRegistry()
     skills_manager = SkillsManager(settings.workspace_root)
     skills_manager.discover()
+
+    def enqueue_background_task(**kwargs):
+        """延迟绑定后台任务队列，供工具在运行时提交任务。"""
+
+        return task_queue.enqueue(**kwargs)
+
     register_builtin_tools(
         tools,
         settings.workspace_root,
         max_output_chars=settings.max_tool_output_chars,
         default_timeout=settings.tool_timeout_seconds,
+        task_enqueue=enqueue_background_task,
     )
     register_memory_tools(tools, memory_store)
     register_diet_tools(tools, diet_store)
@@ -363,6 +372,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         command_queue,
         delivery_queue,
         event_store=event_store,
+        task_queue=task_queue,
     )
     autonomy_runtime = AutonomyRuntime(
         settings,
@@ -375,6 +385,11 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         state_write_repository=primary_write,
         diet_store=diet_store,
     )
+    collaboration_runtime = CollaborationRuntime(
+        runner,
+        event_store=event_store,
+        artifact_root=settings.workspace_root,
+    )
     task_worker = TaskWorkerRuntime(
         task_queue,
         worker_id=settings.task_worker_id,
@@ -383,6 +398,14 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     task_worker.register_handler("cron", autonomy_runtime.cron.run_task_instance)
     task_worker.register_handler("heartbeat", autonomy_runtime.heartbeat.run_task_instance)
+    task_worker.register_handler(
+        "agent_collaboration",
+        AgentCollaborationTaskHandler(
+            collaboration_runtime,
+            dispatcher=dispatcher,
+            channels=channel_manager,
+        ),
+    )
     task_worker.register_handler(
         "agent_inbound",
         AgentInboundTaskHandler(
@@ -411,6 +434,9 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     agent_inbound_handler = task_worker.handlers.get("agent_inbound")
     if isinstance(agent_inbound_handler, AgentInboundTaskHandler):
         agent_inbound_handler.delivery_runtime = delivery_runtime
+    agent_collaboration_handler = task_worker.handlers.get("agent_collaboration")
+    if isinstance(agent_collaboration_handler, AgentCollaborationTaskHandler):
+        agent_collaboration_handler.delivery_runtime = delivery_runtime
     metrics_runtime = MetricsRuntime(
         metrics_store=metrics_store,
         delivery_queue=delivery_queue,
@@ -478,6 +504,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         profile_manager=profile_manager,
         channel_manager=channel_manager,
         dispatcher=dispatcher,
+        collaboration_runtime=collaboration_runtime,
         autonomy_runtime=autonomy_runtime,
         delivery_queue=delivery_queue,
         delivery_runtime=delivery_runtime,

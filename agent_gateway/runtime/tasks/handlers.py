@@ -5,7 +5,8 @@ from collections.abc import Callable
 
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.infra.redis_client import RedisClient
-from agent_gateway.runtime.domain.models import InboundMessage
+from agent_gateway.runtime.domain.models import InboundMessage, ProactiveTarget
+from agent_gateway.runtime.execution.collaboration import CollaborationRuntime
 from agent_gateway.runtime.execution.delivery_runtime import DeliveryRuntime
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 from agent_gateway.runtime.tasks.lane import LaneOwnership, LaneOwnerToken, RedisLaneCoordinator
@@ -231,3 +232,88 @@ class AgentInboundTaskHandler:
         except Exception:
             # 进度提示是体验增强，失败时不能影响真正的任务执行和最终回复。
             pass
+
+
+class AgentCollaborationTaskHandler:
+    """后台执行主控 Agent 持续规划协作任务。"""
+
+    def __init__(
+        self,
+        runtime: CollaborationRuntime,
+        dispatcher: GatewayDispatcher | None = None,
+        channels: ChannelManager | None = None,
+        delivery_runtime: DeliveryRuntime | None = None,
+    ) -> None:
+        self.runtime = runtime
+        self.dispatcher = dispatcher
+        self.channels = channels
+        self.delivery_runtime = delivery_runtime
+
+    async def __call__(self, task: TaskInstance) -> str:
+        """从任务 payload 读取主控目标并运行协作闭环。"""
+
+        orchestration_goal = str(task.payload.get("user_goal") or "").strip()
+        controller_agent_id = str(task.payload.get("controller_agent_id") or "").strip()
+        if not orchestration_goal or not controller_agent_id:
+            raise ValueError(
+                "agent_collaboration task requires user_goal and controller_agent_id"
+            )
+        result = await self.runtime.execute_orchestrated(
+            user_goal=orchestration_goal,
+            controller_agent_id=controller_agent_id,
+            channel=str(task.payload.get("channel") or "collaboration"),
+            mode=str(task.payload.get("mode") or "minimal"),
+            correlation_id=str(task.payload.get("correlation_id") or task.id),
+            session_prefix=str(task.payload.get("session_prefix") or "orchestration"),
+            run_id=str(task.payload.get("run_id") or task.id),
+            max_iterations=int(task.payload.get("max_iterations") or 8),
+            disabled_tools=list(task.payload.get("disabled_tools") or []),
+        )
+        delivery_id = await self._deliver_orchestration_result(task, result)
+        delivery_suffix = f" delivered={delivery_id}" if delivery_id else ""
+        return (
+            f"agent orchestration {result['status']}: "
+            f"{result['run_id']} observations={result['observation_count']}"
+            f"{delivery_suffix}"
+        )
+
+    async def _deliver_orchestration_result(
+        self,
+        task: TaskInstance,
+        result: dict[str, object],
+    ) -> str:
+        """把主控协作最终输出投递回触发该任务的消息通道。"""
+
+        if self.dispatcher is None or self.channels is None:
+            return ""
+        target_payload = task.payload.get("response_target")
+        if not isinstance(target_payload, dict):
+            return ""
+        channel = str(target_payload.get("channel") or task.payload.get("channel") or "").strip()
+        peer_id = str(target_payload.get("peer_id") or "").strip()
+        if not channel or not peer_id:
+            return ""
+        text = str(result.get("final_output") or "").strip()
+        if not text:
+            text = f"主控协作任务已结束，状态：{result.get('status', 'unknown')}"
+        target = ProactiveTarget(
+            channel=channel,
+            account_id=str(target_payload.get("account_id") or ""),
+            peer_id=peer_id,
+            agent_id=str(result.get("controller_agent_id") or task.agent_id or "main"),
+        )
+        delivery_id = await self.dispatcher.deliver_text(
+            self.channels,
+            target,
+            text,
+            metadata={
+                "kind": "agent_orchestration_result",
+                "task_id": task.id,
+                "run_id": str(result.get("run_id") or ""),
+                "status": str(result.get("status") or ""),
+                "source_session_key": str(target_payload.get("source_session_key") or ""),
+            },
+        )
+        if self.delivery_runtime is not None and channel == "cli":
+            await self.delivery_runtime.flush_once()
+        return delivery_id

@@ -8,6 +8,84 @@ from agent_gateway.ai.tools.registry import ToolRegistry
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_start_agent_orchestration_enqueues_controller_task(tmp_path: Path) -> None:
+    calls = []
+
+    def enqueue_task(**kwargs):
+        calls.append(kwargs)
+        return type("Task", (), {"id": "task-1", "status": "pending"})()
+
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path, task_enqueue=enqueue_task)
+
+    result = json.loads(
+        registry.dispatch(
+            "start_agent_orchestration",
+            {
+                "user_goal": (
+                    "分析这个仓库是否适合引入 Gateway，并给风险审查、采纳计划和正式报告："
+                    "https://github.com/Obiah-Z/smart-trip"
+                ),
+                "controller_agent_id": "main",
+                "channel": "wework",
+                "run_id": "smart-trip-review",
+                "max_iterations": 6,
+            },
+        )
+    )
+
+    assert result["type"] == "agent_orchestration_task"
+    assert result["task_id"] == "task-1"
+    assert result["run_id"] == "smart-trip-review"
+    assert calls[0]["task_type"] == "agent_collaboration"
+    assert calls[0]["source"] == "agent_orchestration"
+    assert calls[0]["agent_id"] == "main"
+    assert calls[0]["session_key"] == "orchestration:smart-trip-review:controller:main"
+    assert calls[0]["payload"]["controller_agent_id"] == "main"
+    assert calls[0]["payload"]["channel"] == "wework"
+    assert calls[0]["payload"]["max_iterations"] == 6
+    assert calls[0]["payload"]["disabled_tools"] == ["memory_write"]
+
+
+def test_start_agent_orchestration_captures_response_target_from_runtime_context(
+    tmp_path: Path,
+) -> None:
+    calls = []
+
+    def enqueue_task(**kwargs):
+        calls.append(kwargs)
+        return type("Task", (), {"id": "task-2", "status": "pending"})()
+
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path, task_enqueue=enqueue_task)
+
+    result = json.loads(
+        registry.dispatch(
+            "start_agent_orchestration",
+            {
+                "user_goal": "分析 smart-trip 并生成正式报告",
+                "controller_agent_id": "main",
+                "run_id": "smart-trip",
+            },
+            runtime_context={
+                "agent_id": "wework-entry",
+                "channel": "wework",
+                "session_key": "agent:wework-entry:wework:wework-main:direct:zhanghaibo",
+            },
+        )
+    )
+
+    assert result["type"] == "agent_orchestration_task"
+    assert calls[0]["payload"]["channel"] == "wework"
+    assert calls[0]["payload"]["response_target"] == {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "zhanghaibo",
+        "source_session_key": "agent:wework-entry:wework:wework-main:direct:zhanghaibo",
+        "source_agent_id": "wework-entry",
+    }
+
+
 def test_write_file_accepts_path_alias(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
@@ -2480,6 +2558,22 @@ def test_plan_agent_collaboration_builds_repo_adoption_route(tmp_path: Path) -> 
     ]
     assert "不会自动调用任何 Agent" in data["next_actions"][2]
     assert "不代表任何 Agent 已经执行" in data["note"]
+
+
+def test_static_collaboration_blueprint_tools_are_not_registered(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    registered = set(registry.names())
+
+    assert "compose_collaboration_execution_blueprint" not in registered
+    assert "render_collaboration_execution_blueprint_markdown" not in registered
+    assert registry.dispatch("compose_collaboration_execution_blueprint", {}) == (
+        "Error: unknown tool 'compose_collaboration_execution_blueprint'"
+    )
+    assert registry.dispatch("render_collaboration_execution_blueprint_markdown", {}) == (
+        "Error: unknown tool 'render_collaboration_execution_blueprint_markdown'"
+    )
 
 
 def test_list_agent_collaboration_routes_filters_by_alias(tmp_path: Path) -> None:

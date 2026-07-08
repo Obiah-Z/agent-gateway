@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from agent_gateway.ai.agent_contracts import (
     DEFAULT_AGENT_ROUTING_CONTRACTS,
@@ -271,12 +274,51 @@ def _keyword_score(text: str, keywords: tuple[str, ...]) -> int:
     return sum(1 for keyword in keywords if keyword and keyword in text)
 
 
+def _short_hash(text: str) -> str:
+    """生成稳定短哈希，用于任务 run_id 和幂等键。"""
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _response_target_from_session_key(
+    session_key: str,
+    *,
+    fallback_channel: str = "",
+) -> dict[str, str]:
+    """从标准 session_key 中恢复可投递的响应目标。"""
+
+    parts = str(session_key or "").split(":")
+    if len(parts) >= 6 and parts[0] == "agent" and parts[4] == "direct":
+        return {
+            "channel": parts[2],
+            "account_id": parts[3],
+            "peer_id": parts[5],
+            "source_session_key": session_key,
+        }
+    if len(parts) >= 5 and parts[0] == "agent" and parts[3] == "direct":
+        return {
+            "channel": parts[2],
+            "account_id": "",
+            "peer_id": parts[4],
+            "source_session_key": session_key,
+        }
+    if len(parts) >= 4 and parts[0] == "agent" and parts[2] == "direct":
+        return {
+            "channel": fallback_channel,
+            "account_id": "",
+            "peer_id": parts[3],
+            "source_session_key": session_key,
+        }
+    return {}
+
+
 def register_builtin_tools(
     registry: ToolRegistry,
     workspace_root: Path,
     *,
     max_output_chars: int = 50_000,
     default_timeout: int = 30,
+    task_enqueue: Callable[..., Any] | None = None,
 ) -> None:
     """注册网关内置工具集。"""
 
@@ -299,6 +341,83 @@ def register_builtin_tools(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return f"Wrote {len(content)} chars to {path.relative_to(workspace_root)}"
+
+    def start_agent_orchestration(
+        user_goal: str,
+        controller_agent_id: str = "main",
+        channel: str = "collaboration",
+        run_id: str = "",
+        max_iterations: int = 8,
+        mode: str = "minimal",
+        idempotency_key: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        """提交由主控 Agent 持续规划下一步的后台协作任务。"""
+
+        runtime_context = dict(__runtime_context or {})
+        goal = user_goal.strip()
+        controller = controller_agent_id.strip() or "main"
+        if not goal:
+            return "Error: start_agent_orchestration requires user_goal"
+        if task_enqueue is None:
+            return "Error: task queue is not available in this runtime"
+        safe_max_iterations = max(1, min(int(max_iterations or 8), 20))
+        safe_run_id = run_id.strip() or _short_hash(f"{controller}:{goal}")[:12]
+        requested_channel = channel.strip()
+        runtime_channel = str(runtime_context.get("channel") or "").strip()
+        safe_channel = (
+            runtime_channel
+            if requested_channel in {"", "collaboration"} and runtime_channel
+            else requested_channel or "collaboration"
+        )
+        safe_mode = mode.strip() or "minimal"
+        source_session_key = str(runtime_context.get("session_key") or "").strip()
+        response_target = _response_target_from_session_key(
+            source_session_key,
+            fallback_channel=safe_channel,
+        )
+        if response_target and not response_target.get("channel"):
+            response_target["channel"] = safe_channel
+        if response_target:
+            response_target["source_agent_id"] = str(runtime_context.get("agent_id") or "")
+        task = task_enqueue(
+            task_type="agent_collaboration",
+            source="agent_orchestration",
+            agent_id=controller,
+            session_key=f"orchestration:{safe_run_id}:controller:{controller}",
+            priority=80,
+            idempotency_key=(
+                idempotency_key.strip()
+                or f"agent_orchestration:{controller}:{safe_run_id}"
+            ),
+            payload={
+                "user_goal": goal,
+                "controller_agent_id": controller,
+                "run_id": safe_run_id,
+                "channel": safe_channel,
+                "mode": safe_mode,
+                "max_iterations": safe_max_iterations,
+                "disabled_tools": ["memory_write"],
+                "response_target": response_target,
+            },
+            metadata={
+                "origin": "start_agent_orchestration",
+                "controller_agent_id": controller,
+                "source_session_key": source_session_key,
+            },
+        )
+        return json.dumps(
+            {
+                "type": "agent_orchestration_task",
+                "task_id": task.id,
+                "status": task.status,
+                "run_id": safe_run_id,
+                "controller_agent_id": controller,
+                "user_goal": goal,
+                "message": "主控协作任务已入队，将由 worker 持续规划下一步并执行。",
+            },
+            ensure_ascii=False,
+        )
 
     def save_markdown_report(
         title: str,
@@ -7645,6 +7764,51 @@ def register_builtin_tools(
             },
             handler=write_file,
             tags=("filesystem", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="start_agent_orchestration",
+            description=(
+                "Enqueue a controller-agent orchestration task. The controller agent "
+                "keeps planning the next step and delegates sub-tasks to specialist agents."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["user_goal"],
+                "properties": {
+                    "user_goal": {
+                        "type": "string",
+                        "description": "Original complex user goal to complete.",
+                    },
+                    "controller_agent_id": {
+                        "type": "string",
+                        "description": "Controller agent id, usually main.",
+                    },
+                    "channel": {
+                        "type": "string",
+                        "description": "Execution channel label, for example wework or feishu.",
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional stable run id for idempotency and artifacts.",
+                    },
+                    "max_iterations": {
+                        "type": "integer",
+                        "description": "Maximum controller planning iterations, capped at 20.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Prompt mode for execution, usually minimal.",
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": "Optional explicit idempotency key.",
+                    },
+                },
+            },
+            handler=start_agent_orchestration,
+            tags=("agent", "collaboration", "task", "orchestration"),
         )
     )
     registry.register(
