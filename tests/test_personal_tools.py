@@ -151,6 +151,41 @@ def test_personal_todo_update_by_title_refuses_ambiguous_matches(tmp_path: Path)
     assert {todo["priority"] for todo in store.list_todos(status="open", user_scope="user:alice")} == {"normal"}
 
 
+def test_personal_todo_search_returns_keyword_matches(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理 RabbitMQ 面试题", "notes": "重点讲企业选型"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "背诵 Redis 分布式锁"},
+        runtime_context=context,
+    )
+
+    result = json.loads(
+        registry.dispatch(
+            "personal_todo_search",
+            {"query": "企业选型"},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_todo_list",
+        {"todo_list_json": json.dumps(result, ensure_ascii=False)},
+    )
+
+    assert result["type"] == "personal_todo_search"
+    assert result["count"] == 1
+    assert result["items"][0]["title"] == "整理 RabbitMQ 面试题"
+    assert "## 待办列表" in formatted
+    assert "整理 RabbitMQ 面试题" in formatted
+
+
 def test_personal_todo_cancel_by_title_cancels_unique_match(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

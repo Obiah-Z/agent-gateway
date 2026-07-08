@@ -88,6 +88,31 @@ class PersonalStore:
         rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
         return rows[:safe_limit]
 
+    def search_todos(
+        self,
+        query: str,
+        *,
+        status: str = "open",
+        limit: int = 20,
+        user_scope: str = "",
+    ) -> list[dict[str, Any]]:
+        """按标题、备注或结果关键词搜索个人待办。"""
+
+        normalized_query = " ".join(query.strip().split()).lower()
+        if not normalized_query:
+            return []
+        rows = self.list_todos(status=status, limit=100, user_scope=user_scope)
+        matches = []
+        for row in rows:
+            haystack = " ".join(
+                str(row.get(field, ""))
+                for field in ("title", "notes", "result", "cancel_reason")
+            ).lower()
+            if normalized_query in haystack:
+                matches.append(row)
+        matches.sort(key=self._todo_sort_key)
+        return matches[: max(1, min(int(limit), 50))]
+
     def complete_todo(
         self,
         todo_id: str,
@@ -1056,6 +1081,32 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             user_scope=_scope(__runtime_context, user_scope),
         )
         return json.dumps({"items": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
+
+    def personal_todo_search(
+        query: str,
+        status: str = "open",
+        limit: int = 20,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        if not query.strip():
+            return "Error: query is required"
+        scope = _scope(__runtime_context, user_scope)
+        rows = personal_store.search_todos(
+            query,
+            status=status,
+            limit=limit,
+            user_scope=scope,
+        )
+        result = {
+            "type": "personal_todo_search",
+            "query": query.strip(),
+            "status": status.strip().lower() or "open",
+            "items": rows,
+            "count": len(rows),
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
 
     def format_personal_todo_list(todo_list_json: str) -> str:
         if not todo_list_json.strip():
@@ -2187,6 +2238,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
                 },
             },
             handler=personal_todo_list,
+            tags=("personal", "todo", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_todo_search",
+            description="Search structured personal todos by title, notes, result, or cancel reason.",
+            input_schema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "done", "canceled", "all", ""],
+                        "default": "open",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                },
+            },
+            handler=personal_todo_search,
             tags=("personal", "todo", "read"),
         )
     )

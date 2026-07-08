@@ -912,6 +912,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "adapt_collaboration_plan_to_task_plan",
         "ops_runtime_diagnostics",
         "format_personal_todo_entry",
+        "personal_todo_search",
         "personal_todo_complete_by_title",
         "personal_todo_update_by_title",
         "format_personal_todo_update",
@@ -995,6 +996,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_todo_add",
         "format_personal_todo_entry",
         "personal_todo_list",
+        "personal_todo_search",
         "format_personal_todo_list",
         "personal_todo_complete",
         "personal_todo_complete_by_title",
@@ -1047,6 +1049,9 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_personal_todo_list" in identity
     assert "format_personal_todo_list" in soul
     assert "format_personal_todo_list" in tools_md
+    assert "personal_todo_search" in identity
+    assert "personal_todo_search" in soul
+    assert "personal_todo_search" in tools_md
     assert "personal_todo_complete" in identity
     assert "format_personal_todo_completion" in identity
     assert "format_personal_todo_completion" in soul
