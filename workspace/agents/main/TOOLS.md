@@ -17,6 +17,7 @@
 
 - 如果 `can_answer_directly=true`，可以直接回答。
 - 如果 `requires_collaboration=true`，先调用 `plan_agent_collaboration`，并把 `collaboration_task_type` 作为 `task_type`。
+- 如果结果是 `repo-reading-guide`，只生成 repo-analyzer 交接提示；目标 Agent 应使用 `github_repo_reading_guide`，不要走完整 `repo-adoption` 协作路线。
 - 如果推荐了专用 Agent，说明推荐对象和原因，并给出可复制的交接提示。
 - 不要把分类结果当成已经完成的执行结果。
 

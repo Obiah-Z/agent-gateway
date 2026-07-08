@@ -2890,6 +2890,29 @@ def test_classify_task_intent_routes_github_repo_analysis(tmp_path: Path) -> Non
     assert data["confidence"] >= 0.67
 
 
+def test_classify_task_intent_routes_github_repo_reading_guide(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {
+            "user_text": (
+                "这个仓库 https://github.com/example/repo 我应该先看哪些文件，"
+                "从哪里读起？"
+            )
+        },
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "task_intent_classification"
+    assert data["intent"] == "repo-reading-guide"
+    assert data["recommended_agent_id"] == "repo-analyzer"
+    assert data["requires_collaboration"] is False
+    assert data["collaboration_task_type"] == ""
+    assert "github_repo_reading_guide" in data["suggested_next_step"]
+
+
 def test_classify_task_intent_routes_repo_adoption_collaboration(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
@@ -3307,6 +3330,36 @@ def test_prepare_entry_route_response_matches_agent_capability(
     assert "# Agent 交接包" in data["formatted_response"]
     assert "目标 Agent：`doc-writer`" in data["formatted_response"]
     assert "```text" in data["formatted_response"]
+    assert "不代表目标 Agent 已经自动执行" in data["formatted_response"]
+
+
+def test_prepare_entry_route_response_delegates_repo_reading_guide(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {
+                "user_text": (
+                    "这个仓库 https://github.com/example/repo 我应该先看哪些文件，"
+                    "从哪里读起？"
+                ),
+                "source_platform": "feishu",
+                "expected_output": "中文阅读路线",
+            },
+        )
+    )
+
+    assert data["classification"]["intent"] == "repo-reading-guide"
+    assert data["classification"]["requires_collaboration"] is False
+    assert data["handoff_prompt"]
+    assert "目标 Agent：repo-analyzer" in data["handoff_prompt"]
+    assert "github_repo_reading_guide" in data["route_explanation"]["next_step"]
+    assert data["collaboration_plan"] is None
+    assert "repo-analyzer" in data["formatted_response"]
     assert "不代表目标 Agent 已经自动执行" in data["formatted_response"]
 
 

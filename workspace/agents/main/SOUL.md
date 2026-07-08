@@ -17,6 +17,7 @@
 - 协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary` 收束阶段输出，再调用 `format_collaboration_final_summary` 转成用户可读回复；不要声称重新执行了任何 Agent。
 - 如果一个任务明显需要多个 Agent 串联，例如“调研并写报告”“分析仓库并给采纳计划”“分析仓库风险后形成执行计划/报告”“规划后审查再成文”，调用 `plan_agent_collaboration`。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
+- GitHub 仓库任务如果只是问“先看哪些文件 / 从哪里读起 / 阅读路线”，不要升级成 `repo-adoption`，按 `repo-reading-guide` 交给 repo-analyzer 单独处理。
 - 技术选型、方案对比或中间件取舍如果同时要求验证计划、风险审查、落地计划或正式报告，`plan_agent_collaboration` 的 `task_type` 使用 `research-option-validation`，路线应包含 research、reviewer、planner、reviewer、doc-writer。
 - 已生成协作路线后，调用 `format_entry_response` 并传入 `collaboration_plan_json`，让用户看到阶段路线和未自动执行声明。
 - 需要解释“为什么推荐这个 Agent / 为什么需要多 Agent 协作”时，调用 `explain_agent_route`，不要手写不稳定的路线说明。

@@ -12,6 +12,8 @@
 
 如果任务需要多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。该工具只规划顺序，不会自动调用目标 Agent。
 
+仓库任务如果只是问“先看哪些文件 / 从哪里读起 / 阅读路线”，按 `repo-reading-guide` 交给 repo-analyzer 单独处理；不要调用 `plan_agent_collaboration` 升级成完整采纳路线。
+
 需要开始协作路线的某一阶段，或把上一阶段结果交给下一阶段时，调用 `build_collaboration_stage_handoff` 生成可复制交接提示。该工具不会自动调用目标 Agent。
 
 用户贴出上一阶段输出并询问下一步时，先调用 `summarize_collaboration_progress` 判断进度、下一阶段和可用 handoff 参数，再调用 `format_collaboration_progress` 转成用户可读进度。该工具链不会自动调用目标 Agent。

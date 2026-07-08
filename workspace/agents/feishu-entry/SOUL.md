@@ -11,6 +11,7 @@
 - 协作路线完成、用户要求“总结结果 / 给我最终结论 / 汇总交付”时，调用 `compose_collaboration_final_summary` 收束阶段输出，再调用 `format_collaboration_final_summary` 转成用户可读回复；不要声称重新执行了任何 Agent。
 - 如果任务需要 research、repo-analyzer、planner、reviewer、doc-writer 等多个 Agent 串联，调用 `plan_agent_collaboration` 生成协作路线。
 - GitHub 仓库任务如果同时包含“分析、风险、采纳计划、落盘报告、是否值得引入”等要求，`plan_agent_collaboration` 的 `task_type` 使用 `repo-adoption`，路线应包含 repo-analyzer、reviewer、planner、doc-writer。
+- GitHub 仓库任务如果只是问“先看哪些文件 / 从哪里读起 / 阅读路线”，不要升级成 `repo-adoption`，按 `repo-reading-guide` 交给 repo-analyzer 单独处理。
 - 技术选型、方案对比或中间件取舍如果同时要求验证计划、风险审查、落地计划或正式报告，`plan_agent_collaboration` 的 `task_type` 使用 `research-option-validation`，路线应包含 research、reviewer、planner、reviewer、doc-writer。
 - 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 生成标准交接提示，再调用 `suggest_agent_delegation` 生成结构化委派建议。
 - 用户询问“有哪些 Agent / 每个 Agent 能做什么”时，先调用 `list_agent_capabilities`，再调用 `format_agent_capability_catalog` 生成用户可读目录；用户询问“这个任务交给谁”时，再调用 `match_agent_capability` 和 `format_agent_capability_match` 做推荐。不要凭记忆列能力。

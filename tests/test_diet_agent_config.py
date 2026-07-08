@@ -812,6 +812,9 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
     assert "prepare_entry_route_response" in main_tools
     assert "repo-analyzer、reviewer、planner、doc-writer" in main_soul
     assert "repo-analyzer → reviewer → planner → doc-writer" in main_tools
+    assert "repo-reading-guide" in main_soul
+    assert "github_repo_reading_guide" in main_tools
+    assert "不要升级成 `repo-adoption`" in main_soul
     assert "research、reviewer、planner、reviewer、doc-writer" in main_soul
     assert "research → reviewer → planner → reviewer → doc-writer" in main_tools
 
@@ -830,6 +833,9 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
         assert "explain_agent_route" in soul
         assert "prepare_entry_route_response" in soul
         assert "repo-analyzer、reviewer、planner、doc-writer" in soul
+        assert "repo-reading-guide" in soul
+        assert "repo-reading-guide" in tools_md
+        assert "不要调用 `plan_agent_collaboration`" in tools_md
         assert "research、reviewer、planner、reviewer、doc-writer" in soul
 
 

@@ -5098,6 +5098,33 @@ def register_builtin_tools(
                 "collaboration_task_type": "repo-adoption",
             },
             {
+                "intent": "repo-reading-guide",
+                "agent": "repo-analyzer",
+                "keywords": (
+                    "github.com/",
+                    "gitlab.com/",
+                    "仓库",
+                    "repo",
+                    "repository",
+                    "代码库",
+                    "先看",
+                    "看哪些文件",
+                    "哪些文件",
+                    "从哪里读起",
+                    "从哪读起",
+                    "阅读路线",
+                    "阅读顺序",
+                    "读代码",
+                    "reading guide",
+                    "reading order",
+                ),
+                "reason": "用户关注仓库阅读入口和文件顺序，repo-analyzer 的阅读路线工具更适合处理。",
+                "next": "提取仓库链接和阅读目标后，建议交给 repo-analyzer；先调用 github_repo_summary，再调用 github_repo_reading_guide 和 format_github_repo_reading_guide。",
+                "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
+            },
+            {
                 "intent": "repo-analysis",
                 "agent": "repo-analyzer",
                 "keywords": (
@@ -5288,6 +5315,18 @@ def register_builtin_tools(
             "是否值得",
             "adoption",
         )
+        repo_reading_triggers = (
+            "先看",
+            "看哪些文件",
+            "哪些文件",
+            "从哪里读起",
+            "从哪读起",
+            "阅读路线",
+            "阅读顺序",
+            "读代码",
+            "reading guide",
+            "reading order",
+        )
         option_triggers = (
             "技术选型",
             "方案对比",
@@ -5323,6 +5362,11 @@ def register_builtin_tools(
                 has_repo = _keyword_score(normalized, repo_triggers) > 0
                 has_adoption = _keyword_score(normalized, adoption_triggers) > 0
                 if not (has_repo and has_adoption):
+                    return 0
+            if row.get("intent") == "repo-reading-guide":
+                has_repo = _keyword_score(normalized, repo_triggers) > 0
+                has_reading = _keyword_score(normalized, repo_reading_triggers) > 0
+                if not (has_repo and has_reading):
                     return 0
             if row.get("intent") == "research-option-validation":
                 has_option = _keyword_score(normalized, option_triggers) > 0
