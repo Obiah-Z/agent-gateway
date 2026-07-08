@@ -2923,6 +2923,81 @@ def register_builtin_tools(
             ]
         ).strip()
 
+    def format_github_repo_adoption_plan(adoption_plan_json: str) -> str:
+        """把 github_repo_adoption_plan JSON 转成用户可读的采纳路线摘要。"""
+
+        if not adoption_plan_json.strip():
+            return "Error: adoption_plan_json is required"
+        data = json.loads(adoption_plan_json)
+        if not isinstance(data, dict):
+            return "Error: adoption_plan_json must be a JSON object"
+        if data.get("type") != "github_repo_adoption_plan":
+            return "Error: adoption_plan_json type must be github_repo_adoption_plan"
+
+        decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+        fit = data.get("fit") if isinstance(data.get("fit"), dict) else {}
+        action_labels = {
+            "adopt": "建议进入小步采纳",
+            "pilot": "建议先做轻量验证",
+            "watch": "建议保留观察",
+            "hold": "建议暂缓",
+        }
+        action = str(decision.get("action") or "").strip()
+        stage_rows: list[list[object]] = []
+        for index, stage in enumerate(data.get("stages") or [], start=1):
+            if not isinstance(stage, dict):
+                continue
+            tasks = stage.get("tasks") if isinstance(stage.get("tasks"), list) else []
+            stage_rows.append(
+                [
+                    index,
+                    stage.get("title") or f"阶段 {index}",
+                    stage.get("objective") or "待明确",
+                    "；".join(str(item).strip() for item in tasks if str(item).strip()) or "待补充",
+                ]
+            )
+
+        fit_rows = [
+            ["适配分", fit.get("score", 0)],
+            ["优先级", fit.get("priority") or "unknown"],
+            [
+                "适配信号",
+                "；".join(str(item).strip() for item in fit.get("signals") or [] if str(item).strip())
+                or "暂无",
+            ],
+        ]
+        handoff = data.get("handoff") if isinstance(data.get("handoff"), dict) else {}
+        return "\n".join(
+            [
+                "## GitHub 仓库采纳路线图",
+                f"- 仓库：{data.get('repository') or 'unknown/repository'}",
+                f"- 地址：{data.get('url') or '未提供'}",
+                f"- 采纳目标：{data.get('adoption_goal') or '未说明'}",
+                f"- 决策：{action_labels.get(action, action or '待判断')}",
+                f"- 决策理由：{decision.get('reason') or '未说明'}",
+                "",
+                "## 适配概览",
+                _markdown_table(["项目", "内容"], fit_rows),
+                "",
+                "## 分阶段路线",
+                _markdown_table(["序号", "阶段", "目标", "任务"], stage_rows),
+                "",
+                "## 风险门槛",
+                _markdown_bullets(data.get("risk_gates") if isinstance(data.get("risk_gates"), list) else []),
+                "",
+                "## 验收检查",
+                _markdown_bullets(
+                    data.get("acceptance_checks") if isinstance(data.get("acceptance_checks"), list) else []
+                ),
+                "",
+                "## 后续交接",
+                f"- 目标 Agent：{handoff.get('target_agent_id') or 'planner'}",
+                f"- 交接说明：{handoff.get('summary') or '进入实现前先复核风险门槛。'}",
+                "",
+                f"> 边界：{data.get('note') or '这是采纳路线图，不代表已经完成代码实现或依赖引入。'}",
+            ]
+        ).strip()
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -7724,6 +7799,27 @@ def register_builtin_tools(
             },
             handler=format_github_repo_analysis,
             tags=("github", "repository", "analysis", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_github_repo_adoption_plan",
+            description=(
+                "Format a github_repo_adoption_plan JSON object into a Chinese "
+                "user-facing Markdown roadmap with decision, stages, risk gates, and checks."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["adoption_plan_json"],
+                "properties": {
+                    "adoption_plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by plan_github_repo_adoption.",
+                    },
+                },
+            },
+            handler=format_github_repo_adoption_plan,
+            tags=("github", "repository", "adoption", "format", "user-facing"),
         )
     )
     registry.register(

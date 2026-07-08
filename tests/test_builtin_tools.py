@@ -1706,6 +1706,60 @@ def test_format_github_repo_analysis_outputs_user_facing_summary(tmp_path: Path)
     assert "正式报告落盘仍应交给 doc-writer" in formatted
 
 
+def test_format_github_repo_adoption_plan_outputs_user_facing_roadmap(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    adoption_plan = {
+        "type": "github_repo_adoption_plan",
+        "repository": "demo/workflow",
+        "url": "https://github.com/demo/workflow",
+        "adoption_goal": "拆成 Gateway 落地阶段",
+        "decision": {
+            "action": "hold",
+            "reason": "存在许可或维护状态风险，先人工确认再进入实现。",
+        },
+        "fit": {
+            "score": 82,
+            "priority": "high",
+            "signals": ["包含 Agent workflow 信号。"],
+        },
+        "stages": [
+            {
+                "title": "证据复核",
+                "objective": "确认 README、许可证、维护状态和关键目录是否支持继续采纳。",
+                "tasks": ["复核 README 与目录树。", "确认许可证。"],
+            },
+            {
+                "title": "落地验证 1",
+                "objective": "参考工作流模板，改进 Gateway 主动任务编排。",
+                "tasks": ["拆成一个小实验。", "补充测试。"],
+            },
+        ],
+        "risk_gates": ["确认许可证允许学习、引用或复用。"],
+        "acceptance_checks": ["形成一份可追溯的证据摘要。"],
+        "handoff": {
+            "target_agent_id": "planner",
+            "summary": "可交给 planner 拆成 PROJECT_PLAN 小阶段。",
+        },
+        "note": "这是基于仓库分析生成的采纳路线图，不代表已经完成代码实现或依赖引入。",
+    }
+
+    formatted = registry.dispatch(
+        "format_github_repo_adoption_plan",
+        {"adoption_plan_json": json.dumps(adoption_plan, ensure_ascii=False)},
+    )
+
+    assert "## GitHub 仓库采纳路线图" in formatted
+    assert "- 仓库：demo/workflow" in formatted
+    assert "- 决策：建议暂缓" in formatted
+    assert "| 适配分 | 82 |" in formatted
+    assert "| 1 | 证据复核 | 确认 README、许可证、维护状态和关键目录是否支持继续采纳。 | 复核 README 与目录树。；确认许可证。 |" in formatted
+    assert "- 确认许可证允许学习、引用或复用。" in formatted
+    assert "- 形成一份可追溯的证据摘要。" in formatted
+    assert "- 目标 Agent：planner" in formatted
+    assert "不代表已经完成代码实现或依赖引入" in formatted
+
+
 def test_render_repo_analysis_markdown_can_be_saved_as_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

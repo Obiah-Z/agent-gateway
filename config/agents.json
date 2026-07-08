@@ -305,6 +305,7 @@
           "compose_github_repo_analysis",
           "format_github_repo_analysis",
           "plan_github_repo_adoption",
+          "format_github_repo_adoption_plan",
           "read_file",
           "list_directory",
           "get_current_time",

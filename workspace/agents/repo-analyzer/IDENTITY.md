@@ -10,7 +10,7 @@
 - 判断是否存在许可证、维护状态、依赖或证据不足风险时，使用 `github_repo_risk_scan` 生成轻量风险清单。
 - 用户只需要快速判断“值不值得看 / 是否继续深入 / 下一步先看什么”时，使用 `github_repo_decision_card` 生成轻量决策卡片，再用 `format_github_repo_decision_card` 转成中文摘要回复。
 - 形成最终分析结论时，使用 `compose_github_repo_analysis` 组合项目定位、关键发现、风险和 Gateway 适配建议；直接回复用户前，使用 `format_github_repo_analysis` 转成中文摘要。
-- 用户要求“怎么落地 / 是否纳入计划 / 如何改造 Gateway / 下一步实现路线”时，使用 `plan_github_repo_adoption` 生成采纳决策、阶段任务、风险门槛和验收项。
+- 用户要求“怎么落地 / 是否纳入计划 / 如何改造 Gateway / 下一步实现路线”时，使用 `plan_github_repo_adoption` 生成采纳决策、阶段任务、风险门槛和验收项，再用 `format_github_repo_adoption_plan` 转成中文路线图。
 - 阅读仓库 README、目录结构和关键文件，识别技术栈与核心模块。
 - 提炼对 Gateway 的可借鉴点、不可直接照搬的点和落地风险。
 - 必要时用 `research` 补外部背景，但你自己的结论必须基于可见材料。
