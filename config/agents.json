@@ -241,6 +241,7 @@
           "profile_get",
           "format_diet_profile",
           "profile_update",
+          "format_diet_profile_update",
           "meal_log_add",
           "format_meal_log_entry",
           "meal_log_list",

@@ -18,6 +18,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
 
     assert agent["prompt_policy"]["prompt_dir"] == f"agents/{AGENT_ID}"
     assert "format_diet_profile" in agent["tool_policy"]["tool_names"]
+    assert "format_diet_profile_update" in agent["tool_policy"]["tool_names"]
     assert "meal_log_add" in agent["tool_policy"]["tool_names"]
     assert "format_meal_log_entry" in agent["tool_policy"]["tool_names"]
     assert "format_meal_log_list" in agent["tool_policy"]["tool_names"]
@@ -297,6 +298,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "format_diet_profile" in tools_md
     assert "format_diet_profile" in identity
     assert "format_diet_profile" in soul
+    assert "format_diet_profile_update" in tools_md
+    assert "format_diet_profile_update" in identity
+    assert "format_diet_profile_update" in soul
     assert "meal_log_add" in tools_md
     assert "format_meal_log_entry" in tools_md
     assert "format_meal_log_entry" in identity
@@ -889,6 +893,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "ops_runtime_diagnostics",
         "format_personal_todo_entry",
         "format_personal_review_entry",
+        "format_diet_profile_update",
         "format_meal_log_entry",
         "format_meal_log_list",
         "format_nutrition_day_summary",

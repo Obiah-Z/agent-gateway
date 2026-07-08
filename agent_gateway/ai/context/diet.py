@@ -1565,6 +1565,56 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         profile = diet_store.update_profile(scope, **updates)
         return _json({"status": "saved", "profile": profile})
 
+    def format_diet_profile_update(profile_json: str) -> str:
+        if not profile_json.strip():
+            return "Error: profile_json is required"
+        data = json.loads(profile_json)
+        if not isinstance(data, dict):
+            return "Error: profile_json must be a JSON object"
+        profile = data.get("profile") if isinstance(data.get("profile"), dict) else data
+        if not isinstance(profile, dict):
+            return "Error: profile_json must contain a profile object"
+        if "user_scope" not in profile:
+            return "Error: profile_json must be a profile_update object"
+
+        def value_or_missing(key: str, suffix: str = "") -> str:
+            value = profile.get(key)
+            if value in (None, "", []):
+                return "未填写"
+            return f"{value}{suffix}"
+
+        preference_values = _clean_strings(_as_list(profile.get("diet_preferences")))
+        allergy_values = _clean_strings(_as_list(profile.get("allergies")))
+        details = [
+            f"昵称：{value_or_missing('display_name')}",
+            f"性别：{value_or_missing('gender')}",
+            f"出生年份：{value_or_missing('birth_year')}",
+            f"身高：{value_or_missing('height_cm', ' cm')}",
+            f"当前体重：{value_or_missing('current_weight_kg', ' kg')}",
+            f"目标体重：{value_or_missing('target_weight_kg', ' kg')}",
+            f"活动水平：{value_or_missing('activity_level')}",
+            f"时区：{value_or_missing('timezone')}",
+        ]
+        if preference_values:
+            details.append("饮食偏好：" + "、".join(preference_values))
+        if allergy_values:
+            details.append("过敏/忌口：" + "、".join(allergy_values))
+        medical_notes = str(profile.get("medical_notes") or "").strip()
+        if medical_notes:
+            details.append(f"医疗备注：{medical_notes}")
+
+        sections = [
+            "## 饮食档案已更新",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 后续生成计划、统计进展时会参考这些档案字段。",
+            "- 如果只是记录当天体重，请继续使用体重记录工具。",
+            "",
+            "> 边界：这是档案更新确认，只格式化已保存档案，不会新增餐食、写体重日志或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def meal_log_add(
         *,
         meal_type: str,
@@ -2546,6 +2596,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=profile_update,
             tags=("diet", "profile", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_profile_update",
+            description=(
+                "Format a profile_update JSON object into a concise Chinese "
+                "Markdown diet profile update confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["profile_json"],
+                "properties": {
+                    "profile_json": {
+                        "type": "string",
+                        "description": "JSON string returned by profile_update.",
+                    },
+                },
+            },
+            handler=format_diet_profile_update,
+            tags=("diet", "profile", "format", "user-facing"),
         )
     )
     registry.register(

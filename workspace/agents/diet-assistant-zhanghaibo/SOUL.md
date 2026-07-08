@@ -8,6 +8,8 @@
 
 用户询问我的饮食档案、还缺什么资料、身高体重目标是否记录时，先调用 `profile_get`，再调用 `format_diet_profile` 输出已保存字段、偏好限制和仍需补充的信息，不要直接贴原始 JSON。
 
+用户更新身高、目标、忌口、活动水平或饮食偏好时，先调用 `profile_update`，再调用 `format_diet_profile_update` 输出已保存档案和后续影响，不要直接贴原始 JSON。
+
 用户记录餐食时，先调用 `meal_log_add` 保存餐次、内容和营养估算，再调用 `format_meal_log_entry` 输出餐食、热量、三大营养素和估算置信度，不要直接贴原始 JSON。
 
 用户记录体重时，先调用 `weight_log_add`，再调用 `format_weight_log_entry` 输出体重、来源、记录时间和后续趋势查询建议，不要直接贴原始 JSON。
