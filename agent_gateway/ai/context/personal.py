@@ -1202,6 +1202,89 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(plan, ensure_ascii=False, indent=2)
 
+    def format_personal_day_review_plan(plan_json: str) -> str:
+        if not plan_json.strip():
+            return "Error: plan_json is required"
+        data = json.loads(plan_json)
+        if not isinstance(data, dict):
+            return "Error: plan_json must be a JSON object"
+        if data.get("type") != "personal_day_review_plan":
+            return "Error: plan_json type must be personal_day_review_plan"
+
+        review = data.get("review_draft") if isinstance(data.get("review_draft"), dict) else {}
+        tomorrow = data.get("tomorrow_plan") if isinstance(data.get("tomorrow_plan"), dict) else {}
+        priority_todos = (
+            tomorrow.get("priority_todos")
+            if isinstance(tomorrow.get("priority_todos"), list)
+            else []
+        )
+        todo_lines = []
+        for index, todo in enumerate(priority_todos, start=1):
+            if not isinstance(todo, dict):
+                continue
+            title = str(todo.get("title") or "").strip()
+            if not title:
+                continue
+            details = []
+            if todo.get("priority"):
+                details.append(f"优先级：{todo.get('priority')}")
+            if todo.get("due_at"):
+                details.append(f"时间：{todo.get('due_at')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            todo_lines.append(f"{index}. {title}{suffix}")
+
+        block_lines = []
+        time_blocks = (
+            tomorrow.get("time_blocks") if isinstance(tomorrow.get("time_blocks"), list) else []
+        )
+        for block in time_blocks:
+            if not isinstance(block, dict):
+                continue
+            name = str(block.get("name") or "时间块").strip()
+            items = block.get("items") if isinstance(block.get("items"), list) else []
+            titles = [
+                str(item.get("title") or "").strip()
+                for item in items
+                if isinstance(item, dict) and str(item.get("title") or "").strip()
+            ]
+            block_lines.append(f"- {name}：" + ("、".join(titles) if titles else "留作缓冲"))
+
+        confirmations = data.get("needs_confirmation")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        next_actions = data.get("next_actions")
+        if not isinstance(next_actions, list):
+            next_actions = []
+
+        sections = [
+            "## 今日复盘草稿",
+            f"- 总结：{review.get('summary') or '待补充今日复盘摘要'}",
+            "完成：",
+            _markdown_bullets(review.get("completed") if isinstance(review.get("completed"), list) else []),
+            "卡点：",
+            _markdown_bullets(review.get("blockers") if isinstance(review.get("blockers"), list) else []),
+            f"- 明天第一步：{review.get('next_step') or tomorrow.get('first_step') or '待确认'}",
+            "",
+            "## 明日计划",
+            f"- 重点：{tomorrow.get('focus') or '待确认'}",
+            f"- 第一步：{tomorrow.get('first_step') or review.get('next_step') or '待确认'}",
+            "",
+            "## 明日优先待办",
+            "\n".join(todo_lines) if todo_lines else "暂无明确待办，请先确认明天第一步。",
+            "",
+            "## 明日时间块",
+            "\n".join(block_lines) if block_lines else "- 暂无时间块，请先补充待办。",
+            "",
+            "## 需要确认",
+            _markdown_bullets(confirmations),
+            "",
+            "## 可执行下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{data.get('note') or '这是个人日复盘和明日计划草稿，不会自动写入复盘或待办。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_weekly_plan_generate(
         week_goal: str = "",
         focus_areas: list[str] | None = None,
@@ -1447,6 +1530,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_focus_card_generate,
             tags=("personal", "focus", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_day_review_plan",
+            description=(
+                "Format a personal_day_review_plan_generate JSON object into a concise "
+                "Chinese Markdown day review and tomorrow plan for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["plan_json"],
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_day_review_plan_generate.",
+                    },
+                },
+            },
+            handler=format_personal_day_review_plan,
+            tags=("personal", "review", "planning", "format", "user-facing"),
         )
     )
     registry.register(

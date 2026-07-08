@@ -384,6 +384,43 @@ def test_personal_day_review_plan_generates_draft_without_writing(tmp_path: Path
     assert store.list_todos(user_scope="user:alice")[0]["status"] == "open"
 
 
+def test_format_personal_day_review_plan_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练习 RabbitMQ 选型", "priority": "high", "due_at": "tomorrow"},
+        runtime_context=context,
+    )
+    plan_json = registry.dispatch(
+        "personal_day_review_plan_generate",
+        {
+            "today_summary": "今天完成 Redis 项目表达复盘。",
+            "completed": ["整理 Redis 在 Gateway 中的作用"],
+            "blockers": ["场景题还有点不稳"],
+            "tomorrow_focus": "先练 RabbitMQ 选型表达",
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_personal_day_review_plan", {"plan_json": plan_json})
+
+    assert "## 今日复盘草稿" in formatted
+    assert "- 总结：今天完成 Redis 项目表达复盘。" in formatted
+    assert "- 整理 Redis 在 Gateway 中的作用" in formatted
+    assert "- 场景题还有点不稳" in formatted
+    assert "- 明天第一步：先练 RabbitMQ 选型表达" in formatted
+    assert "## 明日计划" in formatted
+    assert "- 重点：先练 RabbitMQ 选型表达" in formatted
+    assert "1. 练习 RabbitMQ 选型（优先级：high；时间：tomorrow）" in formatted
+    assert "- 上午：练习 RabbitMQ 选型" in formatted
+    assert "- 这些卡点是否需要拆成待办或求助事项？" in formatted
+    assert "不会自动写入复盘、待办或长期记忆" in formatted
+
+
 def test_personal_weekly_plan_generates_draft_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

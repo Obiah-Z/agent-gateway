@@ -196,6 +196,7 @@
           "personal_focus_card_generate",
           "format_personal_focus_card",
           "personal_day_review_plan_generate",
+          "format_personal_day_review_plan",
           "personal_weekly_plan_generate",
           "personal_inbox_triage",
           "personal_inbox_commit",
