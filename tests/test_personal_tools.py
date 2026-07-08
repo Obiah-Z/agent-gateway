@@ -305,6 +305,49 @@ def test_personal_focus_card_selects_one_current_action_without_writing(tmp_path
     assert [todo["status"] for todo in store.list_todos(user_scope="user:alice")] == ["open", "open"]
 
 
+def test_format_personal_focus_card_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理简历", "priority": "normal", "due_at": "2026-07-10"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "准备 RabbitMQ 面试表达", "priority": "urgent", "due_at": "2026-07-08"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "昨天场景题推进慢",
+            "blockers": ["系统设计题容易发散"],
+            "next_step": "先把 RabbitMQ 选型讲顺",
+        },
+        runtime_context=context,
+    )
+    card = registry.dispatch(
+        "personal_focus_card_generate",
+        {"todo_limit": 6, "review_limit": 2},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_personal_focus_card", {"focus_card_json": card})
+
+    assert "## 当前聚焦" in formatted
+    assert "- 先做：准备 RabbitMQ 面试表达（优先级：urgent；时间：2026-07-08）" in formatted
+    assert "- 原因：它是当前最高优先级事项，适合先处理，避免继续积压。" in formatted
+    assert "- 第一步：先用 25 分钟推进「准备 RabbitMQ 面试表达」。" in formatted
+    assert "- 整理简历" in formatted
+    assert "- 系统设计题容易发散" in formatted
+    assert "- 先把 RabbitMQ 选型讲顺" in formatted
+    assert "不会自动完成、修改或新增待办" in formatted
+
+
 def test_personal_day_review_plan_generates_draft_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

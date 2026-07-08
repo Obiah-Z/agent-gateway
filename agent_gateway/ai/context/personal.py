@@ -1116,6 +1116,56 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         ]
         return "\n".join(sections).strip()
 
+    def format_personal_focus_card(focus_card_json: str) -> str:
+        if not focus_card_json.strip():
+            return "Error: focus_card_json is required"
+        data = json.loads(focus_card_json)
+        if not isinstance(data, dict):
+            return "Error: focus_card_json must be a JSON object"
+        if data.get("type") != "personal_focus_card":
+            return "Error: focus_card_json type must be personal_focus_card"
+
+        focus_todo = data.get("focus_todo") if isinstance(data.get("focus_todo"), dict) else {}
+        focus = str(data.get("focus") or focus_todo.get("title") or "待确认").strip()
+        priority = str(focus_todo.get("priority") or "").strip()
+        due_at = str(focus_todo.get("due_at") or "").strip()
+        details = []
+        if priority:
+            details.append(f"优先级：{priority}")
+        if due_at:
+            details.append(f"时间：{due_at}")
+        focus_suffix = f"（{'；'.join(details)}）" if details else ""
+
+        needs_confirmation = data.get("needs_confirmation")
+        if not isinstance(needs_confirmation, list):
+            needs_confirmation = []
+
+        sections = [
+            "## 当前聚焦",
+            f"- 先做：{focus}{focus_suffix}",
+            f"- 原因：{data.get('why_now') or '它是当前更值得先推进的事项。'}",
+            f"- 第一步：{data.get('first_action') or '先用 25 分钟推进这个事项。'}",
+            "",
+            "## 暂时延后",
+            _markdown_bullets(data.get("defer") if isinstance(data.get("defer"), list) else []),
+            "",
+            "## 卡点提醒",
+            _markdown_bullets(data.get("blockers") if isinstance(data.get("blockers"), list) else []),
+            "",
+            "## 复盘线索",
+            _markdown_bullets(
+                data.get("review_next_steps")
+                if isinstance(data.get("review_next_steps"), list)
+                else []
+            ),
+            "",
+            "## 需要确认",
+            _markdown_bullets(needs_confirmation),
+            "",
+            f"> 边界：{data.get('note') or '这是个人聚焦建议，不会自动完成、修改或新增待办。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_focus_card_generate(
         todo_limit: int = 8,
         review_limit: int = 3,
@@ -1358,6 +1408,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=format_personal_daily_workflow,
             tags=("personal", "workflow", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_focus_card",
+            description=(
+                "Format a personal_focus_card_generate JSON object into a concise "
+                "Chinese Markdown focus card for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["focus_card_json"],
+                "properties": {
+                    "focus_card_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_focus_card_generate.",
+                    },
+                },
+            },
+            handler=format_personal_focus_card,
+            tags=("personal", "focus", "format", "user-facing"),
         )
     )
     registry.register(
