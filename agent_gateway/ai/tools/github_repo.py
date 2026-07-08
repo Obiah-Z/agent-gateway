@@ -515,6 +515,82 @@ def plan_repo_adoption(
     }
 
 
+def compose_repo_decision_card(
+    repo_summary: dict[str, Any],
+    gateway_fit: dict[str, Any] | None = None,
+    risk_scan: dict[str, Any] | None = None,
+    *,
+    decision_goal: str = "",
+) -> dict[str, Any]:
+    """把仓库摘要、适配评分和风险扫描压缩成轻量决策卡片。"""
+
+    fit = gateway_fit or assess_gateway_repo_fit(repo_summary)
+    scan = risk_scan or scan_github_repo_risks(repo_summary, intended_use=decision_goal)
+    score = _as_int(fit.get("fit_score"))
+    priority = str(fit.get("priority") or "unknown")
+    risk_level = str(scan.get("risk_level") or "unknown")
+    risk_decision = str(scan.get("decision") or "unknown")
+    if risk_decision in {"hold", "block"} or risk_level == "high":
+        decision = "hold"
+        decision_label = "先暂缓"
+        reason = "仓库存在高风险或复用边界不清晰，需要先人工复核。"
+    elif score >= 70 and priority == "high":
+        decision = "deep-dive"
+        decision_label = "值得深入分析"
+        reason = "仓库与 Gateway 适配信号较强，适合进入深入分析或小实验。"
+    elif score >= 40 or priority == "medium":
+        decision = "skim"
+        decision_label = "适合快速浏览"
+        reason = "仓库有一定参考价值，但暂不建议直接进入实现计划。"
+    else:
+        decision = "watch"
+        decision_label = "保留观察"
+        reason = "当前适配信号不足，适合作为素材保留。"
+
+    risk_items = [
+        str(item.get("issue") or item.get("mitigation") or "").strip()
+        for item in scan.get("risk_items") or []
+        if isinstance(item, dict) and str(item.get("issue") or item.get("mitigation") or "").strip()
+    ]
+    signals = [str(item).strip() for item in fit.get("signals") or [] if str(item).strip()]
+    next_steps = [str(item).strip() for item in fit.get("next_steps") or [] if str(item).strip()]
+    next_steps.extend(str(item).strip() for item in scan.get("next_actions") or [] if str(item).strip())
+    return {
+        "type": "github_repo_decision_card",
+        "repository": repo_summary.get("repository", ""),
+        "url": repo_summary.get("url", ""),
+        "decision_goal": decision_goal.strip() or "判断是否值得继续分析或采纳。",
+        "decision": decision,
+        "decision_label": decision_label,
+        "reason": reason,
+        "fit": {
+            "score": score,
+            "priority": priority,
+            "signals": signals[:5],
+        },
+        "risk": {
+            "level": risk_level,
+            "decision": risk_decision,
+            "items": risk_items[:5],
+        },
+        "repo_snapshot": {
+            "description": repo_summary.get("description") or "",
+            "language": repo_summary.get("language") or "unknown",
+            "stars": _as_int(repo_summary.get("stars")),
+            "license": repo_summary.get("license") or "unknown",
+            "archived": bool(repo_summary.get("archived")),
+            "pushed_at": repo_summary.get("pushed_at") or "",
+        },
+        "reuse_ideas": [
+            str(item).strip()
+            for item in fit.get("gateway_reuse_ideas") or []
+            if str(item).strip()
+        ][:5],
+        "next_actions": list(dict.fromkeys(next_steps))[:6],
+        "note": "这是仓库轻量决策卡片，不代表已经完成正式分析、风险门禁或采纳计划。",
+    }
+
+
 def _adoption_decision(score: int, priority: str, risks: list[str]) -> dict[str, str]:
     severe_risk = any("许可证" in risk or "归档" in risk for risk in risks)
     if severe_risk:
@@ -654,6 +730,39 @@ def register_github_repo_tools(
         scan = scan_github_repo_risks(data, intended_use=intended_use)
         return json.dumps(scan, ensure_ascii=False, indent=2)
 
+    def github_repo_decision_card(
+        repo_summary_json: str,
+        gateway_fit_json: str = "",
+        risk_scan_json: str = "",
+        decision_goal: str = "",
+    ) -> str:
+        if not repo_summary_json.strip():
+            return "Error: repo_summary_json is required"
+        summary = json.loads(repo_summary_json)
+        if not isinstance(summary, dict):
+            return "Error: repo_summary_json must be a JSON object"
+        fit = None
+        if gateway_fit_json.strip():
+            parsed_fit = json.loads(gateway_fit_json)
+            if not isinstance(parsed_fit, dict):
+                return "Error: gateway_fit_json must be a JSON object"
+            fit = parsed_fit
+        risk = None
+        if risk_scan_json.strip():
+            parsed_risk = json.loads(risk_scan_json)
+            if not isinstance(parsed_risk, dict):
+                return "Error: risk_scan_json must be a JSON object"
+            if parsed_risk.get("type") != "github_repo_risk_scan":
+                return "Error: risk_scan_json type must be github_repo_risk_scan"
+            risk = parsed_risk
+        card = compose_repo_decision_card(
+            summary,
+            fit,
+            risk,
+            decision_goal=decision_goal,
+        )
+        return json.dumps(card, ensure_ascii=False, indent=2)
+
     def compose_github_repo_analysis(
         repo_summary_json: str,
         gateway_fit_json: str = "",
@@ -781,6 +890,40 @@ def register_github_repo_tools(
             },
             handler=github_repo_risk_scan,
             tags=("github", "repository", "risk", "analysis"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="github_repo_decision_card",
+            description=(
+                "Compose a lightweight GitHub repository decision card from "
+                "github_repo_summary, optional gateway fit, and optional risk scan: "
+                "decision, reason, fit score, risks, reuse ideas, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["repo_summary_json"],
+                "properties": {
+                    "repo_summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_summary.",
+                    },
+                    "gateway_fit_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by github_repo_gateway_fit.",
+                    },
+                    "risk_scan_json": {
+                        "type": "string",
+                        "description": "Optional JSON string returned by github_repo_risk_scan.",
+                    },
+                    "decision_goal": {
+                        "type": "string",
+                        "description": "What the user wants to decide about this repository.",
+                    },
+                },
+            },
+            handler=github_repo_decision_card,
+            tags=("github", "repository", "decision", "analysis"),
         )
     )
     registry.register(

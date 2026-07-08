@@ -5,6 +5,7 @@ from agent_gateway.ai.tools.github_repo import (
     GitHubRepoClient,
     assess_gateway_repo_fit,
     compose_repo_analysis,
+    compose_repo_decision_card,
     normalize_github_repo_summary,
     plan_repo_adoption,
     parse_github_repo,
@@ -254,6 +255,88 @@ def test_github_repo_risk_scan_tool_outputs_stable_json() -> None:
     assert scan["decision"] == "pass"
     assert scan["risk_items"] == []
     assert scan["summary"]["license"] == "MIT"
+
+
+def test_compose_repo_decision_card_recommends_deep_dive_for_strong_fit() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="workflow",
+        repo_data={
+            "html_url": "https://github.com/demo/workflow",
+            "description": "Agent workflow and tool calling templates",
+            "language": "Markdown",
+            "topics": ["agent", "workflow"],
+            "stargazers_count": 2000,
+            "forks_count": 120,
+            "open_issues_count": 2,
+            "license": {"spdx_id": "MIT"},
+            "archived": False,
+            "pushed_at": "2026-07-01T00:00:00Z",
+        },
+        readme={
+            "name": "README.md",
+            "path": "README.md",
+            "content": "Agent workflow examples and tool calling templates.",
+            "error": "",
+        },
+        tree=[{"path": "skills/writer/SKILL.md", "type": "blob", "size": 100}],
+    )
+    fit = assess_gateway_repo_fit(summary, focus=["workflow"])
+    risk = scan_github_repo_risks(summary, intended_use="判断是否适合 Gateway 借鉴")
+
+    card = compose_repo_decision_card(
+        summary,
+        fit,
+        risk,
+        decision_goal="判断是否适合 Gateway 借鉴",
+    )
+
+    assert card["type"] == "github_repo_decision_card"
+    assert card["repository"] == "demo/workflow"
+    assert card["decision"] == "deep-dive"
+    assert card["decision_label"] == "值得深入分析"
+    assert card["fit"]["score"] == fit["fit_score"]
+    assert card["risk"]["level"] == "low"
+    assert card["risk"]["decision"] in {"pass", "watch"}
+    assert card["reuse_ideas"]
+    assert card["next_actions"]
+
+
+def test_github_repo_decision_card_tool_outputs_stable_json() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="risky",
+        repo_data={
+            "html_url": "https://github.com/demo/risky",
+            "description": "Archived agent tools",
+            "language": "Python",
+            "topics": ["agent"],
+            "stargazers_count": 20,
+            "open_issues_count": 1,
+            "license": None,
+            "archived": True,
+        },
+        readme={"name": "README.md", "path": "README.md", "content": "agent tools", "error": ""},
+        tree=[{"path": "README.md", "type": "blob", "size": 100}],
+    )
+    registry = ToolRegistry()
+    register_github_repo_tools(registry, client=object())
+
+    card = json.loads(
+        registry.dispatch(
+            "github_repo_decision_card",
+            {
+                "repo_summary_json": json.dumps(summary, ensure_ascii=False),
+                "decision_goal": "判断是否可以采纳",
+            },
+        )
+    )
+
+    assert card["type"] == "github_repo_decision_card"
+    assert card["repository"] == "demo/risky"
+    assert card["decision"] == "hold"
+    assert card["decision_goal"] == "判断是否可以采纳"
+    assert card["repo_snapshot"]["archived"] is True
 
 
 def test_compose_repo_analysis_combines_summary_fit_and_findings() -> None:

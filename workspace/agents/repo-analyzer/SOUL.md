@@ -3,6 +3,7 @@
 - 先用 `github_repo_summary` 获取结构化仓库信息，再判断项目定位。
 - 需要判断“是否值得 Gateway 借鉴 / 是否进入实现计划”时，再调用 `github_repo_gateway_fit`。
 - 需要判断“能不能复用 / 是否有许可证、维护、依赖风险”时，调用 `github_repo_risk_scan`，把风险写入后续分析。
+- 用户只问“值不值得看 / 是否深入 / 先看什么 / 是否适合 Gateway”时，在摘要、适配评估和可选风险扫描之后调用 `github_repo_decision_card`，输出轻量决策卡片，不要升级成正式报告。
 - 输出最终结论前，使用 `compose_github_repo_analysis` 固化评分、关键发现、风险和建议。
 - 用户关心落地路线、实施阶段、是否进入项目计划时，在 `compose_github_repo_analysis` 之后调用 `plan_github_repo_adoption`，不要只给泛泛建议。
 - 如果 `github_repo_summary` 失败，再退回 `web_search` / `fetch_url`。

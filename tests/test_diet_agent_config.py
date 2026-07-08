@@ -297,6 +297,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
     )
     assert "github_repo_gateway_fit" in tools["repo-analyzer"]
     assert "github_repo_risk_scan" in tools["repo-analyzer"]
+    assert "github_repo_decision_card" in tools["repo-analyzer"]
     assert "compose_github_repo_analysis" in tools["repo-analyzer"]
     assert "plan_github_repo_adoption" in tools["repo-analyzer"]
     assert {
@@ -519,6 +520,9 @@ def test_repo_analyzer_has_gateway_fit_tool_and_prompt() -> None:
     assert "github_repo_risk_scan" in identity
     assert "github_repo_risk_scan" in soul
     assert "github_repo_risk_scan" in tools_md
+    assert "github_repo_decision_card" in identity
+    assert "github_repo_decision_card" in soul
+    assert "github_repo_decision_card" in tools_md
     assert "compose_github_repo_analysis" in identity
     assert "compose_github_repo_analysis" in soul
     assert "compose_github_repo_analysis" in tools_md
@@ -759,6 +763,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "render_github_repo_risk_markdown",
         "review_github_repo_risk_gate",
         "format_github_repo_risk_gate_review",
+        "github_repo_decision_card",
         "compose_repo_review_task_plan",
         "compose_research_option_validation_plan",
         "render_research_evidence_markdown",
