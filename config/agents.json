@@ -191,6 +191,8 @@
           "personal_todo_complete",
           "personal_todo_complete_by_title",
           "format_personal_todo_completion",
+          "personal_todo_update_by_title",
+          "format_personal_todo_update",
           "personal_review_add",
           "format_personal_review_entry",
           "personal_review_recent",

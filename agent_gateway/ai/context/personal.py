@@ -113,6 +113,39 @@ class PersonalStore:
         self._write_jsonl(self._todos_path(user_scope), rows)
         return updated
 
+    def update_todo(
+        self,
+        todo_id: str,
+        *,
+        title: str | None = None,
+        priority: str | None = None,
+        due_at: str | None = None,
+        notes: str | None = None,
+        user_scope: str = "",
+    ) -> dict[str, Any] | None:
+        """更新指定待办的标题、优先级、时间或备注。"""
+
+        rows = self._read_jsonl(self._todos_path(user_scope))
+        updated = None
+        now = self._now()
+        for row in rows:
+            if str(row.get("id", "")) == todo_id:
+                if title is not None and title.strip():
+                    row["title"] = title.strip()
+                if priority is not None and priority.strip():
+                    row["priority"] = self._normalize_priority(priority)
+                if due_at is not None:
+                    row["due_at"] = due_at.strip()
+                if notes is not None:
+                    row["notes"] = notes.strip()
+                row["updated_at"] = now
+                updated = row
+                break
+        if updated is None:
+            return None
+        self._write_jsonl(self._todos_path(user_scope), rows)
+        return updated
+
     def add_review(
         self,
         summary: str,
@@ -1095,6 +1128,86 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             return f"Error: todo not found after title match: {title_query}"
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def personal_todo_update_by_title(
+        title_query: str,
+        new_title: str | None = None,
+        priority: str | None = None,
+        due_at: str | None = None,
+        notes: str | None = None,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        query = " ".join(title_query.strip().split()).lower()
+        if not query:
+            return "Error: title_query is required"
+        update_values = [new_title, priority, due_at, notes]
+        if not any(value is not None and str(value).strip() for value in update_values):
+            return "Error: at least one update field is required"
+        scope = _scope(__runtime_context, user_scope)
+        open_todos = personal_store.list_todos(status="open", limit=100, user_scope=scope)
+        exact_matches = [
+            todo
+            for todo in open_todos
+            if str(todo.get("title", "")).strip().lower() == query
+        ]
+        partial_matches = [
+            todo
+            for todo in open_todos
+            if query in str(todo.get("title", "")).strip().lower()
+        ]
+        matches = exact_matches or partial_matches
+        if not matches:
+            return f"Error: no open todo matched title: {title_query}"
+        if len(matches) > 1:
+            titles = "；".join(str(todo.get("title", "")) for todo in matches[:5])
+            return f"Error: multiple open todos matched title: {titles}"
+        row = personal_store.update_todo(
+            str(matches[0].get("id", "")),
+            title=new_title,
+            priority=priority,
+            due_at=due_at,
+            notes=notes,
+            user_scope=scope,
+        )
+        if row is None:
+            return f"Error: todo not found after title match: {title_query}"
+        return json.dumps(row, ensure_ascii=False, indent=2)
+
+    def format_personal_todo_update(todo_json: str) -> str:
+        if not todo_json.strip():
+            return "Error: todo_json is required"
+        data = json.loads(todo_json)
+        if not isinstance(data, dict):
+            return "Error: todo_json must be a JSON object"
+        if not data.get("title"):
+            return "Error: todo_json must be an updated personal todo object"
+
+        details = [
+            f"事项：{data.get('title')}",
+            f"状态：{data.get('status') or 'open'}",
+            f"优先级：{data.get('priority') or 'normal'}",
+        ]
+        if data.get("due_at"):
+            details.append(f"时间：{data.get('due_at')}")
+        notes = str(data.get("notes") or "").strip()
+        if notes:
+            details.append(f"备注：{notes}")
+        if data.get("updated_at"):
+            details.append(f"更新时间：{data.get('updated_at')}")
+
+        sections = [
+            "## 待办已更新",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 后续查询待办时会显示更新后的内容。",
+            "- 如果这项已完成，可以继续告诉我完成结果。",
+            "",
+            "> 边界：这是待办更新确认，只修改已匹配的结构化待办，不会新增待办、完成待办或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def format_personal_todo_completion(completion_json: str) -> str:
         if not completion_json.strip():
             return "Error: completion_json is required"
@@ -2037,6 +2150,50 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_todo_complete_by_title,
             tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_todo_update_by_title",
+            description=(
+                "Update one open personal todo by matching a title fragment. "
+                "Can update title, priority, due_at, and notes; returns an error "
+                "when none or multiple open todos match."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title_query"],
+                "properties": {
+                    "title_query": {"type": "string"},
+                    "new_title": {"type": "string"},
+                    "priority": {"type": "string", "enum": ["low", "normal", "high", "urgent", ""]},
+                    "due_at": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+            },
+            handler=personal_todo_update_by_title,
+            tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_update",
+            description=(
+                "Format a personal_todo_update_by_title JSON object into a concise "
+                "Chinese Markdown todo update confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["todo_json"],
+                "properties": {
+                    "todo_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_update_by_title.",
+                    },
+                },
+            },
+            handler=format_personal_todo_update,
+            tags=("personal", "todo", "format", "user-facing"),
         )
     )
     registry.register(

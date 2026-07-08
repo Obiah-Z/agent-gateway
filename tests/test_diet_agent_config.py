@@ -913,6 +913,8 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "ops_runtime_diagnostics",
         "format_personal_todo_entry",
         "personal_todo_complete_by_title",
+        "personal_todo_update_by_title",
+        "format_personal_todo_update",
         "format_personal_review_entry",
         "format_diet_profile_update",
         "diet_today_status",
@@ -995,6 +997,8 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_todo_complete",
         "personal_todo_complete_by_title",
         "format_personal_todo_completion",
+        "personal_todo_update_by_title",
+        "format_personal_todo_update",
         "personal_review_add",
         "format_personal_review_entry",
         "personal_review_recent",
@@ -1097,6 +1101,12 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "personal_todo_complete_by_title" in identity
     assert "personal_todo_complete_by_title" in soul
     assert "personal_todo_complete_by_title" in tools_md
+    assert "personal_todo_update_by_title" in identity
+    assert "personal_todo_update_by_title" in soul
+    assert "personal_todo_update_by_title" in tools_md
+    assert "format_personal_todo_update" in identity
+    assert "format_personal_todo_update" in soul
+    assert "format_personal_todo_update" in tools_md
     assert "format_personal_inbox_commit" in identity
     assert "format_personal_inbox_commit" in soul
     assert "format_personal_inbox_commit" in tools_md

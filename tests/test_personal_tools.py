@@ -85,6 +85,72 @@ def test_personal_todo_complete_by_title_refuses_ambiguous_matches(tmp_path: Pat
     assert len(store.list_todos(status="open", user_scope="user:alice")) == 2
 
 
+def test_personal_todo_update_by_title_updates_unique_match(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练 RabbitMQ 选型", "priority": "normal", "due_at": "today"},
+        runtime_context=context,
+    )
+
+    updated = json.loads(
+        registry.dispatch(
+            "personal_todo_update_by_title",
+            {
+                "title_query": "RabbitMQ",
+                "priority": "urgent",
+                "due_at": "tomorrow",
+                "notes": "重点讲清楚为什么不用 Kafka",
+            },
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_todo_update",
+        {"todo_json": json.dumps(updated, ensure_ascii=False)},
+    )
+
+    assert updated["title"] == "练 RabbitMQ 选型"
+    assert updated["priority"] == "urgent"
+    assert updated["due_at"] == "tomorrow"
+    assert updated["notes"] == "重点讲清楚为什么不用 Kafka"
+    assert updated["status"] == "open"
+    assert store.list_todos(user_scope="user:alice")[0]["priority"] == "urgent"
+    assert "## 待办已更新" in formatted
+    assert "- 优先级：urgent" in formatted
+    assert "- 时间：tomorrow" in formatted
+    assert "重点讲清楚为什么不用 Kafka" in formatted
+
+
+def test_personal_todo_update_by_title_refuses_ambiguous_matches(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练 RabbitMQ 选型"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练 RabbitMQ 消息队列面试题"},
+        runtime_context=context,
+    )
+
+    result = registry.dispatch(
+        "personal_todo_update_by_title",
+        {"title_query": "RabbitMQ", "priority": "urgent"},
+        runtime_context=context,
+    )
+
+    assert result.startswith("Error: multiple open todos matched title:")
+    assert {todo["priority"] for todo in store.list_todos(status="open", user_scope="user:alice")} == {"normal"}
+
+
 def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
