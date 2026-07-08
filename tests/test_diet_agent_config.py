@@ -27,6 +27,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "diet_weekly_plan_generate" in agent["tool_policy"]["tool_names"]
     assert "format_diet_weekly_plan" in agent["tool_policy"]["tool_names"]
     assert "diet_inbox_triage" in agent["tool_policy"]["tool_names"]
+    assert "format_diet_inbox_triage" in agent["tool_policy"]["tool_names"]
     assert "diet_inbox_commit" in agent["tool_policy"]["tool_names"]
     assert not any(row["agent_id"] == AGENT_ID and row["match_key"] == "peer_id" for row in bindings)
     assert secretary_binding["tier"] == 1
@@ -297,6 +298,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "format_diet_weekly_plan" in identity
     assert "format_diet_weekly_plan" in soul
     assert "diet_inbox_triage" in tools_md
+    assert "format_diet_inbox_triage" in tools_md
+    assert "format_diet_inbox_triage" in identity
+    assert "format_diet_inbox_triage" in soul
     assert "diet_inbox_commit" in tools_md
 
 
@@ -851,6 +855,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_diet_day_review_plan",
         "format_diet_weekly_plan",
         "diet_inbox_triage",
+        "format_diet_inbox_triage",
         "diet_inbox_commit",
         "build_agent_handoff_prompt",
         "build_collaboration_stage_handoff",

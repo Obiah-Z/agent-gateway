@@ -660,6 +660,44 @@ def test_diet_inbox_triage_suggests_records_without_writing(tmp_path: Path) -> N
     assert store.get_profile("user:wework:diet") is None
 
 
+def test_format_diet_inbox_triage_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    triage_json = registry.dispatch(
+        "diet_inbox_triage",
+        {
+            "text": (
+                "今天早餐吃了鸡蛋豆浆约 320 kcal，蛋白 22g；"
+                "体重 81.5kg；目标降到 75kg；我不吃香菜。"
+            )
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_inbox_triage", {"triage_json": triage_json})
+
+    assert "## 饮食收件箱整理" in formatted
+    assert "- 判断：mixed" in formatted
+    assert "## 餐食候选" in formatted
+    assert "1. breakfast：今天早餐吃了鸡蛋豆浆约 320 kcal" in formatted
+    assert "热量：约 320 kcal" in formatted
+    assert "蛋白质：约 22g" in formatted
+    assert "## 体重候选" in formatted
+    assert "- 体重：81.5 kg" in formatted
+    assert "## 档案/偏好候选" in formatted
+    assert "- diet_preferences：" in formatted
+    assert "不吃香菜" in formatted
+    assert "- target_weight_kg：75" in formatted
+    assert "- 档案或偏好更新需要确认后再调用 profile_update 或 memory_write。" in formatted
+    assert "meal_log_add" in formatted
+    assert "weight_log_add" in formatted
+    assert "profile_update" in formatted
+    assert "不会自动写入餐食、体重、档案或长期记忆" in formatted
+
+
 def test_diet_inbox_commit_writes_confirmed_records_but_skips_preferences(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

@@ -1851,6 +1851,94 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             }
         )
 
+    def format_diet_inbox_triage(triage_json: str) -> str:
+        if not triage_json.strip():
+            return "Error: triage_json is required"
+        data = json.loads(triage_json)
+        if not isinstance(data, dict):
+            return "Error: triage_json must be a JSON object"
+        triage = data.get("triage") if isinstance(data.get("triage"), dict) else data
+        if not isinstance(triage, dict):
+            return "Error: triage_json must contain a triage object"
+        if triage.get("type") != "diet_inbox_triage":
+            return "Error: triage_json type must be diet_inbox_triage"
+
+        meal_lines = []
+        suggested_meals = (
+            triage.get("suggested_meals")
+            if isinstance(triage.get("suggested_meals"), list)
+            else []
+        )
+        for index, meal in enumerate(suggested_meals, start=1):
+            if not isinstance(meal, dict):
+                continue
+            meal_type = str(meal.get("meal_type") or "unknown").strip()
+            raw_text = str(meal.get("raw_text") or "").strip()
+            details = []
+            calories = _as_float(meal.get("estimated_calories"))
+            protein = _as_float(meal.get("protein_g"))
+            if calories:
+                details.append(f"热量：约 {calories:.0f} kcal")
+            if protein:
+                details.append(f"蛋白质：约 {protein:.0f}g")
+            if meal.get("meal_date"):
+                details.append(f"日期：{meal.get('meal_date')}")
+            if meal.get("needs_estimation"):
+                details.append("需要估算")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            meal_lines.append(f"{index}. {meal_type}：{raw_text or '待确认'}{suffix}")
+
+        weight = triage.get("suggested_weight") if isinstance(triage.get("suggested_weight"), dict) else {}
+        profile_updates = (
+            triage.get("suggested_profile_updates")
+            if isinstance(triage.get("suggested_profile_updates"), dict)
+            else {}
+        )
+        profile_lines = []
+        for key in sorted(profile_updates):
+            value = profile_updates[key]
+            if isinstance(value, list):
+                text = "、".join(str(item).strip() for item in value if str(item).strip())
+            else:
+                text = str(value).strip()
+            if text:
+                profile_lines.append(f"- {key}：{text}")
+
+        confirmations = triage.get("needs_confirmation")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        next_actions = triage.get("next_actions")
+        if not isinstance(next_actions, list):
+            next_actions = []
+
+        sections = [
+            "## 饮食收件箱整理",
+            f"- 判断：{triage.get('intent') or '待确认'}",
+            f"- 原文：{triage.get('source_text') or '无'}",
+            "",
+            "## 餐食候选",
+            "\n".join(meal_lines) if meal_lines else "暂无明确餐食候选。",
+            "",
+            "## 体重候选",
+            (
+                f"- 体重：{_as_float(weight.get('weight_kg')):.1f} kg"
+                if weight
+                else "暂无体重候选。"
+            ),
+            "",
+            "## 档案/偏好候选",
+            "\n".join(profile_lines) if profile_lines else "暂无档案或偏好候选。",
+            "",
+            "## 需要确认",
+            _markdown_bullets(confirmations),
+            "",
+            "## 可执行下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{triage.get('note') or '这是饮食输入整理建议，不会自动写入餐食、体重、档案或长期记忆。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_inbox_commit(
         *,
         triage_json: str,
@@ -2191,6 +2279,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_inbox_triage,
             tags=("diet", "inbox", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_inbox_triage",
+            description=(
+                "Format a diet_inbox_triage JSON object into a concise Chinese "
+                "Markdown diet inbox triage summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["triage_json"],
+                "properties": {
+                    "triage_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_inbox_triage.",
+                    },
+                },
+            },
+            handler=format_diet_inbox_triage,
+            tags=("diet", "inbox", "planning", "format", "user-facing"),
         )
     )
     registry.register(
