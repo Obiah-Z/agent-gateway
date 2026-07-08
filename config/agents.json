@@ -239,6 +239,7 @@
           "profile_update",
           "meal_log_add",
           "meal_log_list",
+          "format_meal_log_list",
           "nutrition_day_summary",
           "format_nutrition_day_summary",
           "diet_plan_generate",

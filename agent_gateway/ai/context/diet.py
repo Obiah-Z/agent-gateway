@@ -1529,6 +1529,49 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         rows = diet_store.list_meal_logs(scope, meal_date=meal_date, limit=limit)
         return _json({"status": "ok", "meals": rows})
 
+    def format_meal_log_list(meals_json: str) -> str:
+        if not meals_json.strip():
+            return "Error: meals_json is required"
+        data = json.loads(meals_json)
+        if not isinstance(data, dict):
+            return "Error: meals_json must be a JSON object"
+        meals = data.get("meals") if isinstance(data.get("meals"), list) else None
+        if meals is None:
+            return "Error: meals_json must contain a meals list"
+
+        valid_meals = [meal for meal in meals if isinstance(meal, dict)]
+        total_calories = sum(_as_float(meal.get("estimated_calories")) for meal in valid_meals)
+        total_protein = sum(_as_float(meal.get("protein_g")) for meal in valid_meals)
+        meal_lines = []
+        for index, meal in enumerate(valid_meals[:12], start=1):
+            meal_date_value = str(meal.get("meal_date") or "未知日期").strip()
+            meal_type = str(meal.get("meal_type") or "餐食").strip()
+            raw_text = str(meal.get("raw_text") or "未填写内容").strip()
+            calories = _as_float(meal.get("estimated_calories"))
+            protein = _as_float(meal.get("protein_g"))
+            carbs = _as_float(meal.get("carbs_g"))
+            fat = _as_float(meal.get("fat_g"))
+            meal_lines.append(
+                (
+                    f"{index}. {meal_date_value} {meal_type}：{raw_text}"
+                    f"（约 {calories:.0f} kcal，蛋白质 {protein:.0f}g，"
+                    f"碳水 {carbs:.0f}g，脂肪 {fat:.0f}g）"
+                )
+            )
+
+        sections = [
+            "## 餐食记录",
+            f"- 当前显示：{len(valid_meals)} 餐",
+            f"- 合计热量：约 {total_calories:.0f} kcal",
+            f"- 合计蛋白质：约 {total_protein:.0f}g",
+            "",
+            "## 明细",
+            "\n".join(meal_lines) if meal_lines else "暂无餐食记录。",
+            "",
+            "> 边界：这是餐食记录查询结果，只读取已保存餐食，不会自动新增、修改或删除记录。",
+        ]
+        return "\n".join(sections).strip()
+
     def nutrition_day_summary(
         *,
         date: str = "",
@@ -2379,6 +2422,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=meal_log_list,
             tags=("diet", "meal", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_meal_log_list",
+            description=(
+                "Format a meal_log_list JSON object into a concise Chinese "
+                "Markdown meal record list for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["meals_json"],
+                "properties": {
+                    "meals_json": {
+                        "type": "string",
+                        "description": "JSON string returned by meal_log_list.",
+                    },
+                },
+            },
+            handler=format_meal_log_list,
+            tags=("diet", "meal", "format", "user-facing"),
         )
     )
     registry.register(

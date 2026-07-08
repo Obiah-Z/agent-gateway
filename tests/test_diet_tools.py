@@ -129,6 +129,58 @@ def test_format_nutrition_day_summary_outputs_user_facing_summary(tmp_path: Path
     assert "不会自动补记餐食、体重或修改计划" in formatted
 
 
+def test_format_meal_log_list_outputs_user_facing_meal_records(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:test"}
+
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-07",
+            "meal_type": "breakfast",
+            "raw_text": "燕麦和鸡蛋",
+            "estimated_calories": 350,
+            "protein_g": 20,
+            "carbs_g": 45,
+            "fat_g": 10,
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-07",
+            "meal_type": "lunch",
+            "raw_text": "牛肉饭一份",
+            "estimated_calories": 780,
+            "protein_g": 38,
+            "carbs_g": 92,
+            "fat_g": 24,
+        },
+        runtime_context=context,
+    )
+    meals_json = registry.dispatch(
+        "meal_log_list",
+        {"meal_date": "2026-07-07"},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_meal_log_list",
+        {"meals_json": meals_json},
+    )
+
+    assert "## 餐食记录" in formatted
+    assert "- 当前显示：2 餐" in formatted
+    assert "- 合计热量：约 1130 kcal" in formatted
+    assert "- 合计蛋白质：约 58g" in formatted
+    assert "1. 2026-07-07 breakfast：燕麦和鸡蛋" in formatted
+    assert "2. 2026-07-07 lunch：牛肉饭一份" in formatted
+    assert "不会自动新增、修改或删除记录" in formatted
+
+
 def test_profile_update_preserves_existing_fields_when_partially_updating(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

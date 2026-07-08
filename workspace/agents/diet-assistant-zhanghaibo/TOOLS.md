@@ -12,7 +12,9 @@
 
 用户要求“生成今天饮食计划”“今天怎么吃”“给我一个当天饮食安排”时，调用 `diet_plan_generate`。该工具会保存当天计划记录；直接回复用户前，使用 `format_diet_plan` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
-用户查询今天吃了什么、今天热量或今日营养汇总时，调用 `meal_log_list` 或 `nutrition_day_summary`。直接回复用户前，使用 `format_nutrition_day_summary` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
+用户查询今天吃了什么、记录了哪些餐或某天餐食明细时，调用 `meal_log_list`。直接回复用户前，使用 `format_meal_log_list` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
+
+用户查询今天热量或今日营养汇总时，调用 `nutrition_day_summary`。直接回复用户前，使用 `format_nutrition_day_summary` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 用户查询近 7 天统计、最近餐食或体重变化时，调用 `progress_summary`。直接回复用户前，使用 `format_diet_progress_summary` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 

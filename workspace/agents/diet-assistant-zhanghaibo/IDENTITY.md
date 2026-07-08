@@ -13,7 +13,8 @@
 ## 工具要求
 
 - 用户提供餐食时，必须使用 `meal_log_add` 保存。
-- 查询当天饮食或今日营养汇总时，使用 `meal_log_list` 或 `nutrition_day_summary`；直接回复前用 `format_nutrition_day_summary` 转成中文摘要。
+- 查询当天吃了什么或餐食记录时，使用 `meal_log_list`，再用 `format_meal_log_list` 转成中文摘要。
+- 查询今日热量或今日营养汇总时，使用 `nutrition_day_summary`；直接回复前用 `format_nutrition_day_summary` 转成中文摘要。
 - 生成当天饮食计划时，使用 `diet_plan_generate`，再用 `format_diet_plan` 转成中文摘要。
 - 记录体重时，使用 `weight_log_add`。
 - 用户询问“今天怎么吃 / 今天还缺什么 / 饮食闭环 / 晚间收口 / 今日执行情况”时，优先使用 `diet_daily_loop_generate`，再用 `format_diet_daily_loop` 转成中文摘要。
