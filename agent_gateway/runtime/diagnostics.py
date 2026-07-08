@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import json
 import os
 from pathlib import Path
 from typing import Any
 
+from agent_gateway.ai.agent_contracts import (
+    baseline_agent_required_tools,
+    find_agent_contract_gaps,
+    load_agent_tool_allowlists,
+)
 from agent_gateway.config import GatewaySettings, PACKAGE_ROOT
 from agent_gateway.runtime.infra.postgres_client import PostgresClient
 from agent_gateway.runtime.infra.rabbitmq import RabbitMQDeliveryBroker
@@ -205,42 +209,19 @@ def _check_agent_contracts(settings: GatewaySettings) -> list[DoctorCheck]:
             )
         ]
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
+        tool_allowlists = load_agent_tool_allowlists(config_path)
     except Exception as exc:
         return [
             DoctorCheck(
                 "fail",
                 "agent.contracts",
-                f"Agent config cannot be parsed: {exc}",
+                f"Agent config cannot be loaded: {exc}",
                 {"path": str(config_path)},
             )
         ]
 
-    agents = data.get("agents", [])
-    if not isinstance(agents, list):
-        return [
-            DoctorCheck(
-                "fail",
-                "agent.contracts",
-                "Agent config field 'agents' must be a list",
-                {"path": str(config_path)},
-            )
-        ]
-
-    tool_allowlists = {
-        str(agent.get("id") or ""): set(agent.get("tool_policy", {}).get("tool_names", []))
-        for agent in agents
-        if isinstance(agent, dict) and agent.get("id")
-    }
-    required = _baseline_agent_required_tools()
-    missing_agents = [agent_id for agent_id in required if agent_id not in tool_allowlists]
-    missing_tools: dict[str, list[str]] = {}
-    for agent_id, tool_names in required.items():
-        if agent_id not in tool_allowlists:
-            continue
-        missing = [tool_name for tool_name in tool_names if tool_name not in tool_allowlists[agent_id]]
-        if missing:
-            missing_tools[agent_id] = missing
+    required = baseline_agent_required_tools()
+    missing_agents, missing_tools = find_agent_contract_gaps(tool_allowlists, required)
 
     detail = {
         "path": str(config_path),
@@ -265,39 +246,6 @@ def _check_agent_contracts(settings: GatewaySettings) -> list[DoctorCheck]:
             detail,
         )
     ]
-
-
-def _baseline_agent_required_tools() -> dict[str, tuple[str, ...]]:
-    """Baseline tool allowlist required by entry routing and capability checks."""
-
-    return {
-        "main": (
-            "classify_task_intent",
-            "format_entry_response",
-            "list_agent_capabilities",
-            "format_agent_capability_catalog",
-        ),
-        "repo-analyzer": (
-            "compose_github_repo_analysis",
-            "format_github_repo_analysis",
-            "github_repo_reading_guide",
-            "format_github_repo_reading_guide",
-            "plan_github_repo_adoption",
-            "format_github_repo_adoption_plan",
-        ),
-        "research": ("compose_research_option_comparison",),
-        "planner": ("plan_execution_stage", "format_execution_stage_plan"),
-        "ops": ("ops_readonly_health", "ops_runtime_diagnostics"),
-        "diet-assistant-zhanghaibo": ("meal_log_add", "format_meal_log_entry"),
-        "personal-secretary-zhanghaibo": (
-            "personal_todo_add",
-            "personal_review_add",
-            "personal_due_todo_digest_generate",
-            "format_personal_due_todo_digest",
-        ),
-        "doc-writer": ("outline_structured_document", "save_structured_document"),
-        "reviewer": ("assess_risk_decision", "format_risk_decision_assessment"),
-    }
 
 
 def _check_security_bindings(settings: GatewaySettings) -> list[DoctorCheck]:
