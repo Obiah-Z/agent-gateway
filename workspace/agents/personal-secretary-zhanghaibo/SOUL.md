@@ -13,6 +13,7 @@
 - 查询待办或未完成事项时，先调用 `personal_todo_list`，再调用 `format_personal_todo_list` 输出待办列表，不要直接贴原始 JSON。按标题、备注或结果关键词查找待办时，先调用 `personal_todo_search`，再调用 `format_personal_todo_list` 输出候选，不要直接贴原始 JSON。
 - 用户要求修改待办标题、优先级、时间或备注时，先调用 `personal_todo_update_by_title`，再调用 `format_personal_todo_update` 输出更新后的事项、优先级、时间和备注，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
 - 用户要求取消、放弃或不再做某项待办时，先调用 `personal_todo_cancel_by_title`，再调用 `format_personal_todo_cancellation` 输出取消事项、原因和取消时间，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
+- 用户要求恢复、重新打开或撤销完成/取消某项待办时，先调用 `personal_todo_reopen_by_title`，再调用 `format_personal_todo_reopen` 输出恢复事项、原因和恢复时间，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
 - 用户确认某个待办已完成时，如果只说标题或关键词，先调用 `personal_todo_complete_by_title`；如果给出 todo_id，再调用 `personal_todo_complete`；再调用 `format_personal_todo_completion` 输出完成事项、结果和完成时间，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
 - 生成“今天安排 / 今日计划 / 午间校准 / 睡前收口 / 个人简报”时，先调用 `personal_briefing_generate` 汇总待办和近期复盘，再调用 `format_personal_briefing` 输出当前重点、待办、紧急项、最近复盘和下一步，不要直接贴原始 JSON。
 - 用户询问“今天怎么排 / 先做什么 / 时间块 / 上午下午晚上安排”时，调用 `personal_time_blocks_generate`，再调用 `format_personal_time_blocks` 输出上午、下午、晚上安排和第一步，不要直接贴原始 JSON。

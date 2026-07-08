@@ -196,6 +196,8 @@
           "format_personal_todo_update",
           "personal_todo_cancel_by_title",
           "format_personal_todo_cancellation",
+          "personal_todo_reopen_by_title",
+          "format_personal_todo_reopen",
           "personal_review_add",
           "format_personal_review_entry",
           "personal_review_recent",

@@ -245,6 +245,112 @@ def test_personal_todo_cancel_by_title_refuses_ambiguous_matches(tmp_path: Path)
     assert store.list_todos(status="canceled", user_scope="user:alice") == []
 
 
+def test_personal_todo_reopen_by_title_reopens_completed_todo(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "复盘 RabbitMQ 选型", "priority": "high"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_complete_by_title",
+        {"title_query": "RabbitMQ", "result": "误标完成"},
+        runtime_context=context,
+    )
+
+    reopened = json.loads(
+        registry.dispatch(
+            "personal_todo_reopen_by_title",
+            {"title_query": "RabbitMQ", "reason": "还需要继续补充"},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_todo_reopen",
+        {"reopen_json": json.dumps(reopened, ensure_ascii=False)},
+    )
+
+    assert reopened["status"] == "open"
+    assert reopened["title"] == "复盘 RabbitMQ 选型"
+    assert reopened["reopen_reason"] == "还需要继续补充"
+    assert "completed_at" not in reopened
+    assert store.list_todos(status="done", user_scope="user:alice") == []
+    assert store.list_todos(status="open", user_scope="user:alice")[0]["id"] == reopened["id"]
+    assert "## 待办已恢复" in formatted
+    assert "- 恢复原因：还需要继续补充" in formatted
+
+
+def test_personal_todo_reopen_by_title_reopens_canceled_todo(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理项目答辩素材"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_cancel_by_title",
+        {"title_query": "答辩", "reason": "暂时不做"},
+        runtime_context=context,
+    )
+
+    reopened = json.loads(
+        registry.dispatch(
+            "personal_todo_reopen_by_title",
+            {"title_query": "答辩", "reason": "重新纳入计划"},
+            runtime_context=context,
+        )
+    )
+
+    assert reopened["status"] == "open"
+    assert reopened["reopen_reason"] == "重新纳入计划"
+    assert "canceled_at" not in reopened
+    assert store.list_todos(status="canceled", user_scope="user:alice") == []
+    assert store.list_todos(status="open", user_scope="user:alice")[0]["title"] == "整理项目答辩素材"
+
+
+def test_personal_todo_reopen_by_title_refuses_ambiguous_matches(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "恢复 RabbitMQ 复盘"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "恢复 RabbitMQ 压测整理"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_cancel_by_title",
+        {"title_query": "复盘"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_cancel_by_title",
+        {"title_query": "压测"},
+        runtime_context=context,
+    )
+
+    result = registry.dispatch(
+        "personal_todo_reopen_by_title",
+        {"title_query": "RabbitMQ"},
+        runtime_context=context,
+    )
+
+    assert result.startswith("Error: multiple done or canceled todos matched title:")
+    assert len(store.list_todos(status="open", user_scope="user:alice")) == 0
+    assert len(store.list_todos(status="canceled", user_scope="user:alice")) == 2
+
+
 def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

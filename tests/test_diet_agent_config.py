@@ -918,6 +918,8 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_personal_todo_update",
         "personal_todo_cancel_by_title",
         "format_personal_todo_cancellation",
+        "personal_todo_reopen_by_title",
+        "format_personal_todo_reopen",
         "format_personal_review_entry",
         "format_diet_profile_update",
         "diet_today_status",
@@ -1005,6 +1007,8 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "format_personal_todo_update",
         "personal_todo_cancel_by_title",
         "format_personal_todo_cancellation",
+        "personal_todo_reopen_by_title",
+        "format_personal_todo_reopen",
         "personal_review_add",
         "format_personal_review_entry",
         "personal_review_recent",
@@ -1122,6 +1126,12 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_personal_todo_cancellation" in identity
     assert "format_personal_todo_cancellation" in soul
     assert "format_personal_todo_cancellation" in tools_md
+    assert "personal_todo_reopen_by_title" in identity
+    assert "personal_todo_reopen_by_title" in soul
+    assert "personal_todo_reopen_by_title" in tools_md
+    assert "format_personal_todo_reopen" in identity
+    assert "format_personal_todo_reopen" in soul
+    assert "format_personal_todo_reopen" in tools_md
     assert "format_personal_inbox_commit" in identity
     assert "format_personal_inbox_commit" in soul
     assert "format_personal_inbox_commit" in tools_md

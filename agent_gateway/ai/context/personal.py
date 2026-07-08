@@ -163,6 +163,33 @@ class PersonalStore:
         self._write_jsonl(self._todos_path(user_scope), rows)
         return updated
 
+    def reopen_todo(
+        self,
+        todo_id: str,
+        *,
+        reason: str = "",
+        user_scope: str = "",
+    ) -> dict[str, Any] | None:
+        """把已完成或已取消的待办恢复为 open。"""
+
+        rows = self._read_jsonl(self._todos_path(user_scope))
+        now = self._now()
+        updated = None
+        for row in rows:
+            if str(row.get("id", "")) == todo_id:
+                row["status"] = "open"
+                row["reopened_at"] = now
+                row.pop("completed_at", None)
+                row.pop("canceled_at", None)
+                if reason.strip():
+                    row["reopen_reason"] = reason.strip()
+                updated = row
+                break
+        if updated is None:
+            return None
+        self._write_jsonl(self._todos_path(user_scope), rows)
+        return updated
+
     def update_todo(
         self,
         todo_id: str,
@@ -1287,6 +1314,47 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             return f"Error: todo not found after title match: {title_query}"
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def personal_todo_reopen_by_title(
+        title_query: str,
+        reason: str = "",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        query = " ".join(title_query.strip().split()).lower()
+        if not query:
+            return "Error: title_query is required"
+        scope = _scope(__runtime_context, user_scope)
+        inactive_todos = [
+            todo
+            for todo in personal_store.list_todos(status="all", limit=100, user_scope=scope)
+            if str(todo.get("status", "")).lower() in {"done", "canceled"}
+        ]
+        exact_matches = [
+            todo
+            for todo in inactive_todos
+            if str(todo.get("title", "")).strip().lower() == query
+        ]
+        partial_matches = [
+            todo
+            for todo in inactive_todos
+            if query in str(todo.get("title", "")).strip().lower()
+        ]
+        matches = exact_matches or partial_matches
+        if not matches:
+            return f"Error: no done or canceled todo matched title: {title_query}"
+        if len(matches) > 1:
+            titles = "；".join(str(todo.get("title", "")) for todo in matches[:5])
+            return f"Error: multiple done or canceled todos matched title: {titles}"
+        row = personal_store.reopen_todo(
+            str(matches[0].get("id", "")),
+            reason=reason,
+            user_scope=scope,
+        )
+        if row is None:
+            return f"Error: todo not found after title match: {title_query}"
+        return json.dumps(row, ensure_ascii=False, indent=2)
+
     def format_personal_todo_update(todo_json: str) -> str:
         if not todo_json.strip():
             return "Error: todo_json is required"
@@ -1350,6 +1418,40 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             _markdown_bullets(details),
             "",
             "> 边界：这是待办取消确认，只把已匹配的结构化待办标记为 canceled，不会删除记录或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
+    def format_personal_todo_reopen(reopen_json: str) -> str:
+        if not reopen_json.strip():
+            return "Error: reopen_json is required"
+        data = json.loads(reopen_json)
+        if not isinstance(data, dict):
+            return "Error: reopen_json must be a JSON object"
+        if data.get("status") != "open" or not data.get("reopened_at"):
+            return "Error: reopen_json must be a reopened personal todo object"
+
+        details = [
+            f"事项：{data.get('title') or '未命名待办'}",
+            f"状态：{data.get('status') or 'open'}",
+            f"优先级：{data.get('priority') or 'normal'}",
+        ]
+        if data.get("due_at"):
+            details.append(f"计划时间：{data.get('due_at')}")
+        reason = str(data.get("reopen_reason") or "").strip()
+        if reason:
+            details.append(f"恢复原因：{reason}")
+        if data.get("reopened_at"):
+            details.append(f"恢复时间：{data.get('reopened_at')}")
+
+        sections = [
+            "## 待办已恢复",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 这项待办已回到未完成列表。",
+            "- 后续可以继续修改、完成或取消它。",
+            "",
+            "> 边界：这是待办恢复确认，只恢复已匹配的结构化待办，不会新增待办、写复盘或写入长期记忆。",
         ]
         return "\n".join(sections).strip()
 
@@ -2362,6 +2464,25 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
     )
     registry.register(
         RegisteredTool(
+            name="personal_todo_reopen_by_title",
+            description=(
+                "Reopen one done or canceled personal todo by matching a title fragment. "
+                "Returns an error when none or multiple inactive todos match."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title_query"],
+                "properties": {
+                    "title_query": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+            handler=personal_todo_reopen_by_title,
+            tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
             name="format_personal_todo_update",
             description=(
                 "Format a personal_todo_update_by_title JSON object into a concise "
@@ -2378,6 +2499,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
                 },
             },
             handler=format_personal_todo_update,
+            tags=("personal", "todo", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_reopen",
+            description=(
+                "Format a personal_todo_reopen_by_title JSON object into a concise "
+                "Chinese Markdown todo reopen confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["reopen_json"],
+                "properties": {
+                    "reopen_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_reopen_by_title.",
+                    },
+                },
+            },
+            handler=format_personal_todo_reopen,
             tags=("personal", "todo", "format", "user-facing"),
         )
     )
