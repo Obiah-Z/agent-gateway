@@ -82,6 +82,53 @@ def test_diet_tools_use_runtime_context_scope(tmp_path: Path) -> None:
     assert plan["plan"]["meals"]["breakfast"]
 
 
+def test_format_nutrition_day_summary_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:test"}
+
+    registry.dispatch(
+        "profile_update",
+        {"height_cm": 178, "current_weight_kg": 82, "target_weight_kg": 75},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-07",
+            "meal_type": "lunch",
+            "raw_text": "牛肉饭一份",
+            "estimated_calories": 780,
+            "protein_g": 38,
+            "carbs_g": 92,
+            "fat_g": 24,
+        },
+        runtime_context=context,
+    )
+    summary_json = registry.dispatch(
+        "nutrition_day_summary",
+        {"date": "2026-07-07"},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_nutrition_day_summary",
+        {"summary_json": summary_json},
+    )
+
+    assert "## 今日营养汇总" in formatted
+    assert "- 日期：2026-07-07" in formatted
+    assert "- 今日摄入：约 780 /" in formatted
+    assert "- 热量差额：还可安排约" in formatted
+    assert "- 蛋白质：约 38g" in formatted
+    assert "- 碳水：约 92g" in formatted
+    assert "- 脂肪：约 24g" in formatted
+    assert "- 已记录餐次：1 餐" in formatted
+    assert "- 漏记餐次：breakfast、dinner" in formatted
+    assert "不会自动补记餐食、体重或修改计划" in formatted
+
+
 def test_profile_update_preserves_existing_fields_when_partially_updating(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

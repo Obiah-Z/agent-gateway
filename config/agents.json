@@ -238,6 +238,7 @@
           "meal_log_add",
           "meal_log_list",
           "nutrition_day_summary",
+          "format_nutrition_day_summary",
           "diet_plan_generate",
           "format_diet_plan",
           "weight_log_add",

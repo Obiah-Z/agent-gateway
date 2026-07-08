@@ -1539,6 +1539,53 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         row = diet_store.summarize_day(scope, date=date)
         return _json({"status": "ok", "summary": row})
 
+    def format_nutrition_day_summary(summary_json: str) -> str:
+        if not summary_json.strip():
+            return "Error: summary_json is required"
+        data = json.loads(summary_json)
+        if not isinstance(data, dict):
+            return "Error: summary_json must be a JSON object"
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else data
+        if not isinstance(summary, dict):
+            return "Error: summary_json must contain a summary object"
+        if not {"date", "target_calories", "actual_calories", "metadata"}.issubset(summary):
+            return "Error: summary_json must be a nutrition_day_summary object"
+
+        metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+        missing_meals = (
+            metadata.get("missing_meals")
+            if isinstance(metadata.get("missing_meals"), list)
+            else []
+        )
+        missing_text = "、".join(str(item) for item in missing_meals) if missing_meals else "无明显漏记"
+        target = _as_float(summary.get("target_calories"))
+        actual = _as_float(summary.get("actual_calories"))
+        remaining = target - actual
+        if remaining > 0:
+            gap_text = f"还可安排约 {remaining:.0f} kcal"
+        elif remaining < 0:
+            gap_text = f"已超出约 {abs(remaining):.0f} kcal"
+        else:
+            gap_text = "基本贴近目标"
+
+        sections = [
+            "## 今日营养汇总",
+            f"- 日期：{summary.get('date') or '待确认'}",
+            f"- 今日摄入：约 {actual:.0f} / {target:.0f} kcal",
+            f"- 热量差额：{gap_text}",
+            f"- 蛋白质：约 {_as_float(summary.get('protein_g')):.0f}g",
+            f"- 碳水：约 {_as_float(summary.get('carbs_g')):.0f}g",
+            f"- 脂肪：约 {_as_float(summary.get('fat_g')):.0f}g",
+            f"- 已记录餐次：{_as_int(metadata.get('meal_count'))} 餐",
+            f"- 漏记餐次：{missing_text}",
+            "",
+            "## 简要判断",
+            f"- {summary.get('summary_text') or '暂无总结。'}",
+            "",
+            "> 边界：这是当天营养汇总，会保存汇总快照，但不会自动补记餐食、体重或修改计划。",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_plan_generate(
         *,
         plan_date: str = "",
@@ -2344,6 +2391,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=nutrition_day_summary,
             tags=("diet", "summary", "read", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_nutrition_day_summary",
+            description=(
+                "Format a nutrition_day_summary JSON object into a concise Chinese "
+                "Markdown daily nutrition summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["summary_json"],
+                "properties": {
+                    "summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by nutrition_day_summary.",
+                    },
+                },
+            },
+            handler=format_nutrition_day_summary,
+            tags=("diet", "summary", "nutrition", "format", "user-facing"),
         )
     )
     registry.register(
