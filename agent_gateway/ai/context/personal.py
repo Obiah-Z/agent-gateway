@@ -1402,6 +1402,83 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(triage, ensure_ascii=False, indent=2)
 
+    def format_personal_inbox_triage(triage_json: str) -> str:
+        if not triage_json.strip():
+            return "Error: triage_json is required"
+        data = json.loads(triage_json)
+        if not isinstance(data, dict):
+            return "Error: triage_json must be a JSON object"
+        if data.get("type") != "personal_inbox_triage":
+            return "Error: triage_json type must be personal_inbox_triage"
+
+        suggested_todos = (
+            data.get("suggested_todos") if isinstance(data.get("suggested_todos"), list) else []
+        )
+        todo_lines = []
+        for index, todo in enumerate(suggested_todos, start=1):
+            if not isinstance(todo, dict):
+                continue
+            title = str(todo.get("title") or "").strip()
+            if not title:
+                continue
+            details = []
+            if todo.get("priority"):
+                details.append(f"优先级：{todo.get('priority')}")
+            if todo.get("due_at"):
+                details.append(f"时间：{todo.get('due_at')}")
+            notes = str(todo.get("notes") or "").strip()
+            if notes:
+                details.append(f"备注：{notes}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            todo_lines.append(f"{index}. {title}{suffix}")
+
+        review = data.get("suggested_review") if isinstance(data.get("suggested_review"), dict) else {}
+        memory = data.get("suggested_memory") if isinstance(data.get("suggested_memory"), dict) else {}
+        confirmations = data.get("needs_confirmation")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        next_actions = data.get("next_actions")
+        if not isinstance(next_actions, list):
+            next_actions = []
+
+        memory_lines = []
+        if memory:
+            if memory.get("category"):
+                memory_lines.append(f"- 类型：{memory.get('category')}")
+            if memory.get("content"):
+                memory_lines.append(f"- 内容：{memory.get('content')}")
+            if memory.get("reason"):
+                memory_lines.append(f"- 原因：{memory.get('reason')}")
+
+        sections = [
+            "## 收件箱整理",
+            f"- 判断：{data.get('intent') or '待确认'}",
+            f"- 原文：{data.get('source_text') or '无'}",
+            "",
+            "## 待办候选",
+            "\n".join(todo_lines) if todo_lines else "暂无明确待办候选。",
+            "",
+            "## 复盘候选",
+            f"- 总结：{review.get('summary') or '暂无明确复盘摘要'}",
+            "完成：",
+            _markdown_bullets(review.get("completed") if isinstance(review.get("completed"), list) else []),
+            "卡点：",
+            _markdown_bullets(review.get("blockers") if isinstance(review.get("blockers"), list) else []),
+            f"- 下一步：{review.get('next_step') or '待确认'}",
+            "",
+            "## 长期记忆候选",
+            "\n".join(memory_lines) if memory_lines else "暂无长期记忆候选。",
+            "",
+            "## 需要确认",
+            _markdown_bullets(confirmations),
+            "",
+            "## 可执行下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{data.get('note') or '这是个人秘书收件箱整理建议，不会自动写入待办、复盘或长期记忆。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_inbox_commit(
         triage_json: str,
         commit_todos: bool = True,
@@ -1717,6 +1794,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_inbox_triage,
             tags=("personal", "inbox", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_inbox_triage",
+            description=(
+                "Format a personal_inbox_triage JSON object into a concise Chinese "
+                "Markdown inbox triage summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["triage_json"],
+                "properties": {
+                    "triage_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_inbox_triage.",
+                    },
+                },
+            },
+            handler=format_personal_inbox_triage,
+            tags=("personal", "inbox", "planning", "format", "user-facing"),
         )
     )
     registry.register(

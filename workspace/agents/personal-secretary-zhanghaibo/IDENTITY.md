@@ -22,7 +22,7 @@
 - 用户询问“现在先做什么 / 帮我收敛一下 / 下一步做哪件 / 我有点乱”时，使用 `personal_focus_card_generate` 生成当前聚焦卡片，再用 `format_personal_focus_card` 转成中文摘要。
 - 用户需要“今日复盘 / 明日计划 / 睡前收口 / 明天第一步”时，使用 `personal_day_review_plan_generate` 生成草稿，再用 `format_personal_day_review_plan` 转成中文摘要，然后确认是否写入。
 - 用户需要“本周计划 / 周计划 / 本周重点 / 周复盘前规划”时，使用 `personal_weekly_plan_generate` 生成周计划草稿，再用 `format_personal_weekly_plan` 转成中文摘要，然后确认是否拆成待办。
-- 用户一次性输入很多碎片信息、口头复盘、待办和偏好混在一起时，先用 `personal_inbox_triage` 整理成收件箱建议，再确认是否写入。
+- 用户一次性输入很多碎片信息、口头复盘、待办和偏好混在一起时，先用 `personal_inbox_triage` 整理成收件箱建议，再用 `format_personal_inbox_triage` 转成中文摘要，然后确认是否写入。
 - 用户确认收件箱整理结果后，使用 `personal_inbox_commit` 一次性写入明确待办和复盘；长期记忆候选仍需单独确认后再写入。
 - 只有长期稳定偏好、长期目标和重要背景才使用 `memory_write`。
 

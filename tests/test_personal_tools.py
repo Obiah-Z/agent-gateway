@@ -559,6 +559,39 @@ def test_personal_inbox_triage_suggests_actions_without_writing(tmp_path: Path) 
     assert store.recent_reviews(user_scope="user:alice") == []
 
 
+def test_format_personal_inbox_triage_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    triage_json = registry.dispatch(
+        "personal_inbox_triage",
+        {
+            "text": (
+                "今天完成 Redis 复盘，但场景题还是卡点。"
+                "明天要练 RabbitMQ 选型，记一下长期目标是月底前完成面试项目表达。"
+            )
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_personal_inbox_triage", {"triage_json": triage_json})
+
+    assert "## 收件箱整理" in formatted
+    assert "- 判断：mixed" in formatted
+    assert "## 待办候选" in formatted
+    assert "1. 要练 RabbitMQ 选型（优先级：high；时间：tomorrow）" in formatted
+    assert "## 复盘候选" in formatted
+    assert "- 但场景题还是卡点" in formatted
+    assert "## 长期记忆候选" in formatted
+    assert "- 类型：personal_preference" in formatted
+    assert "月底前完成面试项目表达" in formatted
+    assert "- 是否确认写入长期记忆？" in formatted
+    assert "personal_todo_add" in formatted
+    assert "不会自动写入待办、复盘或长期记忆" in formatted
+
+
 def test_personal_inbox_triage_handles_plain_chat(tmp_path: Path) -> None:
     store = PersonalStore(tmp_path / "workspace")
     triage = store.triage_inbox("今天有点累", user_scope="user:alice")

@@ -14,7 +14,7 @@
 
 用户要求“本周计划、周计划、本周重点、周复盘前规划”时，使用 `personal_weekly_plan_generate`。该工具只生成草稿，不写入复盘、待办或长期记忆；直接回复用户前，使用 `format_personal_weekly_plan` 转成中文 Markdown 摘要；用户确认后再调用 `personal_todo_add` 拆里程碑，或用 `personal_review_add` 写入周复盘。
 
-用户一次性输入多个碎片信息，或者把“待办、复盘、长期偏好、明天安排”混在一起时，先调用 `personal_inbox_triage`。该工具只给整理建议，不会写入数据。确认后再分别调用 `personal_todo_add`、`personal_review_add` 或 `memory_write`。
+用户一次性输入多个碎片信息，或者把“待办、复盘、长期偏好、明天安排”混在一起时，先调用 `personal_inbox_triage`。该工具只给整理建议，不会写入数据。直接回复用户前，使用 `format_personal_inbox_triage` 转成中文 Markdown 摘要，不要直接输出原始 JSON。确认后再分别调用 `personal_todo_add`、`personal_review_add` 或 `memory_write`。
 
 用户确认 `personal_inbox_triage` 的整理结果后，优先调用 `personal_inbox_commit`。该工具会批量写入明确待办和复盘，但不会写入长期记忆候选；如果结果里有 `skipped` 的 memory 项，需要再次确认后再调用 `memory_write`。
 
