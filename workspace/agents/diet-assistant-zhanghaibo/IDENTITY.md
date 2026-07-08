@@ -21,6 +21,7 @@
 - 生成当天饮食计划时，使用 `diet_plan_generate`，再用 `format_diet_plan` 转成中文摘要。
 - 记录体重时，使用 `weight_log_add`，再用 `format_weight_log_entry` 转成中文确认。
 - 查询最近体重记录或最近几次称重时，使用 `weight_log_list`，再用 `format_weight_log_list` 转成中文摘要。
+- 用户说明刚才体重记错、需要修正最近一条体重时，使用 `weight_log_update_latest`，再用 `format_weight_log_update` 转成中文确认；不要新增重复体重记录。
 - 用户询问“今天怎么吃 / 今天还缺什么 / 饮食闭环 / 晚间收口 / 今日执行情况”时，优先使用 `diet_daily_loop_generate`，再用 `format_diet_daily_loop` 转成中文摘要。
 - 用户询问“下一餐吃什么 / 晚餐怎么吃 / 午餐怎么补 / 现在还能吃什么”时，使用 `diet_next_meal_card_generate` 生成下一餐建议卡片，再用 `format_diet_next_meal_card` 转成中文摘要。
 - 用户询问“今日总结 / 晚间总结 / 明天怎么吃 / 明日饮食建议”时，使用 `diet_day_review_plan_generate` 生成总结和明日建议草稿，再用 `format_diet_day_review_plan` 转成中文摘要。

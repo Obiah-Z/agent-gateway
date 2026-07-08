@@ -165,6 +165,31 @@ class DietStore:
         rows.sort(key=lambda row: _as_float(row.get("recorded_at")), reverse=True)
         return rows[:safe_limit]
 
+    def update_latest_weight_log(
+        self,
+        user_scope: str,
+        weight_kg: float,
+        *,
+        source: str = "",
+        correction_reason: str = "",
+    ) -> dict[str, Any] | None:
+        """修正最近一条体重记录，并同步当前体重档案。"""
+
+        scope = self._require_scope(user_scope)
+        rows = self.list_weight_logs(scope, limit=1)
+        if not rows:
+            return None
+        updated = dict(rows[0])
+        updated["weight_kg"] = _as_float(weight_kg)
+        if source.strip():
+            updated["source"] = source.strip()
+        updated["updated_at"] = _now()
+        if correction_reason.strip():
+            updated["correction_reason"] = correction_reason.strip()
+        self._upsert("weight_logs", updated)
+        self.update_profile(scope, current_weight_kg=updated["weight_kg"])
+        return updated
+
     def add_meal_log(
         self,
         user_scope: str,
@@ -2183,6 +2208,62 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         ]
         return "\n".join(sections).strip()
 
+    def weight_log_update_latest(
+        weight_kg: float,
+        source: str = "",
+        correction_reason: str = "",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        row = diet_store.update_latest_weight_log(
+            scope,
+            weight_kg=weight_kg,
+            source=source,
+            correction_reason=correction_reason,
+        )
+        if row is None:
+            return "Error: no weight log found to update"
+        return _json({"status": "updated", "weight": row})
+
+    def format_weight_log_update(weight_json: str) -> str:
+        if not weight_json.strip():
+            return "Error: weight_json is required"
+        data = json.loads(weight_json)
+        if not isinstance(data, dict):
+            return "Error: weight_json must be a JSON object"
+        weight = data.get("weight") if isinstance(data.get("weight"), dict) else data
+        if not isinstance(weight, dict):
+            return "Error: weight_json must contain a weight object"
+        if "weight_kg" not in weight or not weight.get("updated_at"):
+            return "Error: weight_json must be a weight_log_update_latest object"
+
+        details = [
+            f"weight_id：{weight.get('id') or 'unknown'}",
+            f"体重：{_as_float(weight.get('weight_kg')):.1f} kg",
+            f"来源：{weight.get('source') or 'user'}",
+        ]
+        if weight.get("recorded_at"):
+            details.append(f"原记录时间：{weight.get('recorded_at')}")
+        if weight.get("updated_at"):
+            details.append(f"更新时间：{weight.get('updated_at')}")
+        reason = str(weight.get("correction_reason") or "").strip()
+        if reason:
+            details.append(f"修正原因：{reason}")
+
+        sections = [
+            "## 体重已修正",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 已同步更新当前体重档案。",
+            "- 后续体重历史和趋势会读取修正后的记录。",
+            "",
+            "> 边界：这是最近体重修正确认，只更新最近一条体重记录，不会新增餐食、生成计划或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def progress_summary(
         *,
         days: int = 7,
@@ -3295,6 +3376,45 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
                 },
             },
             handler=format_weight_log_list,
+            tags=("diet", "weight", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="weight_log_update_latest",
+            description="Update the latest body weight record for quick correction.",
+            input_schema={
+                "type": "object",
+                "required": ["weight_kg"],
+                "properties": {
+                    "weight_kg": {"type": "number"},
+                    "source": {"type": "string"},
+                    "correction_reason": {"type": "string"},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=weight_log_update_latest,
+            tags=("diet", "weight", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_weight_log_update",
+            description=(
+                "Format a weight_log_update_latest JSON object into a concise Chinese "
+                "Markdown weight correction confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["weight_json"],
+                "properties": {
+                    "weight_json": {
+                        "type": "string",
+                        "description": "JSON string returned by weight_log_update_latest.",
+                    },
+                },
+            },
+            handler=format_weight_log_update,
             tags=("diet", "weight", "format", "user-facing"),
         )
     )

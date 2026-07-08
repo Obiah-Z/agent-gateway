@@ -32,6 +32,8 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "format_weight_log_entry" in agent["tool_policy"]["tool_names"]
     assert "weight_log_list" in agent["tool_policy"]["tool_names"]
     assert "format_weight_log_list" in agent["tool_policy"]["tool_names"]
+    assert "weight_log_update_latest" in agent["tool_policy"]["tool_names"]
+    assert "format_weight_log_update" in agent["tool_policy"]["tool_names"]
     assert "diet_coach_briefing" in agent["tool_policy"]["tool_names"]
     assert "format_diet_progress_summary" in agent["tool_policy"]["tool_names"]
     assert "format_diet_coach_briefing" in agent["tool_policy"]["tool_names"]
@@ -357,6 +359,12 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "format_weight_log_list" in tools_md
     assert "format_weight_log_list" in identity
     assert "format_weight_log_list" in soul
+    assert "weight_log_update_latest" in tools_md
+    assert "weight_log_update_latest" in identity
+    assert "weight_log_update_latest" in soul
+    assert "format_weight_log_update" in tools_md
+    assert "format_weight_log_update" in identity
+    assert "format_weight_log_update" in soul
     assert "progress_summary" in tools_md
     assert "format_diet_progress_summary" in tools_md
     assert "format_diet_progress_summary" in identity
@@ -952,6 +960,8 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_weight_log_entry",
         "weight_log_list",
         "format_weight_log_list",
+        "weight_log_update_latest",
+        "format_weight_log_update",
         "format_diet_progress_summary",
         "format_diet_coach_briefing",
         "format_diet_daily_loop",

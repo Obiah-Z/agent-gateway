@@ -209,6 +209,45 @@ def test_weight_log_list_outputs_recent_weight_history(tmp_path: Path) -> None:
     assert "不会新增体重、修改档案或写入长期记忆" in formatted
 
 
+def test_weight_log_update_latest_corrects_recent_weight(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+    registry.dispatch(
+        "weight_log_add",
+        {"weight_kg": 82.0, "source": "scale"},
+        runtime_context=context,
+    )
+
+    updated_json = registry.dispatch(
+        "weight_log_update_latest",
+        {
+            "weight_kg": 81.6,
+            "source": "scale",
+            "correction_reason": "刚才看错读数",
+        },
+        runtime_context=context,
+    )
+    updated = json.loads(updated_json)
+    formatted = registry.dispatch(
+        "format_weight_log_update",
+        {"weight_json": updated_json},
+    )
+    weights = store.list_weight_logs("user:wework:diet")
+
+    assert updated["status"] == "updated"
+    assert updated["weight"]["weight_kg"] == 81.6
+    assert updated["weight"]["correction_reason"] == "刚才看错读数"
+    assert len(weights) == 1
+    assert weights[0]["weight_kg"] == 81.6
+    assert store.get_profile("user:wework:diet")["current_weight_kg"] == 81.6
+    assert "## 体重已修正" in formatted
+    assert "- 体重：81.6 kg" in formatted
+    assert "- 修正原因：刚才看错读数" in formatted
+    assert "只更新最近一条体重记录" in formatted
+
+
 def test_format_meal_log_entry_outputs_user_facing_confirmation(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

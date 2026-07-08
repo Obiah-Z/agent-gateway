@@ -272,6 +272,8 @@
           "format_weight_log_entry",
           "weight_log_list",
           "format_weight_log_list",
+          "weight_log_update_latest",
+          "format_weight_log_update",
           "progress_summary",
           "format_diet_progress_summary",
           "diet_coach_briefing",
