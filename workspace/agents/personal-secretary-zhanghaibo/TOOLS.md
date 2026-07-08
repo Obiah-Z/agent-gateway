@@ -4,6 +4,8 @@
 
 查询未完成事项、今天安排、个人简报时，先使用 `personal_briefing_generate` 汇总待办和近期复盘。直接回复用户前，使用 `format_personal_briefing` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
+用户询问“待办情况、现在还有多少事、高优先级有哪些、最近完成了什么、最近取消了什么”时，使用 `personal_todo_status_card_generate`。直接回复用户前，使用 `format_personal_todo_status_card` 转成中文 Markdown 状态卡，不要直接输出原始 JSON。
+
 用户询问“今天怎么排、先做什么、上午下午晚上怎么安排、时间块计划”时，使用 `personal_time_blocks_generate`。直接回复用户前，使用 `format_personal_time_blocks` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 用户询问“今天安排、今日工作流、怎么推进、睡前收口、午间校准”时，优先使用 `personal_daily_workflow_generate`。它会组合待办、近期复盘、时间块、第一步和需要确认的问题。直接回复用户前，使用 `format_personal_daily_workflow` 转成中文 Markdown 摘要，不要直接输出原始 JSON。

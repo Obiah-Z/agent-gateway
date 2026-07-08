@@ -292,6 +292,55 @@ class PersonalStore:
             "next_steps": next_steps[:5],
         }
 
+    def generate_todo_status_card(
+        self,
+        *,
+        user_scope: str = "",
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """生成轻量待办状态卡，只读展示待办队列概况。"""
+
+        safe_limit = max(1, min(int(limit), 10))
+        rows = self.list_todos(status="all", limit=100, user_scope=user_scope)
+        open_todos = [row for row in rows if str(row.get("status", "")).lower() == "open"]
+        done_todos = [row for row in rows if str(row.get("status", "")).lower() == "done"]
+        canceled_todos = [
+            row for row in rows if str(row.get("status", "")).lower() == "canceled"
+        ]
+        urgent_open = [
+            row
+            for row in open_todos
+            if str(row.get("priority", "")).lower() in {"high", "urgent"}
+        ]
+        open_sorted = sorted(open_todos, key=self._todo_sort_key)
+        done_todos.sort(key=lambda row: str(row.get("completed_at") or row.get("created_at") or ""), reverse=True)
+        canceled_todos.sort(
+            key=lambda row: str(row.get("canceled_at") or row.get("created_at") or ""),
+            reverse=True,
+        )
+        next_action = "暂无未完成待办。"
+        if open_sorted:
+            first = open_sorted[0]
+            next_action = f"先推进：{first.get('title') or '未命名待办'}"
+        return {
+            "type": "personal_todo_status_card",
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "counts": {
+                "open": len(open_todos),
+                "urgent_open": len(urgent_open),
+                "done": len(done_todos),
+                "canceled": len(canceled_todos),
+                "total": len(rows),
+            },
+            "top_open": open_sorted[:safe_limit],
+            "urgent_open": sorted(urgent_open, key=self._todo_sort_key)[:safe_limit],
+            "recent_done": done_todos[:safe_limit],
+            "recent_canceled": canceled_todos[:safe_limit],
+            "next_action": next_action,
+            "note": "这是待办状态只读概览，不会新增、修改、完成、取消或恢复待办。",
+        }
+
     def generate_time_blocks(
         self,
         *,
@@ -1691,6 +1740,92 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         ]
         return "\n".join(sections).strip()
 
+    def personal_todo_status_card_generate(
+        limit: int = 5,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        card = personal_store.generate_todo_status_card(
+            user_scope=_scope(__runtime_context, user_scope),
+            limit=limit,
+        )
+        return json.dumps(card, ensure_ascii=False, indent=2)
+
+    def format_personal_todo_status_card(status_card_json: str) -> str:
+        if not status_card_json.strip():
+            return "Error: status_card_json is required"
+        data = json.loads(status_card_json)
+        if not isinstance(data, dict):
+            return "Error: status_card_json must be a JSON object"
+        if data.get("type") != "personal_todo_status_card":
+            return "Error: status_card_json must be a personal_todo_status_card object"
+
+        counts = data.get("counts") if isinstance(data.get("counts"), dict) else {}
+        top_open = data.get("top_open") if isinstance(data.get("top_open"), list) else []
+        urgent_open = data.get("urgent_open") if isinstance(data.get("urgent_open"), list) else []
+        recent_done = data.get("recent_done") if isinstance(data.get("recent_done"), list) else []
+        recent_canceled = (
+            data.get("recent_canceled")
+            if isinstance(data.get("recent_canceled"), list)
+            else []
+        )
+
+        def _todo_line(todo: object, index: int) -> str:
+            if not isinstance(todo, dict):
+                return f"{index}. 未知待办"
+            title = str(todo.get("title") or "未命名待办").strip()
+            details = []
+            if todo.get("priority"):
+                details.append(f"优先级：{todo.get('priority')}")
+            if todo.get("due_at"):
+                details.append(f"时间：{todo.get('due_at')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            return f"{index}. {title}{suffix}"
+
+        top_open_lines = [
+            _todo_line(todo, index)
+            for index, todo in enumerate(top_open[:6], start=1)
+        ]
+        urgent_lines = [
+            _todo_line(todo, index)
+            for index, todo in enumerate(urgent_open[:6], start=1)
+        ]
+        done_lines = [
+            _todo_line(todo, index)
+            for index, todo in enumerate(recent_done[:5], start=1)
+        ]
+        canceled_lines = [
+            _todo_line(todo, index)
+            for index, todo in enumerate(recent_canceled[:5], start=1)
+        ]
+
+        sections = [
+            "## 待办状态卡",
+            f"- 未完成：{counts.get('open', 0)} 项",
+            f"- 高优先级：{counts.get('urgent_open', 0)} 项",
+            f"- 已完成：{counts.get('done', 0)} 项",
+            f"- 已取消：{counts.get('canceled', 0)} 项",
+            "",
+            "## 优先处理",
+            "\n".join(top_open_lines) if top_open_lines else "暂无未完成待办。",
+            "",
+            "## 高优先级",
+            "\n".join(urgent_lines) if urgent_lines else "暂无高优先级待办。",
+            "",
+            "## 最近完成",
+            "\n".join(done_lines) if done_lines else "暂无完成记录。",
+            "",
+            "## 最近取消",
+            "\n".join(canceled_lines) if canceled_lines else "暂无取消记录。",
+            "",
+            "## 下一步",
+            f"- {data.get('next_action') or '暂无建议。'}",
+            "",
+            f"> 边界：{data.get('note') or '这是待办状态只读概览。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_time_blocks_generate(
         todo_limit: int = 9,
         *,
@@ -2674,6 +2809,41 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=format_personal_briefing,
             tags=("personal", "briefing", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_todo_status_card_generate",
+            description="Generate a read-only personal todo status card with counts and key queues.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                },
+            },
+            handler=personal_todo_status_card_generate,
+            tags=("personal", "todo", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_status_card",
+            description=(
+                "Format a personal_todo_status_card JSON object into a concise "
+                "Chinese Markdown todo status card for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["status_card_json"],
+                "properties": {
+                    "status_card_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_status_card_generate.",
+                    },
+                },
+            },
+            handler=format_personal_todo_status_card,
+            tags=("personal", "todo", "format", "user-facing"),
         )
     )
     registry.register(

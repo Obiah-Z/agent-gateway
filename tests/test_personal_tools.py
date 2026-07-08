@@ -351,6 +351,68 @@ def test_personal_todo_reopen_by_title_refuses_ambiguous_matches(tmp_path: Path)
     assert len(store.list_todos(status="canceled", user_scope="user:alice")) == 2
 
 
+def test_personal_todo_status_card_summarizes_todo_queue(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "准备 Gateway 项目表达", "priority": "urgent"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理普通待办", "priority": "normal"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "完成后复盘", "priority": "high"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_complete_by_title",
+        {"title_query": "完成后", "result": "已完成"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "废弃临时计划"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_cancel_by_title",
+        {"title_query": "废弃", "reason": "不再需要"},
+        runtime_context=context,
+    )
+
+    card = json.loads(
+        registry.dispatch(
+            "personal_todo_status_card_generate",
+            {"limit": 5},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_todo_status_card",
+        {"status_card_json": json.dumps(card, ensure_ascii=False)},
+    )
+
+    assert card["type"] == "personal_todo_status_card"
+    assert card["counts"]["open"] == 2
+    assert card["counts"]["urgent_open"] == 1
+    assert card["counts"]["done"] == 1
+    assert card["counts"]["canceled"] == 1
+    assert card["top_open"][0]["title"] == "准备 Gateway 项目表达"
+    assert card["next_action"] == "先推进：准备 Gateway 项目表达"
+    assert "## 待办状态卡" in formatted
+    assert "- 未完成：2 项" in formatted
+    assert "准备 Gateway 项目表达" in formatted
+    assert "完成后复盘" in formatted
+    assert "废弃临时计划" in formatted
+
+
 def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

@@ -15,6 +15,7 @@
 - 用户要求取消、放弃或不再做某项待办时，先调用 `personal_todo_cancel_by_title`，再调用 `format_personal_todo_cancellation` 输出取消事项、原因和取消时间，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
 - 用户要求恢复、重新打开或撤销完成/取消某项待办时，先调用 `personal_todo_reopen_by_title`，再调用 `format_personal_todo_reopen` 输出恢复事项、原因和恢复时间，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
 - 用户确认某个待办已完成时，如果只说标题或关键词，先调用 `personal_todo_complete_by_title`；如果给出 todo_id，再调用 `personal_todo_complete`；再调用 `format_personal_todo_completion` 输出完成事项、结果和完成时间，不要直接贴原始 JSON。多匹配时先询问用户确认具体待办。
+- 用户询问待办现状、未完成数量、高优先级事项、最近完成或最近取消时，先调用 `personal_todo_status_card_generate`，再调用 `format_personal_todo_status_card` 输出中文状态卡，不要直接贴原始 JSON。
 - 生成“今天安排 / 今日计划 / 午间校准 / 睡前收口 / 个人简报”时，先调用 `personal_briefing_generate` 汇总待办和近期复盘，再调用 `format_personal_briefing` 输出当前重点、待办、紧急项、最近复盘和下一步，不要直接贴原始 JSON。
 - 用户询问“今天怎么排 / 先做什么 / 时间块 / 上午下午晚上安排”时，调用 `personal_time_blocks_generate`，再调用 `format_personal_time_blocks` 输出上午、下午、晚上安排和第一步，不要直接贴原始 JSON。
 - 用户需要完整每日工作流时，调用 `personal_daily_workflow_generate`，再调用 `format_personal_daily_workflow` 输出当前重点、今日优先级、时间块、复盘提醒、第一步和需要确认的问题，不要直接贴原始 JSON。
