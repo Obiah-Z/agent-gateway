@@ -61,6 +61,7 @@
           "get_current_time",
           "assess_research_confidence",
           "compose_research_brief",
+          "format_research_brief",
           "compose_research_evidence_pack",
           "compose_research_option_comparison",
           "memory_write",

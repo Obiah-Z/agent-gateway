@@ -18,7 +18,7 @@
 
 ## 共享能力 Agent
 
-`research` 负责联网检索、来源核验、证据包沉淀和方案选型对比。`compose_research_evidence_pack` 用于把来源、关键事实、不确定点和下游用途整理成可复用材料；`compose_research_option_comparison` 用于把技术选型、方案对比或中间件取舍整理成候选方案、评价维度、推荐项、来源依据和下游动作。
+`research` 负责联网检索、来源核验、证据包沉淀和方案选型对比。`compose_research_brief` 用于把调研结论、来源、不确定点和可复用摘要整理成结构化简报，`format_research_brief` 用于把该简报转成用户可读中文摘要；`compose_research_evidence_pack` 用于把来源、关键事实、不确定点和下游用途整理成可复用材料；`compose_research_option_comparison` 用于把技术选型、方案对比或中间件取舍整理成候选方案、评价维度、推荐项、来源依据和下游动作。
 
 `repo-analyzer` 负责 GitHub 仓库分析、Gateway 适配评估、轻量风险扫描、快速决策卡片和采纳路线图。`github_repo_decision_card` 用于回答“值不值得看、是否继续深入、下一步先看什么”这类轻量判断，`format_github_repo_decision_card` 用于把该结构化判断转成用户可读中文摘要；`github_repo_risk_scan` 用于检查许可证、维护状态、README 证据、issue 数和依赖文件信号；repo-analyzer 不负责正式文档成文和任务执行。
 

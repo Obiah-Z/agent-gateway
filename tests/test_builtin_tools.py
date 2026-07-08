@@ -3757,6 +3757,38 @@ def test_compose_research_brief_structures_sources_and_uncertainty(tmp_path: Pat
     assert data["reusable_summary"] == "RabbitMQ 适合削峰，Redis 更适合轻量协调。"
 
 
+def test_format_research_brief_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    brief = registry.dispatch(
+        "compose_research_brief",
+        {
+            "topic": "RabbitMQ 适合 Gateway 入站队列吗",
+            "conclusion": "适合做可靠任务削峰，但会话串行仍需要额外协调层。",
+            "sources": [
+                {
+                    "title": "RabbitMQ docs",
+                    "url": "https://www.rabbitmq.com/docs",
+                    "fact": "RabbitMQ supports durable queues and acknowledgements.",
+                }
+            ],
+            "uncertainty": ["具体吞吐需要本机压测确认"],
+            "freshness": "2026-07-07 检索",
+            "reusable_summary": "RabbitMQ 适合削峰，Redis 更适合轻量协调。",
+        },
+    )
+
+    formatted = registry.dispatch("format_research_brief", {"brief_json": brief})
+
+    assert "## 调研简报" in formatted
+    assert "- 主题：RabbitMQ 适合 Gateway 入站队列吗" in formatted
+    assert "- 证据等级：limited" in formatted
+    assert "适合做可靠任务削峰" in formatted
+    assert "| RabbitMQ docs | https://www.rabbitmq.com/docs | RabbitMQ supports durable queues and acknowledgements. |" in formatted
+    assert "- 具体吞吐需要本机压测确认" in formatted
+    assert "RabbitMQ 适合削峰，Redis 更适合轻量协调。" in formatted
+
+
 def test_assess_research_confidence_scores_primary_sources(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

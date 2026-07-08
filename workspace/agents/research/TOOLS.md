@@ -4,7 +4,7 @@
 
 完成来源核验后，使用 `assess_research_confidence` 评估来源类型、来源数量、冲突、不确定点和时效敏感性。不要把低置信度结论写成确定事实。
 
-完成核验后，使用 `compose_research_brief` 整理结论、来源 URL、证据、不确定点、时效性和可复用摘要。
+完成核验后，使用 `compose_research_brief` 整理结论、来源 URL、证据、不确定点、时效性和可复用摘要。直接回复用户前，使用 `format_research_brief` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 当调研结果要交给其他 Agent 继续使用时，使用 `compose_research_evidence_pack` 整理证据包。证据包必须包含研究问题、关键事实、来源 URL、冲突、不确定点、时效性和 downstream_use。
 

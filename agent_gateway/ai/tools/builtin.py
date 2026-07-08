@@ -6341,6 +6341,52 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_research_brief(brief_json: str) -> str:
+        """把 research_brief JSON 转成可直接回复用户的中文摘要。"""
+
+        if not brief_json.strip():
+            return "Error: brief_json is required"
+        data = json.loads(brief_json)
+        if not isinstance(data, dict):
+            return "Error: brief_json must be a JSON object"
+        if data.get("type") != "research_brief":
+            return "Error: brief_json type must be research_brief"
+
+        sources = data.get("sources") if isinstance(data.get("sources"), list) else []
+        source_rows: list[list[object]] = []
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            source_rows.append(
+                [
+                    source.get("title") or "未命名来源",
+                    source.get("url") or "缺少 URL",
+                    source.get("fact") or "未提取关键事实",
+                ]
+            )
+        sections = [
+            "## 调研简报",
+            f"- 主题：{data.get('topic') or '未命名主题'}",
+            f"- 证据等级：{data.get('evidence_level') or 'unknown'}",
+            f"- 时效性：{data.get('freshness') or '未说明'}",
+            "",
+            "## 结论",
+            str(data.get("conclusion") or "缺少明确结论。").strip(),
+            "",
+            "## 关键来源",
+            _markdown_table(["来源", "URL", "关键事实"], source_rows),
+            "",
+            "## 不确定点",
+            _markdown_bullets(data.get("uncertainty") if isinstance(data.get("uncertainty"), list) else []),
+            "",
+            "## 可复用摘要",
+            str(data.get("reusable_summary") or data.get("conclusion") or "暂无").strip(),
+            "",
+            "## 下一步",
+            _markdown_bullets(data.get("next_steps") if isinstance(data.get("next_steps"), list) else []),
+        ]
+        return "\n".join(sections).strip()
+
     def assess_research_confidence(
         topic: str,
         conclusion: str,
@@ -8723,6 +8769,27 @@ def register_builtin_tools(
             },
             handler=compose_research_brief,
             tags=("research", "brief", "evidence"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_research_brief",
+            description=(
+                "Format a research_brief JSON object into a concise Chinese user-facing "
+                "Markdown summary with conclusion, sources, uncertainty, reusable summary, and next steps."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["brief_json"],
+                "properties": {
+                    "brief_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_research_brief.",
+                    },
+                },
+            },
+            handler=format_research_brief,
+            tags=("research", "brief", "format", "user-facing"),
         )
     )
     registry.register(
