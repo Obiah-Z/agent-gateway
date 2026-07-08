@@ -198,6 +198,7 @@
           "personal_day_review_plan_generate",
           "format_personal_day_review_plan",
           "personal_weekly_plan_generate",
+          "format_personal_weekly_plan",
           "personal_inbox_triage",
           "personal_inbox_commit",
           "get_current_time",

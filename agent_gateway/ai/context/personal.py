@@ -1305,6 +1305,89 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(plan, ensure_ascii=False, indent=2)
 
+    def format_personal_weekly_plan(plan_json: str) -> str:
+        if not plan_json.strip():
+            return "Error: plan_json is required"
+        data = json.loads(plan_json)
+        if not isinstance(data, dict):
+            return "Error: plan_json must be a JSON object"
+        if data.get("type") != "personal_weekly_plan":
+            return "Error: plan_json type must be personal_weekly_plan"
+
+        priority_lines = []
+        priorities = (
+            data.get("weekly_priorities")
+            if isinstance(data.get("weekly_priorities"), list)
+            else []
+        )
+        for index, todo in enumerate(priorities, start=1):
+            if not isinstance(todo, dict):
+                continue
+            title = str(todo.get("title") or "").strip()
+            if not title:
+                continue
+            details = []
+            if todo.get("priority"):
+                details.append(f"优先级：{todo.get('priority')}")
+            if todo.get("due_at"):
+                details.append(f"时间：{todo.get('due_at')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            priority_lines.append(f"{index}. {title}{suffix}")
+
+        milestone_lines = []
+        milestones = data.get("milestones") if isinstance(data.get("milestones"), list) else []
+        for milestone in milestones:
+            if not isinstance(milestone, dict):
+                continue
+            name = str(milestone.get("name") or "里程碑").strip()
+            focus = str(milestone.get("focus") or "").strip()
+            done = str(milestone.get("done") or "").strip()
+            if focus and done:
+                milestone_lines.append(f"- {name}：{focus}；完成标准：{done}")
+            elif focus:
+                milestone_lines.append(f"- {name}：{focus}")
+
+        confirmations = data.get("needs_confirmation")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        next_actions = data.get("next_actions")
+        if not isinstance(next_actions, list):
+            next_actions = []
+
+        sections = [
+            "## 本周计划草稿",
+            f"- 本周目标：{data.get('week_goal') or '待确认'}",
+            f"- 第一步：{data.get('first_action') or '先确认本周最重要目标。'}",
+            "",
+            "## 本周重点",
+            _markdown_bullets(data.get("focus_areas") if isinstance(data.get("focus_areas"), list) else []),
+            "",
+            "## 优先待办",
+            "\n".join(priority_lines) if priority_lines else "暂无明确待办，请先确认本周目标。",
+            "",
+            "## 里程碑",
+            "\n".join(milestone_lines) if milestone_lines else "- 暂无明确里程碑。",
+            "",
+            "## 复盘线索",
+            _markdown_bullets(
+                data.get("review_signals")
+                if isinstance(data.get("review_signals"), list)
+                else []
+            ),
+            "",
+            "## 约束",
+            _markdown_bullets(data.get("constraints") if isinstance(data.get("constraints"), list) else []),
+            "",
+            "## 需要确认",
+            _markdown_bullets(confirmations),
+            "",
+            "## 可执行下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{data.get('note') or '这是个人周计划草稿，不会自动写入待办、复盘或长期记忆。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_inbox_triage(
         text: str,
         context: str = "",
@@ -1594,6 +1677,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_weekly_plan_generate,
             tags=("personal", "weekly", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_weekly_plan",
+            description=(
+                "Format a personal_weekly_plan_generate JSON object into a concise "
+                "Chinese Markdown weekly plan for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["plan_json"],
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_weekly_plan_generate.",
+                    },
+                },
+            },
+            handler=format_personal_weekly_plan,
+            tags=("personal", "weekly", "planning", "format", "user-facing"),
         )
     )
     registry.register(

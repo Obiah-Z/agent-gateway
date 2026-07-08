@@ -837,6 +837,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "personal_day_review_plan_generate",
         "format_personal_day_review_plan",
         "diet_next_meal_card_generate",
+        "format_personal_weekly_plan",
         "format_diet_next_meal_card",
         "diet_day_review_plan_generate",
         "diet_inbox_triage",
@@ -892,6 +893,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_day_review_plan_generate",
         "format_personal_day_review_plan",
         "personal_weekly_plan_generate",
+        "format_personal_weekly_plan",
         "personal_inbox_triage",
         "personal_inbox_commit",
     }.issubset(tools[SECRETARY_AGENT_ID])
@@ -932,6 +934,9 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "personal_weekly_plan_generate" in identity
     assert "personal_weekly_plan_generate" in soul
     assert "personal_weekly_plan_generate" in tools_md
+    assert "format_personal_weekly_plan" in identity
+    assert "format_personal_weekly_plan" in soul
+    assert "format_personal_weekly_plan" in tools_md
     assert "personal_inbox_triage" in identity
     assert "personal_inbox_triage" in soul
     assert "personal_inbox_triage" in tools_md

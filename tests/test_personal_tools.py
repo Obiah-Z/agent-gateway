@@ -478,6 +478,55 @@ def test_personal_weekly_plan_generates_draft_without_writing(tmp_path: Path) ->
     assert [todo["status"] for todo in store.list_todos(user_scope="user:alice")] == ["open", "open"]
 
 
+def test_format_personal_weekly_plan_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "完成项目难点表达", "priority": "urgent", "due_at": "this_week"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练三道场景题", "priority": "high", "due_at": "this_week"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "上周 Redis 表达更清楚了",
+            "completed": ["Redis 技术栈复盘"],
+            "next_step": "本周补 RabbitMQ 和系统设计表达",
+        },
+        runtime_context=context,
+    )
+    plan_json = registry.dispatch(
+        "personal_weekly_plan_generate",
+        {
+            "week_goal": "本周完成面试项目表达闭环",
+            "focus_areas": ["项目难点", "RabbitMQ 选型", "系统设计题"],
+            "constraints": ["每天晚上最多 2 小时"],
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_personal_weekly_plan", {"plan_json": plan_json})
+
+    assert "## 本周计划草稿" in formatted
+    assert "- 本周目标：本周完成面试项目表达闭环" in formatted
+    assert "- 第一步：先推进「完成项目难点表达」。" in formatted
+    assert "- 项目难点" in formatted
+    assert "1. 完成项目难点表达（优先级：urgent；时间：this_week）" in formatted
+    assert "- 里程碑 1：项目难点；完成标准：围绕「项目难点」完成至少一个可验证产出。" in formatted
+    assert "- 本周补 RabbitMQ 和系统设计表达" in formatted
+    assert "- 每天晚上最多 2 小时" in formatted
+    assert "- 这些限制是否需要拆成避坑动作或求助事项？" in formatted
+    assert "不会自动写入待办、复盘或长期记忆" in formatted
+
+
 def test_personal_inbox_triage_suggests_actions_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")
