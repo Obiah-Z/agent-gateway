@@ -189,6 +189,7 @@
           "personal_todo_list",
           "format_personal_todo_list",
           "personal_todo_complete",
+          "personal_todo_complete_by_title",
           "format_personal_todo_completion",
           "personal_review_add",
           "format_personal_review_entry",

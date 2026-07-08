@@ -1058,6 +1058,43 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             return f"Error: todo not found: {todo_id}"
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def personal_todo_complete_by_title(
+        title_query: str,
+        result: str = "",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        query = " ".join(title_query.strip().split()).lower()
+        if not query:
+            return "Error: title_query is required"
+        scope = _scope(__runtime_context, user_scope)
+        open_todos = personal_store.list_todos(status="open", limit=100, user_scope=scope)
+        exact_matches = [
+            todo
+            for todo in open_todos
+            if str(todo.get("title", "")).strip().lower() == query
+        ]
+        partial_matches = [
+            todo
+            for todo in open_todos
+            if query in str(todo.get("title", "")).strip().lower()
+        ]
+        matches = exact_matches or partial_matches
+        if not matches:
+            return f"Error: no open todo matched title: {title_query}"
+        if len(matches) > 1:
+            titles = "；".join(str(todo.get("title", "")) for todo in matches[:5])
+            return f"Error: multiple open todos matched title: {titles}"
+        row = personal_store.complete_todo(
+            str(matches[0].get("id", "")),
+            result=result,
+            user_scope=scope,
+        )
+        if row is None:
+            return f"Error: todo not found after title match: {title_query}"
+        return json.dumps(row, ensure_ascii=False, indent=2)
+
     def format_personal_todo_completion(completion_json: str) -> str:
         if not completion_json.strip():
             return "Error: completion_json is required"
@@ -1980,6 +2017,25 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
                 },
             },
             handler=personal_todo_complete,
+            tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_todo_complete_by_title",
+            description=(
+                "Mark one open personal todo as done by matching a title fragment. "
+                "Returns an error when none or multiple open todos match."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title_query"],
+                "properties": {
+                    "title_query": {"type": "string"},
+                    "result": {"type": "string"},
+                },
+            },
+            handler=personal_todo_complete_by_title,
             tags=("personal", "todo", "write"),
         )
     )

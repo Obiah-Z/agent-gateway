@@ -28,6 +28,63 @@ def test_personal_store_completes_todo(tmp_path: Path) -> None:
     assert store.list_todos(status="done", user_scope="user:alice")[0]["id"] == todo["id"]
 
 
+def test_personal_todo_complete_by_title_completes_unique_match(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练 RabbitMQ 选型", "priority": "high"},
+        runtime_context=context,
+    )
+
+    completed = json.loads(
+        registry.dispatch(
+            "personal_todo_complete_by_title",
+            {"title_query": "RabbitMQ", "result": "已完成复盘"},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_todo_completion",
+        {"completion_json": json.dumps(completed, ensure_ascii=False)},
+    )
+
+    assert completed["status"] == "done"
+    assert completed["title"] == "练 RabbitMQ 选型"
+    assert completed["result"] == "已完成复盘"
+    assert store.list_todos(status="open", user_scope="user:alice") == []
+    assert "## 待办已完成" in formatted
+    assert "- 事项：练 RabbitMQ 选型" in formatted
+
+
+def test_personal_todo_complete_by_title_refuses_ambiguous_matches(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练 RabbitMQ 选型"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "练 RabbitMQ 消息队列面试题"},
+        runtime_context=context,
+    )
+
+    result = registry.dispatch(
+        "personal_todo_complete_by_title",
+        {"title_query": "RabbitMQ"},
+        runtime_context=context,
+    )
+
+    assert result.startswith("Error: multiple open todos matched title:")
+    assert len(store.list_todos(status="open", user_scope="user:alice")) == 2
+
+
 def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
