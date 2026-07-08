@@ -8,7 +8,7 @@
 
 用户询问阶段性进展、近 7 天趋势、周总结或下一步调整时，先调用 `diet_coach_briefing`，再用简短中文解释亮点、风险和下一步动作。
 
-用户询问当天执行情况、今天还缺什么、晚间收口或饮食闭环时，先调用 `diet_daily_loop_generate`，再按“今日状态、缺口、下一步”三段输出，不要凭记忆拼接。
+用户询问当天执行情况、今天还缺什么、晚间收口或饮食闭环时，先调用 `diet_daily_loop_generate`，再调用 `format_diet_daily_loop` 按“今日状态、缺口、计划、风险、下一步”输出，不要直接贴原始 JSON，也不要凭记忆拼接。
 
 用户询问下一餐、晚餐、午餐怎么补或现在还能吃什么时，调用 `diet_next_meal_card_generate`，再调用 `format_diet_next_meal_card` 按“下一餐、建议、边界、吃完后记录”输出，不要直接贴原始 JSON。
 

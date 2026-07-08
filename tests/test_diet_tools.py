@@ -344,6 +344,47 @@ def test_diet_daily_loop_combines_today_plan_weight_and_actions(tmp_path: Path) 
     assert "recent_meals" not in loop
 
 
+def test_format_diet_daily_loop_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=1783290000.0)
+    store.generate_plan("user:wework:diet", plan_date="2026-07-06")
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭一份",
+        estimated_calories=780,
+        protein_g=30,
+    )
+    loop_json = registry.dispatch(
+        "diet_daily_loop_generate",
+        {"date": "2026-07-06", "days": 7},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_daily_loop", {"loop_json": loop_json})
+
+    assert "## 今日饮食闭环" in formatted
+    assert "- 日期：2026-07-06" in formatted
+    assert "- 今日摄入：约 780 / 1550 kcal" in formatted
+    assert "- 蛋白质：约 30g" in formatted
+    assert "- 当前体重：81.5 kg" in formatted
+    assert "- 计划状态：available" in formatted
+    assert "- 档案状态：已完整" in formatted
+    assert "- breakfast" in formatted
+    assert "- dinner" in formatted
+    assert "- 早餐：" in formatted
+    assert "- missing_meals" in formatted
+    assert "补记缺失餐次" in formatted
+    assert "餐食记录未闭环" in formatted
+    assert "不会自动写入新记录或生成新计划" in formatted
+
+
 def test_diet_daily_loop_reports_missing_plan_without_auto_generating(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     loop = store.daily_loop("user:wework:diet", date="2026-07-06")

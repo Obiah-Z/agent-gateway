@@ -20,6 +20,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "meal_log_add" in agent["tool_policy"]["tool_names"]
     assert "diet_coach_briefing" in agent["tool_policy"]["tool_names"]
     assert "diet_daily_loop_generate" in agent["tool_policy"]["tool_names"]
+    assert "format_diet_daily_loop" in agent["tool_policy"]["tool_names"]
     assert "diet_next_meal_card_generate" in agent["tool_policy"]["tool_names"]
     assert "format_diet_next_meal_card" in agent["tool_policy"]["tool_names"]
     assert "diet_day_review_plan_generate" in agent["tool_policy"]["tool_names"]
@@ -285,6 +286,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "profile_update" in tools_md
     assert "diet_coach_briefing" in tools_md
     assert "diet_daily_loop_generate" in tools_md
+    assert "format_diet_daily_loop" in tools_md
+    assert "format_diet_daily_loop" in identity
+    assert "format_diet_daily_loop" in soul
     assert "diet_next_meal_card_generate" in tools_md
     assert "format_diet_next_meal_card" in tools_md
     assert "format_diet_next_meal_card" in identity
@@ -843,6 +847,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "review_collaboration_final_summary_gate",
         "adapt_collaboration_plan_to_task_plan",
         "ops_runtime_diagnostics",
+        "format_diet_daily_loop",
         "format_personal_daily_workflow",
         "personal_focus_card_generate",
         "format_personal_focus_card",

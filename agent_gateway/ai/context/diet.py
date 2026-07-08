@@ -1588,6 +1588,67 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "loop": diet_store.daily_loop(scope, date=date, days=days)})
 
+    def format_diet_daily_loop(loop_json: str) -> str:
+        if not loop_json.strip():
+            return "Error: loop_json is required"
+        data = json.loads(loop_json)
+        if not isinstance(data, dict):
+            return "Error: loop_json must be a JSON object"
+        loop = data.get("loop") if isinstance(data.get("loop"), dict) else data
+        if not isinstance(loop, dict):
+            return "Error: loop_json must contain a loop object"
+        if loop.get("type") != "diet_daily_loop":
+            return "Error: loop_json type must be diet_daily_loop"
+
+        actual = _as_float(loop.get("actual_calories"))
+        target = _as_float(loop.get("target_calories"))
+        protein = _as_float(loop.get("protein_g"))
+        latest_weight = (
+            loop.get("latest_weight") if isinstance(loop.get("latest_weight"), dict) else {}
+        )
+        weight_text = (
+            f"{_as_float(latest_weight.get('weight_kg')):.1f} kg"
+            if latest_weight
+            else "暂无记录"
+        )
+        plan = loop.get("plan") if isinstance(loop.get("plan"), dict) else {}
+        plan_meals = plan.get("meals") if isinstance(plan.get("meals"), dict) else {}
+        plan_lines = []
+        for meal_type in ("breakfast", "lunch", "dinner", "snack"):
+            options = plan_meals.get(meal_type)
+            if isinstance(options, list) and options:
+                plan_lines.append(f"- {DietStore._meal_label(meal_type)}：{options[0]}")
+
+        sections = [
+            "## 今日饮食闭环",
+            f"- 日期：{loop.get('date') or '今天'}",
+            f"- 今日摄入：约 {actual:.0f} / {target:.0f} kcal",
+            f"- 蛋白质：约 {protein:.0f}g",
+            f"- 当前体重：{weight_text}",
+            f"- 计划状态：{loop.get('plan_status') or 'unknown'}",
+            f"- 档案状态：{'已完整' if loop.get('profile_complete') else '待补全'}",
+            "",
+            "## 缺失餐次",
+            _markdown_bullets(
+                loop.get("missing_meals") if isinstance(loop.get("missing_meals"), list) else []
+            ),
+            "",
+            "## 今日计划",
+            "\n".join(plan_lines) if plan_lines else "- 暂无今日计划，请先确认是否生成。",
+            "",
+            "## 风险提醒",
+            _markdown_bullets(loop.get("risk_flags") if isinstance(loop.get("risk_flags"), list) else []),
+            "",
+            "## 下一步",
+            _markdown_bullets(loop.get("next_actions") if isinstance(loop.get("next_actions"), list) else []),
+            "",
+            "## 提醒",
+            _markdown_bullets(loop.get("reminders") if isinstance(loop.get("reminders"), list) else []),
+            "",
+            "> 边界：这是今日饮食闭环摘要，只读取已有餐食、计划、体重和趋势，不会自动写入新记录或生成新计划。",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_next_meal_card_generate(
         *,
         date: str = "",
@@ -2134,6 +2195,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_daily_loop_generate,
             tags=("diet", "daily", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_daily_loop",
+            description=(
+                "Format a diet_daily_loop JSON object into a concise Chinese "
+                "Markdown daily diet loop summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["loop_json"],
+                "properties": {
+                    "loop_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_daily_loop_generate.",
+                    },
+                },
+            },
+            handler=format_diet_daily_loop,
+            tags=("diet", "daily", "summary", "format", "user-facing"),
         )
     )
     registry.register(

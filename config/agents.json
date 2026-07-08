@@ -241,6 +241,7 @@
           "progress_summary",
           "diet_coach_briefing",
           "diet_daily_loop_generate",
+          "format_diet_daily_loop",
           "diet_next_meal_card_generate",
           "format_diet_next_meal_card",
           "diet_day_review_plan_generate",
