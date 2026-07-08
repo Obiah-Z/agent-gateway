@@ -111,6 +111,7 @@ class AgentLoopRunner:
             metadata={"mode": mode, "input_length": len(user_text)},
         )
         messages = self.sessions.load_messages(agent_id, session_key)
+        previous_message_count = len(messages)
         messages.append({"role": "user", "content": user_text})
         allowed_tools = agent.allowed_tool_names(self.resilience_runner.tools.names())
         disabled = {name for name in (disabled_tools or []) if name}
@@ -151,8 +152,11 @@ class AgentLoopRunner:
                 allowed_tools=allowed_tools,
                 runtime_context=runtime_context,
             )
+            # Handoff 只能由本轮新产生的工具结果触发。旧会话历史里可能残留
+            # agent_handoff_request，不能让历史请求污染当前用户消息的路由。
+            current_turn_messages = result.messages[previous_message_count:]
             handoff_request = self._extract_handoff_request(
-                result.messages,
+                current_turn_messages,
                 source_agent_id=agent_id,
             )
             # ResilienceRunner 返回的是经过工具调用闭环后的完整历史，用它覆盖会话文件。

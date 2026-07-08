@@ -450,11 +450,15 @@ class MemoryStore:
             return dot / (na * nb) if na and nb else 0.0
 
         qvec = tfidf(query_tokens)
+        normalized_query = query.strip().lower()
         scored = []
         for index, tokens in enumerate(chunk_tokens):
             if not tokens:
                 continue
             score = cosine(qvec, tfidf(tokens))
+            # 中文短语常被正则切成整段长 token；直接子串命中应稳定返回。
+            if normalized_query and normalized_query in chunks[index]["text"].lower():
+                score = max(score, 1.0)
             if score > 0.0:
                 scored.append({"chunk": chunks[index], "score": score})
         scored.sort(key=lambda item: item["score"], reverse=True)

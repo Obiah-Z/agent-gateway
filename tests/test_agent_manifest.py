@@ -329,6 +329,101 @@ def test_agent_loop_runner_extracts_handoff_request_from_tool_result(tmp_path: P
     assert reply.tool_calls == ["request_agent_handoff"]
 
 
+def test_agent_loop_runner_ignores_stale_handoff_request_from_history(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        model_id="deepseek-v4-pro",
+    )
+    settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    (settings.workspace_root / "IDENTITY.md").write_text("Identity", encoding="utf-8")
+
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            tool_policy_mode="allowlist",
+            tool_names=("request_agent_handoff",),
+        )
+    )
+    sessions = SessionStore(settings.sessions_dir)
+    session_key = "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+    stale_history = [
+        {"role": "user", "content": "查一下 DeepSeek API 是否正常"},
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_old",
+                    "name": "request_agent_handoff",
+                    "input": {
+                        "target_agent_id": "research",
+                        "handoff_prompt": "查询 DeepSeek API 状态。",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_old",
+                    "content": json.dumps(
+                        {
+                            "type": "agent_handoff_request",
+                            "target_agent_id": "research",
+                            "handoff_prompt": "查询 DeepSeek API 状态。",
+                            "reason": "需要联网查询。",
+                            "scope": "one-shot",
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+        },
+    ]
+    sessions.rewrite_messages(
+        "personal-secretary-zhanghaibo",
+        session_key,
+        stale_history,
+    )
+
+    current_user_text = (
+        "分析这个仓库是否适合引入 Gateway，并给我风险审查、采纳计划和正式报告："
+        "https://github.com/Obiah-Z/smart-trip"
+    )
+    resilience = FakeResilienceRunner()
+    resilience.response_messages = [
+        *stale_history,
+        {"role": "user", "content": current_user_text},
+        {"role": "assistant", "content": "报告已生成。"},
+    ]
+    runner = AgentLoopRunner(
+        settings,
+        agents,
+        sessions,
+        PromptAssembler(settings.workspace_root),
+        resilience,
+    )
+
+    reply = asyncio.run(
+        runner.run_turn(
+            "personal-secretary-zhanghaibo",
+            session_key,
+            current_user_text,
+            channel="wework",
+        )
+    )
+
+    assert reply.handoff_request is None
+    assert resilience.last_runtime_context["session_key"] == session_key
+
+
 def test_agent_manifest_validator_rejects_invalid_config() -> None:
     agent = AgentConfig(
         id="planner",
