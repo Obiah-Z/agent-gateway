@@ -201,6 +201,7 @@
           "personal_review_add",
           "format_personal_review_entry",
           "personal_review_recent",
+          "personal_review_search",
           "format_personal_review_recent",
           "personal_briefing_generate",
           "format_personal_briefing",

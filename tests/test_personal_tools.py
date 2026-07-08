@@ -568,6 +568,51 @@ def test_personal_review_tools_write_and_read_recent_reviews(tmp_path: Path) -> 
     assert recent["items"][0]["next_step"] == "明天练秒杀设计"
 
 
+def test_personal_review_search_finds_historical_reviews(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "今天练习 RabbitMQ 选型表达",
+            "completed": ["梳理消息队列对比"],
+            "blockers": ["Kafka 和 RabbitMQ 边界还不稳"],
+            "next_step": "明天补一版企业场景表达",
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "整理简历项目描述",
+            "completed": ["压缩项目介绍"],
+            "blockers": ["表达还不够商业化"],
+            "next_step": "明天继续背项目亮点",
+        },
+        runtime_context=context,
+    )
+
+    found = json.loads(
+        registry.dispatch(
+            "personal_review_search",
+            {"query": "企业场景"},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_review_recent",
+        {"review_list_json": json.dumps(found, ensure_ascii=False)},
+    )
+
+    assert found["type"] == "personal_review_search"
+    assert found["count"] == 1
+    assert found["items"][0]["summary"] == "今天练习 RabbitMQ 选型表达"
+    assert "## 最近复盘" in formatted
+    assert "今天练习 RabbitMQ 选型表达" in formatted
+    assert "下一步：明天补一版企业场景表达" in formatted
+
+
 def test_format_personal_review_entry_outputs_user_facing_confirmation(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

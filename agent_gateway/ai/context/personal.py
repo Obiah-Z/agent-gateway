@@ -254,6 +254,37 @@ class PersonalStore:
         rows.sort(key=lambda row: str(row.get("ts", "")), reverse=True)
         return rows[:safe_limit]
 
+    def search_reviews(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        user_scope: str = "",
+    ) -> list[dict[str, Any]]:
+        """按摘要、完成事项、卡点或下一步关键词搜索个人复盘。"""
+
+        normalized_query = " ".join(query.strip().split()).lower()
+        if not normalized_query:
+            return []
+        safe_limit = max(1, min(int(limit), 50))
+        rows = self._read_jsonl(self._reviews_path(user_scope))
+        matches = []
+        for row in rows:
+            completed = row.get("completed") if isinstance(row.get("completed"), list) else []
+            blockers = row.get("blockers") if isinstance(row.get("blockers"), list) else []
+            haystack = " ".join(
+                [
+                    str(row.get("summary", "")),
+                    str(row.get("next_step", "")),
+                    *[str(item) for item in completed],
+                    *[str(item) for item in blockers],
+                ]
+            ).lower()
+            if normalized_query in haystack:
+                matches.append(row)
+        matches.sort(key=lambda row: str(row.get("ts", "")), reverse=True)
+        return matches[:safe_limit]
+
     def generate_briefing(
         self,
         *,
@@ -1598,6 +1629,31 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps({"items": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
 
+    def personal_review_search(
+        query: str,
+        limit: int = 10,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        if not query.strip():
+            return "Error: query is required"
+        rows = personal_store.search_reviews(
+            query,
+            limit=limit,
+            user_scope=_scope(__runtime_context, user_scope),
+        )
+        return json.dumps(
+            {
+                "type": "personal_review_search",
+                "query": query.strip(),
+                "items": rows,
+                "count": len(rows),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def format_personal_review_recent(review_list_json: str) -> str:
         if not review_list_json.strip():
             return "Error: review_list_json is required"
@@ -2748,6 +2804,25 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
                 "properties": {"limit": {"type": "integer"}},
             },
             handler=personal_review_recent,
+            tags=("personal", "review", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_review_search",
+            description=(
+                "Search structured personal daily reviews by summary, completed items, "
+                "blockers, or next steps."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                },
+            },
+            handler=personal_review_search,
             tags=("personal", "review", "read"),
         )
     )

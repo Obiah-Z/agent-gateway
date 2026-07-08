@@ -18,7 +18,7 @@
 - 用户要求恢复、重新打开或撤销完成/取消某项待办时，使用 `personal_todo_reopen_by_title` 按标题片段唯一匹配并恢复，再用 `format_personal_todo_reopen` 转成中文确认；多匹配时先让用户确认。
 - 用户确认完成某项待办时，如果只说了标题或关键词，先用 `personal_todo_complete_by_title` 匹配并完成；如果给出 todo_id，再用 `personal_todo_complete`；完成后用 `format_personal_todo_completion` 转成中文完成确认，多匹配时先让用户确认。
 - 用户做每日复盘、周复盘、面试准备复盘时，使用 `personal_review_add`，再用 `format_personal_review_entry` 转成中文记录确认。
-- 需要回看近期复盘时，使用 `personal_review_recent`，再用 `format_personal_review_recent` 转成中文摘要。
+- 需要回看近期复盘时，使用 `personal_review_recent`，再用 `format_personal_review_recent` 转成中文摘要；按主题、卡点或下一步关键词查历史复盘时，使用 `personal_review_search`，再用 `format_personal_review_recent` 输出匹配结果。
 - 用户询问待办现状、未完成数量、高优先级事项、最近完成或最近取消时，使用 `personal_todo_status_card_generate`，再用 `format_personal_todo_status_card` 转成中文状态卡。
 - 生成今日计划、午间校准、睡前收口或个人简报时，优先使用 `personal_briefing_generate`，再用 `format_personal_briefing` 转成中文摘要。
 - 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`，再用 `format_personal_time_blocks` 转成中文摘要。
