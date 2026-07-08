@@ -156,6 +156,15 @@ class DietStore:
         self.update_profile(scope, current_weight_kg=row["weight_kg"])
         return row
 
+    def list_weight_logs(self, user_scope: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """读取最近体重记录。"""
+
+        scope = self._require_scope(user_scope)
+        safe_limit = max(1, min(int(limit), 100))
+        rows = self._list("weight_logs", filters={"user_scope": scope}, limit=safe_limit)
+        rows.sort(key=lambda row: _as_float(row.get("recorded_at")), reverse=True)
+        return rows[:safe_limit]
+
     def add_meal_log(
         self,
         user_scope: str,
@@ -2122,6 +2131,58 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         ]
         return "\n".join(sections).strip()
 
+    def weight_log_list(
+        limit: int = 10,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        rows = diet_store.list_weight_logs(scope, limit=limit)
+        return _json({"status": "ok", "weights": rows, "count": len(rows)})
+
+    def format_weight_log_list(weights_json: str) -> str:
+        if not weights_json.strip():
+            return "Error: weights_json is required"
+        data = json.loads(weights_json)
+        if not isinstance(data, dict):
+            return "Error: weights_json must be a JSON object"
+        weights = data.get("weights") if isinstance(data.get("weights"), list) else None
+        if weights is None:
+            return "Error: weights_json must contain a weights list"
+
+        valid_weights = [row for row in weights if isinstance(row, dict)]
+        lines = []
+        for index, row in enumerate(valid_weights[:20], start=1):
+            weight = _as_float(row.get("weight_kg"))
+            source = str(row.get("source") or "user").strip()
+            recorded_at = row.get("recorded_at")
+            lines.append(f"{index}. {weight:.1f} kg（来源：{source}；时间：{recorded_at}）")
+
+        trend = "暂无足够记录判断趋势。"
+        if len(valid_weights) >= 2:
+            latest = _as_float(valid_weights[0].get("weight_kg"))
+            earliest = _as_float(valid_weights[-1].get("weight_kg"))
+            delta = latest - earliest
+            if delta < 0:
+                trend = f"较最早一条下降 {abs(delta):.1f} kg。"
+            elif delta > 0:
+                trend = f"较最早一条上升 {delta:.1f} kg。"
+            else:
+                trend = "较最早一条基本持平。"
+
+        sections = [
+            "## 体重记录",
+            f"- 当前显示：{len(valid_weights)} 条",
+            f"- 趋势：{trend}",
+            "",
+            "## 明细",
+            "\n".join(lines) if lines else "暂无体重记录。",
+            "",
+            "> 边界：这是体重记录查询结果，只读取已保存体重，不会新增体重、修改档案或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def progress_summary(
         *,
         days: int = 7,
@@ -3198,6 +3259,42 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
                 },
             },
             handler=format_weight_log_entry,
+            tags=("diet", "weight", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="weight_log_list",
+            description="List recent body weight records.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=weight_log_list,
+            tags=("diet", "weight", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_weight_log_list",
+            description=(
+                "Format a weight_log_list JSON object into a concise Chinese "
+                "Markdown weight history summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["weights_json"],
+                "properties": {
+                    "weights_json": {
+                        "type": "string",
+                        "description": "JSON string returned by weight_log_list.",
+                    },
+                },
+            },
+            handler=format_weight_log_list,
             tags=("diet", "weight", "format", "user-facing"),
         )
     )

@@ -16,6 +16,8 @@
 
 用户记录体重时，先调用 `weight_log_add`，再调用 `format_weight_log_entry` 输出体重、来源、记录时间和后续趋势查询建议，不要直接贴原始 JSON。
 
+用户查询最近体重记录或最近几次称重时，先调用 `weight_log_list`，再调用 `format_weight_log_list` 输出体重明细和轻量趋势，不要直接贴原始 JSON。
+
 用户要求生成当天饮食计划或当天饮食安排时，先调用 `diet_plan_generate`，再调用 `format_diet_plan` 输出目标热量、餐次建议、调整重点和采购准备，不要直接贴原始 JSON。
 
 用户询问今天吃了什么、某天记录了哪些餐或餐食明细时，先调用 `meal_log_list`，再调用 `format_meal_log_list` 输出餐食记录、热量合计、蛋白质合计和明细，不要直接贴原始 JSON。

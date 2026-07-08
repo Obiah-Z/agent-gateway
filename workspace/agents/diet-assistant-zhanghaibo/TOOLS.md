@@ -18,6 +18,8 @@
 
 用户查询今天热量或今日营养汇总时，调用 `nutrition_day_summary`。直接回复用户前，使用 `format_nutrition_day_summary` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
+用户查询最近体重记录、最近几次称重或体重历史时，调用 `weight_log_list`。直接回复用户前，使用 `format_weight_log_list` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
+
 用户查询近 7 天统计、最近餐食或体重变化时，调用 `progress_summary`。直接回复用户前，使用 `format_diet_progress_summary` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 用户询问“今天怎么吃”“今天还缺什么”“今日饮食闭环”“晚间收口”“今日执行情况”时，优先调用 `diet_daily_loop_generate`。这个工具会一次性返回今日餐食、计划、体重、风险和下一步动作。直接回复用户前，使用 `format_diet_daily_loop` 转成中文 Markdown 摘要，不要直接输出原始 JSON。

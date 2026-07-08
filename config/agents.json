@@ -270,6 +270,8 @@
           "format_diet_plan",
           "weight_log_add",
           "format_weight_log_entry",
+          "weight_log_list",
+          "format_weight_log_list",
           "progress_summary",
           "format_diet_progress_summary",
           "diet_coach_briefing",

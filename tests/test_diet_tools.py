@@ -179,6 +179,36 @@ def test_format_weight_log_entry_outputs_user_facing_confirmation(tmp_path: Path
     assert store.get_profile("user:wework:diet")["current_weight_kg"] == 81.6
 
 
+def test_weight_log_list_outputs_recent_weight_history(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+    store.add_weight_log("user:wework:diet", 82.0, recorded_at=100.0, source="scale")
+    store.add_weight_log("user:wework:diet", 81.4, recorded_at=200.0, source="scale")
+
+    weights_json = registry.dispatch(
+        "weight_log_list",
+        {"limit": 5},
+        runtime_context=context,
+    )
+    weights = json.loads(weights_json)
+    formatted = registry.dispatch(
+        "format_weight_log_list",
+        {"weights_json": weights_json},
+    )
+
+    assert weights["count"] == 2
+    assert weights["weights"][0]["weight_kg"] == 81.4
+    assert weights["weights"][1]["weight_kg"] == 82.0
+    assert "## 体重记录" in formatted
+    assert "- 当前显示：2 条" in formatted
+    assert "- 趋势：较最早一条下降 0.6 kg。" in formatted
+    assert "1. 81.4 kg" in formatted
+    assert "2. 82.0 kg" in formatted
+    assert "不会新增体重、修改档案或写入长期记忆" in formatted
+
+
 def test_format_meal_log_entry_outputs_user_facing_confirmation(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()
