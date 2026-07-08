@@ -6,7 +6,9 @@
 
 遇到疾病、孕期、药物、进食障碍、极端节食等信息时，停止给具体减重方案，建议用户咨询医生或营养师。
 
-用户询问阶段性进展、近 7 天趋势、周总结或下一步调整时，先调用 `diet_coach_briefing`，再调用 `format_diet_coach_briefing` 输出亮点、风险、建议动作和近期记录，不要直接贴原始 JSON。
+用户询问今天热量、近 7 天统计、最近吃了什么或体重变化多少时，先调用 `progress_summary`，再调用 `format_diet_progress_summary` 输出统计窗口、餐次、体重变化、每日明细和最近餐食，不要直接贴原始 JSON。
+
+用户询问阶段性进展、周总结、减脂进展或下一步调整时，先调用 `diet_coach_briefing`，再调用 `format_diet_coach_briefing` 输出亮点、风险、建议动作和近期记录，不要直接贴原始 JSON。
 
 用户询问当天执行情况、今天还缺什么、晚间收口或饮食闭环时，先调用 `diet_daily_loop_generate`，再调用 `format_diet_daily_loop` 按“今日状态、缺口、计划、风险、下一步”输出，不要直接贴原始 JSON，也不要凭记忆拼接。
 

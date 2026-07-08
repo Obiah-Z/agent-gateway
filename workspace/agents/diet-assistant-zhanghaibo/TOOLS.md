@@ -10,7 +10,7 @@
 
 性别字段使用规范值：`male`、`female`、`other`、`unknown`。当用户说“我是男的”“男性”“成年男性”“男生”等表述时，写入 `gender=male`；当用户说“我是女的”“女性”“成年女性”“女生”等表述时，写入 `gender=female`。例如“我23岁，正常成年男性一天的基础代谢是多少？”应同时推断并保存 `birth_year` 和 `gender=male`。
 
-用户查询今天吃了什么、今天热量、近 7 天趋势时，调用 `meal_log_list`、`nutrition_day_summary` 或 `progress_summary`。
+用户查询今天吃了什么、今天热量、近 7 天统计、最近餐食或体重变化时，调用 `meal_log_list`、`nutrition_day_summary` 或 `progress_summary`。直接回复用户前，使用 `format_diet_progress_summary` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 用户询问“今天怎么吃”“今天还缺什么”“今日饮食闭环”“晚间收口”“今日执行情况”时，优先调用 `diet_daily_loop_generate`。这个工具会一次性返回今日餐食、计划、体重、风险和下一步动作。直接回复用户前，使用 `format_diet_daily_loop` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 

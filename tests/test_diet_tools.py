@@ -239,6 +239,58 @@ def test_diet_progress_summary_reports_daily_trends(tmp_path: Path) -> None:
     assert progress["daily"][0]["missing_meals"] == ["breakfast", "lunch"]
 
 
+def test_format_diet_progress_summary_outputs_user_facing_statistics(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    registry.dispatch("weight_log_add", {"weight_kg": 82.0}, runtime_context=context)
+    registry.dispatch("weight_log_add", {"weight_kg": 81.2}, runtime_context=context)
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-05",
+            "meal_type": "breakfast",
+            "raw_text": "鸡蛋豆浆",
+            "estimated_calories": 320,
+            "protein_g": 22,
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-06",
+            "meal_type": "dinner",
+            "raw_text": "鸡胸沙拉",
+            "estimated_calories": 460,
+            "protein_g": 42,
+        },
+        runtime_context=context,
+    )
+    progress_json = registry.dispatch(
+        "progress_summary",
+        {"days": 7},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_progress_summary", {"progress_json": progress_json})
+
+    assert "## 饮食进展统计" in formatted
+    assert "- 统计窗口：近 7 天" in formatted
+    assert "- 记录餐次：2 餐" in formatted
+    assert "- 体重变化：" in formatted
+    assert "- 最新体重：" in formatted
+    assert "- 日均热量：约" in formatted
+    assert "## 每日明细" in formatted
+    assert "- 2026-07-06：约 460 kcal" in formatted
+    assert "漏记：breakfast、lunch" in formatted
+    assert "## 最近餐食" in formatted
+    assert "鸡胸沙拉" in formatted
+    assert "不会自动写入或修改数据" in formatted
+
+
 def test_diet_coach_briefing_reports_risks_and_actions(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

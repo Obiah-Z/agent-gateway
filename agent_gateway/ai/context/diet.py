@@ -1569,6 +1569,92 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "progress": diet_store.progress_summary(scope, days=days)})
 
+    def format_diet_progress_summary(progress_json: str) -> str:
+        if not progress_json.strip():
+            return "Error: progress_json is required"
+        data = json.loads(progress_json)
+        if not isinstance(data, dict):
+            return "Error: progress_json must be a JSON object"
+        progress = data.get("progress") if isinstance(data.get("progress"), dict) else data
+        if not isinstance(progress, dict):
+            return "Error: progress_json must contain a progress object"
+        if not {"days", "daily", "meal_count", "weight_change_kg"}.issubset(progress):
+            return "Error: progress_json must be a progress_summary object"
+
+        days = _as_int(progress.get("days"))
+        meal_count = _as_int(progress.get("meal_count"))
+        weight_change = _as_float(progress.get("weight_change_kg"))
+        average_calories = _as_float(progress.get("average_calories"))
+        average_protein = _as_float(progress.get("average_protein_g"))
+        missing_days = _as_int(progress.get("missing_meal_days"))
+        daily_rows = progress.get("daily") if isinstance(progress.get("daily"), list) else []
+        weight_logs = (
+            progress.get("weight_logs")
+            if isinstance(progress.get("weight_logs"), list)
+            else []
+        )
+        recent_meals = (
+            progress.get("recent_meals")
+            if isinstance(progress.get("recent_meals"), list)
+            else []
+        )
+
+        daily_lines = []
+        for row in daily_rows[:7]:
+            if not isinstance(row, dict):
+                continue
+            missing = row.get("missing_meals") if isinstance(row.get("missing_meals"), list) else []
+            missing_text = "、".join(str(item) for item in missing) if missing else "无明显漏记"
+            daily_lines.append(
+                "- {date}：约 {calories:.0f} kcal，蛋白质约 {protein:.0f}g，{count} 餐，漏记：{missing}".format(
+                    date=row.get("date") or "未知日期",
+                    calories=_as_float(row.get("calories")),
+                    protein=_as_float(row.get("protein_g")),
+                    count=_as_int(row.get("meal_count")),
+                    missing=missing_text,
+                )
+            )
+
+        latest_weight = weight_logs[0] if weight_logs and isinstance(weight_logs[0], dict) else None
+        latest_weight_line = "- 最新体重：暂无记录"
+        if latest_weight is not None:
+            latest_weight_line = "- 最新体重：{weight:.1f} kg".format(
+                weight=_as_float(latest_weight.get("weight_kg"))
+            )
+
+        recent_meal_lines = []
+        for meal in recent_meals[:5]:
+            if not isinstance(meal, dict):
+                continue
+            recent_meal_lines.append(
+                "- {date} {kind}：{text}，约 {calories:.0f} kcal".format(
+                    date=meal.get("meal_date") or "未知日期",
+                    kind=meal.get("meal_type") or "餐食",
+                    text=meal.get("raw_text") or "未填写内容",
+                    calories=_as_float(meal.get("estimated_calories")),
+                )
+            )
+
+        sections = [
+            "## 饮食进展统计",
+            f"- 统计窗口：近 {days or 0} 天",
+            f"- 记录餐次：{meal_count} 餐",
+            f"- 体重变化：{weight_change:+.1f} kg",
+            latest_weight_line,
+            f"- 日均热量：约 {average_calories:.0f} kcal",
+            f"- 日均蛋白质：约 {average_protein:.0f}g",
+            f"- 有漏记的天数：{missing_days} 天",
+            "",
+            "## 每日明细",
+            "\n".join(daily_lines) if daily_lines else "- 暂无每日统计。",
+            "",
+            "## 最近餐食",
+            "\n".join(recent_meal_lines) if recent_meal_lines else "- 暂无餐食记录。",
+            "",
+            "> 边界：这是进展统计，只读取已有餐食和体重记录，不会自动写入或修改数据。",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_coach_briefing(
         *,
         days: int = 7,
@@ -2236,6 +2322,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=progress_summary,
             tags=("diet", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_progress_summary",
+            description=(
+                "Format a progress_summary JSON object into a concise Chinese "
+                "Markdown progress statistics report for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["progress_json"],
+                "properties": {
+                    "progress_json": {
+                        "type": "string",
+                        "description": "JSON string returned by progress_summary.",
+                    },
+                },
+            },
+            handler=format_diet_progress_summary,
+            tags=("diet", "summary", "progress", "format", "user-facing"),
         )
     )
     registry.register(

@@ -239,6 +239,7 @@
           "diet_plan_generate",
           "weight_log_add",
           "progress_summary",
+          "format_diet_progress_summary",
           "diet_coach_briefing",
           "format_diet_coach_briefing",
           "diet_daily_loop_generate",
