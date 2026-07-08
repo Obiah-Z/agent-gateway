@@ -1101,6 +1101,60 @@ def test_format_personal_focus_card_outputs_user_facing_summary(tmp_path: Path) 
     assert "不会自动完成、修改或新增待办" in formatted
 
 
+def test_personal_action_closure_combines_focus_due_and_follow_up(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "补交日报", "priority": "urgent", "due_at": "2026-07-07"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理简历", "priority": "normal", "due_at": "this_week"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "昨天准备面试时容易发散",
+            "blockers": ["场景题表达不够收敛"],
+            "next_step": "先补交日报，再练一题系统设计",
+        },
+        runtime_context=context,
+    )
+
+    closure = json.loads(
+        registry.dispatch(
+            "personal_action_closure_generate",
+            {"current_context": "上午提醒我别发散", "todo_limit": 6, "review_limit": 2},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_action_closure",
+        {"closure_json": json.dumps(closure, ensure_ascii=False)},
+    )
+
+    assert closure["type"] == "personal_action_closure"
+    assert closure["user_scope"] == "user:alice"
+    assert closure["current_context"] == "上午提醒我别发散"
+    assert closure["top_action"]["title"] == "补交日报"
+    assert closure["due_summary"]["counts"]["overdue"] == 1
+    assert "存在逾期待办" in closure["risk_flags"][0]
+    assert "personal_todo_complete_by_title" in closure["follow_up_tools"][0]
+    assert "完成「补交日报」" in closure["close_loop_prompts"]["when_done"]
+    assert "## 行动闭环" in formatted
+    assert "- 现在先做：补交日报" in formatted
+    assert "待办压力：逾期 1" in formatted
+    assert "personal_review_add" in formatted
+    assert "不会自动新增、修改、完成待办" in formatted
+    assert [todo["status"] for todo in store.list_todos(user_scope="user:alice")] == ["open", "open"]
+
+
 def test_personal_day_review_plan_generates_draft_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

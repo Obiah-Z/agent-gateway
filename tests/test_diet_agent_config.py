@@ -1014,6 +1014,8 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_personal_daily_workflow",
         "personal_focus_card_generate",
         "format_personal_focus_card",
+        "personal_action_closure_generate",
+        "format_personal_action_closure",
         "personal_day_review_plan_generate",
         "format_personal_day_review_plan",
         "diet_next_meal_card_generate",
@@ -1097,6 +1099,8 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "format_personal_daily_workflow",
         "personal_focus_card_generate",
         "format_personal_focus_card",
+        "personal_action_closure_generate",
+        "format_personal_action_closure",
         "personal_day_review_plan_generate",
         "format_personal_day_review_plan",
         "personal_weekly_plan_generate",
@@ -1169,6 +1173,12 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_personal_focus_card" in identity
     assert "format_personal_focus_card" in soul
     assert "format_personal_focus_card" in tools_md
+    assert "personal_action_closure_generate" in identity
+    assert "personal_action_closure_generate" in soul
+    assert "personal_action_closure_generate" in tools_md
+    assert "format_personal_action_closure" in identity
+    assert "format_personal_action_closure" in soul
+    assert "format_personal_action_closure" in tools_md
     assert "personal_day_review_plan_generate" in identity
     assert "personal_day_review_plan_generate" in soul
     assert "personal_day_review_plan_generate" in tools_md

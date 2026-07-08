@@ -227,6 +227,8 @@
           "format_personal_daily_workflow",
           "personal_focus_card_generate",
           "format_personal_focus_card",
+          "personal_action_closure_generate",
+          "format_personal_action_closure",
           "personal_day_review_plan_generate",
           "format_personal_day_review_plan",
           "personal_weekly_plan_generate",

@@ -574,6 +574,108 @@ class PersonalStore:
             "note": "这是个人秘书当前聚焦卡片，不会自动完成、修改或新增待办。",
         }
 
+    def generate_action_closure(
+        self,
+        *,
+        user_scope: str = "",
+        current_context: str = "",
+        todo_limit: int = 8,
+        review_limit: int = 3,
+    ) -> dict[str, Any]:
+        """生成个人行动闭环卡片，只读汇总下一步、追问和回写方式。"""
+
+        focus_card = self.generate_focus_card(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        workflow = self.generate_daily_workflow(
+            user_scope=user_scope,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        due_digest = self.generate_due_todo_digest(
+            user_scope=user_scope,
+            limit=todo_limit,
+        )
+        focus_todo = focus_card.get("focus_todo") if isinstance(focus_card.get("focus_todo"), dict) else {}
+        focus_title = str(focus_card.get("focus") or focus_todo.get("title") or "").strip()
+        due_counts = due_digest.get("counts") if isinstance(due_digest.get("counts"), dict) else {}
+        risk_flags = []
+        if int(due_counts.get("overdue") or 0) > 0:
+            risk_flags.append("存在逾期待办，优先处理已过期事项。")
+        if int(due_counts.get("today") or 0) > 0:
+            risk_flags.append("今天有到期待办，避免继续后移。")
+        if not focus_title:
+            risk_flags.append("当前缺少明确焦点，需要先确认最重要的一件事。")
+
+        completion_prompt = (
+            f"完成后直接回复：完成「{focus_title}」，结果是 ..."
+            if focus_title
+            else "确认焦点后，我可以帮你记录成待办并继续跟进。"
+        )
+        blocked_prompt = (
+            f"如果卡住，直接回复：{focus_title} 卡住了，原因是 ..."
+            if focus_title
+            else "如果不确定先做什么，请补充当前目标、截止时间和限制。"
+        )
+        follow_up_tools = [
+            "personal_todo_complete_by_title：用户确认完成后标记待办完成。",
+            "personal_review_add：用户提供复盘、卡点或下一步后写入复盘。",
+            "personal_todo_update_by_title：用户调整时间、优先级或备注后更新待办。",
+        ]
+        if not focus_title:
+            follow_up_tools.insert(0, "personal_todo_add：用户确认焦点后记录为结构化待办。")
+
+        return {
+            "generated_at": self._now(),
+            "user_scope": MemoryStore.normalize_scope(user_scope),
+            "type": "personal_action_closure",
+            "current_context": " ".join(current_context.strip().split()),
+            "top_action": {
+                "title": focus_title or "待确认今天最重要的一件事",
+                "first_step": focus_card.get("first_action") or workflow.get("first_action") or "",
+                "why_now": focus_card.get("why_now") or "",
+                "todo": focus_todo,
+            },
+            "due_summary": {
+                "reference_date": due_digest.get("reference_date", ""),
+                "counts": due_counts,
+                "next_action": due_digest.get("next_action", ""),
+            },
+            "workflow_summary": {
+                "current_focus": workflow.get("current_focus", ""),
+                "first_action": workflow.get("first_action", ""),
+                "source": workflow.get("source", {}),
+            },
+            "risk_flags": risk_flags,
+            "needs_confirmation": self._clean_list(
+                [
+                    *(
+                        focus_card.get("needs_confirmation")
+                        if isinstance(focus_card.get("needs_confirmation"), list)
+                        else []
+                    ),
+                    *(
+                        workflow.get("needs_confirmation")
+                        if isinstance(workflow.get("needs_confirmation"), list)
+                        else []
+                    ),
+                ]
+            ),
+            "close_loop_prompts": {
+                "when_done": completion_prompt,
+                "when_blocked": blocked_prompt,
+                "when_reschedule": (
+                    f"如果要改期，直接回复：把「{focus_title}」改到 明天/本周/具体日期。"
+                    if focus_title
+                    else "如果要安排时间，请说明事项、优先级和截止时间。"
+                ),
+            },
+            "follow_up_tools": follow_up_tools,
+            "note": "这是个人行动闭环只读卡片，不会自动新增、修改、完成待办，也不会写入复盘或长期记忆。",
+        }
+
     def generate_day_review_plan(
         self,
         *,
@@ -2241,6 +2343,86 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(card, ensure_ascii=False, indent=2)
 
+    def personal_action_closure_generate(
+        current_context: str = "",
+        todo_limit: int = 8,
+        review_limit: int = 3,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        closure = personal_store.generate_action_closure(
+            user_scope=_scope(__runtime_context, user_scope),
+            current_context=current_context,
+            todo_limit=todo_limit,
+            review_limit=review_limit,
+        )
+        return json.dumps(closure, ensure_ascii=False, indent=2)
+
+    def format_personal_action_closure(closure_json: str) -> str:
+        if not closure_json.strip():
+            return "Error: closure_json is required"
+        data = json.loads(closure_json)
+        if not isinstance(data, dict):
+            return "Error: closure_json must be a JSON object"
+        if data.get("type") != "personal_action_closure":
+            return "Error: closure_json type must be personal_action_closure"
+
+        top_action = data.get("top_action") if isinstance(data.get("top_action"), dict) else {}
+        due_summary = data.get("due_summary") if isinstance(data.get("due_summary"), dict) else {}
+        due_counts = due_summary.get("counts") if isinstance(due_summary.get("counts"), dict) else {}
+        prompts = (
+            data.get("close_loop_prompts")
+            if isinstance(data.get("close_loop_prompts"), dict)
+            else {}
+        )
+        details = []
+        if top_action.get("why_now"):
+            details.append(f"原因：{top_action.get('why_now')}")
+        if due_summary.get("next_action"):
+            details.append(f"到期提醒：{due_summary.get('next_action')}")
+        if due_counts:
+            details.append(
+                "待办压力："
+                f"逾期 {due_counts.get('overdue', 0)}，"
+                f"今天 {due_counts.get('today', 0)}，"
+                f"本周 {due_counts.get('this_week', 0)}"
+            )
+
+        sections = [
+            "## 行动闭环",
+            f"- 现在先做：{top_action.get('title') or '待确认'}",
+            f"- 第一步：{top_action.get('first_step') or '先确认当前最重要的一件事。'}",
+            "",
+            "## 判断依据",
+            _markdown_bullets(details),
+            "",
+            "## 风险提醒",
+            _markdown_bullets(data.get("risk_flags") if isinstance(data.get("risk_flags"), list) else []),
+            "",
+            "## 完成后怎么说",
+            f"- 完成：{prompts.get('when_done') or '完成后告诉我结果，我会帮你收口。'}",
+            f"- 卡住：{prompts.get('when_blocked') or '如果卡住，请说明原因和限制。'}",
+            f"- 改期：{prompts.get('when_reschedule') or '如果要改期，请说明新的时间。'}",
+            "",
+            "## 需要确认",
+            _markdown_bullets(
+                data.get("needs_confirmation")
+                if isinstance(data.get("needs_confirmation"), list)
+                else []
+            ),
+            "",
+            "## 后续可调用工具",
+            _markdown_bullets(
+                data.get("follow_up_tools")
+                if isinstance(data.get("follow_up_tools"), list)
+                else []
+            ),
+            "",
+            f"> 边界：{data.get('note') or '这是个人行动闭环只读卡片。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_day_review_plan_generate(
         today_summary: str = "",
         completed: list[str] | None = None,
@@ -3234,6 +3416,49 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_focus_card_generate,
             tags=("personal", "focus", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_action_closure_generate",
+            description=(
+                "Generate a read-only personal action closure card that combines current focus, "
+                "due todo pressure, confirmation questions, and follow-up tool suggestions."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "current_context": {
+                        "type": "string",
+                        "description": "Optional current user context or latest message.",
+                    },
+                    "todo_limit": {"type": "integer"},
+                    "review_limit": {"type": "integer"},
+                },
+            },
+            handler=personal_action_closure_generate,
+            tags=("personal", "closure", "focus", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_action_closure",
+            description=(
+                "Format a personal_action_closure JSON object into a Chinese Markdown "
+                "action closure card for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["closure_json"],
+                "properties": {
+                    "closure_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_action_closure_generate.",
+                    },
+                },
+            },
+            handler=format_personal_action_closure,
+            tags=("personal", "closure", "format", "user-facing"),
         )
     )
     registry.register(

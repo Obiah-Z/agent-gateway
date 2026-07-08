@@ -16,6 +16,8 @@
 
 用户询问“现在先做什么、下一步做哪件、帮我收敛一下、我有点乱”时，使用 `personal_focus_card_generate`。它只生成当前聚焦卡片，不会写入或修改待办。直接回复用户前，使用 `format_personal_focus_card` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
+用户要求“帮我推进一下、形成闭环、接下来怎么做、完成后怎么收口、别让我忘了”时，优先使用 `personal_action_closure_generate`。它会组合当前聚焦事项、到期待办压力、需要确认的问题和后续可调用工具建议，只生成行动闭环卡片，不会写入或修改数据。直接回复用户前，使用 `format_personal_action_closure` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
+
 用户要求“今日复盘、睡前收口、明日计划、明天第一步”时，使用 `personal_day_review_plan_generate`。该工具只生成草稿，不写入复盘或待办；直接回复用户前，使用 `format_personal_day_review_plan` 转成中文 Markdown 摘要；用户确认后再调用 `personal_review_add` 或 `personal_todo_add`。
 
 用户要求“本周计划、周计划、本周重点、周复盘前规划”时，使用 `personal_weekly_plan_generate`。该工具只生成草稿，不写入复盘、待办或长期记忆；直接回复用户前，使用 `format_personal_weekly_plan` 转成中文 Markdown 摘要；用户确认后再调用 `personal_todo_add` 拆里程碑，或用 `personal_review_add` 写入周复盘。

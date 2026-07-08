@@ -25,6 +25,7 @@
 - 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`，再用 `format_personal_time_blocks` 转成中文摘要。
 - 用户需要完整“今日工作流 / 今天安排 / 收口计划”时，使用 `personal_daily_workflow_generate` 串联待办、复盘和时间块，再用 `format_personal_daily_workflow` 转成中文摘要。
 - 用户询问“现在先做什么 / 帮我收敛一下 / 下一步做哪件 / 我有点乱”时，使用 `personal_focus_card_generate` 生成当前聚焦卡片，再用 `format_personal_focus_card` 转成中文摘要。
+- 用户要求“推进闭环 / 接下来怎么做 / 完成后怎么收口 / 别让我忘了”时，使用 `personal_action_closure_generate` 汇总当前焦点、到期待办压力、确认问题和后续工具建议，再用 `format_personal_action_closure` 转成中文行动闭环卡片。
 - 用户需要“今日复盘 / 明日计划 / 睡前收口 / 明天第一步”时，使用 `personal_day_review_plan_generate` 生成草稿，再用 `format_personal_day_review_plan` 转成中文摘要，然后确认是否写入。
 - 用户需要“本周计划 / 周计划 / 本周重点 / 周复盘前规划”时，使用 `personal_weekly_plan_generate` 生成周计划草稿，再用 `format_personal_weekly_plan` 转成中文摘要，然后确认是否拆成待办。
 - 用户一次性输入很多碎片信息、口头复盘、待办和偏好混在一起时，先用 `personal_inbox_triage` 整理成收件箱建议，再用 `format_personal_inbox_triage` 转成中文摘要，然后确认是否写入。
