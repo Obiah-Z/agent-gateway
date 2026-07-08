@@ -47,6 +47,30 @@ def test_default_routing_eval_cases_declare_required_tools() -> None:
     assert not missing
 
 
+def test_default_routing_eval_cases_declare_risk_contracts() -> None:
+    by_name = {case.name: case for case in DEFAULT_CASES}
+    collaboration_cases = [
+        case.name
+        for case in DEFAULT_CASES
+        if case.expected_requires_collaboration and case.collaboration_mode == "single-agent"
+    ]
+    write_without_confirmation = [
+        case.name
+        for case in DEFAULT_CASES
+        if not case.read_only and case.name in {"diet", "personal"} and not case.requires_confirmation
+    ]
+
+    assert not collaboration_cases
+    assert not write_without_confirmation
+    assert by_name["repo-adoption"].collaboration_mode == "repo-adoption"
+    assert by_name["research-option-validation"].collaboration_mode == "research-option-validation"
+    assert by_name["diet"].read_only is False
+    assert by_name["diet"].requires_confirmation is True
+    assert by_name["personal"].read_only is False
+    assert by_name["personal"].requires_confirmation is True
+    assert by_name["personal-due-reminders"].read_only is True
+
+
 def test_agent_routing_eval_cli_outputs_summary() -> None:
     completed = subprocess.run(
         [sys.executable, "scripts/eval_agent_routing.py"],
@@ -58,3 +82,5 @@ def test_agent_routing_eval_cli_outputs_summary() -> None:
     assert "Summary: 13/13 passed" in completed.stdout
     assert "repo-reading-guide" in completed.stdout
     assert "personal-due-reminders" in completed.stdout
+    assert "risk" in completed.stdout
+    assert "write+confirm" in completed.stdout

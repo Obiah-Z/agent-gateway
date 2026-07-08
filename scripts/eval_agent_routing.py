@@ -21,6 +21,9 @@ class RoutingCase:
     expected_requires_collaboration: bool
     context_hint: str = ""
     required_tools: tuple[str, ...] = ()
+    read_only: bool = True
+    requires_confirmation: bool = False
+    collaboration_mode: str = "single-agent"
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,9 @@ class RoutingResult:
     expected_requires_collaboration: bool
     actual_requires_collaboration: bool
     missing_required_tools: tuple[str, ...]
+    read_only: bool
+    requires_confirmation: bool
+    collaboration_mode: str
     confidence: float
     reason: str
     suggested_next_step: str
@@ -73,6 +79,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=True,
         required_tools=("plan_github_repo_adoption", "format_github_repo_adoption_plan"),
+        collaboration_mode="repo-adoption",
     ),
     RoutingCase(
         name="research-option-validation",
@@ -81,6 +88,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_agent_id="research",
         expected_requires_collaboration=True,
         required_tools=("compose_research_option_comparison",),
+        collaboration_mode="research-option-validation",
     ),
     RoutingCase(
         name="planning",
@@ -113,6 +121,8 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_agent_id="diet-assistant-zhanghaibo",
         expected_requires_collaboration=False,
         required_tools=("meal_log_add", "format_meal_log_entry"),
+        read_only=False,
+        requires_confirmation=True,
     ),
     RoutingCase(
         name="personal",
@@ -121,6 +131,8 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_agent_id="personal-secretary-zhanghaibo",
         expected_requires_collaboration=False,
         required_tools=("personal_todo_add", "personal_review_add"),
+        read_only=False,
+        requires_confirmation=True,
     ),
     RoutingCase(
         name="personal-due-reminders",
@@ -137,6 +149,8 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_agent_id="doc-writer",
         expected_requires_collaboration=False,
         required_tools=("outline_structured_document", "save_structured_document"),
+        read_only=False,
+        requires_confirmation=False,
     ),
     RoutingCase(
         name="review",
@@ -201,6 +215,9 @@ def evaluate_cases(
                 expected_requires_collaboration=case.expected_requires_collaboration,
                 actual_requires_collaboration=actual_requires,
                 missing_required_tools=missing_tools,
+                read_only=case.read_only,
+                requires_confirmation=case.requires_confirmation,
+                collaboration_mode=case.collaboration_mode,
                 confidence=float(data.get("confidence") or 0.0),
                 reason=str(data.get("reason") or ""),
                 suggested_next_step=str(data.get("suggested_next_step") or ""),
@@ -210,7 +227,7 @@ def evaluate_cases(
 
 
 def _format_table(results: list[RoutingResult]) -> str:
-    headers = ["case", "status", "intent", "agent", "collab", "tools", "confidence"]
+    headers = ["case", "status", "intent", "agent", "collab", "tools", "risk", "confidence"]
     rows = [
         [
             row.name,
@@ -219,6 +236,7 @@ def _format_table(results: list[RoutingResult]) -> str:
             f"{row.actual_agent_id} / expected {row.expected_agent_id}",
             f"{row.actual_requires_collaboration} / expected {row.expected_requires_collaboration}",
             "ok" if not row.missing_required_tools else ", ".join(row.missing_required_tools),
+            _format_risk_contract(row),
             f"{row.confidence:.2f}",
         ]
         for row in results
@@ -236,6 +254,15 @@ def _format_table(results: list[RoutingResult]) -> str:
         for row in rows
     )
     return "\n".join(lines)
+
+
+def _format_risk_contract(row: RoutingResult) -> str:
+    parts = ["read-only" if row.read_only else "write"]
+    if row.requires_confirmation:
+        parts.append("confirm")
+    if row.collaboration_mode != "single-agent":
+        parts.append(row.collaboration_mode)
+    return "+".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
