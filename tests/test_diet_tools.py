@@ -525,3 +525,41 @@ def test_diet_inbox_triage_suggests_records_without_writing(tmp_path: Path) -> N
     assert any("profile_update" in action for action in triage["next_actions"])
     assert store.list_meal_logs("user:wework:diet") == []
     assert store.get_profile("user:wework:diet") is None
+
+
+def test_diet_inbox_commit_writes_confirmed_records_but_skips_preferences(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+    triage_json = registry.dispatch(
+        "diet_inbox_triage",
+        {
+            "text": (
+                "今天早餐吃了鸡蛋豆浆约 320 kcal，蛋白 22g；"
+                "体重 81.5kg；目标降到 75kg；我不吃香菜。"
+            )
+        },
+        runtime_context=context,
+    )
+
+    result = json.loads(
+        registry.dispatch(
+            "diet_inbox_commit",
+            {"triage_json": triage_json},
+            runtime_context=context,
+        )
+    )["commit"]
+
+    assert result["type"] == "diet_inbox_commit"
+    assert result["user_scope"] == "user:wework:diet"
+    assert result["source"]["committed_meal_count"] == 1
+    assert result["source"]["committed_weight"] is True
+    assert result["source"]["profile_update_keys"] == ["target_weight_kg"]
+    assert result["source"]["has_preference_candidate"] is True
+    assert result["written_meals"][0]["meal_type"] == "breakfast"
+    assert result["written_weight"]["weight_kg"] == 81.5
+    assert result["written_profile"]["target_weight_kg"] == 75
+    assert result["skipped"][0]["type"] == "diet_preferences"
+    assert store.list_meal_logs("user:wework:diet")[0]["estimated_calories"] == 320
+    assert store.get_profile("user:wework:diet")["target_weight_kg"] == 75

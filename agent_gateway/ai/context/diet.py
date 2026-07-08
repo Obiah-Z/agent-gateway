@@ -228,6 +228,98 @@ class DietStore:
             "note": "这是饮食输入整理建议，不会自动写入餐食、体重、档案或长期记忆。",
         }
 
+    def commit_inbox_triage(
+        self,
+        user_scope: str,
+        triage: dict[str, Any],
+        *,
+        commit_meals: bool = True,
+        commit_weight: bool = True,
+        commit_profile: bool = True,
+    ) -> dict[str, Any]:
+        """把用户已确认的饮食整理结果写入结构化数据。"""
+
+        if triage.get("type") != "diet_inbox_triage":
+            raise ValueError("triage type must be diet_inbox_triage")
+        scope = self._require_scope(user_scope or str(triage.get("user_scope", "")))
+        suggested_meals = triage.get("suggested_meals") if isinstance(triage.get("suggested_meals"), list) else []
+        suggested_weight = (
+            triage.get("suggested_weight") if isinstance(triage.get("suggested_weight"), dict) else None
+        )
+        profile_updates = (
+            triage.get("suggested_profile_updates")
+            if isinstance(triage.get("suggested_profile_updates"), dict)
+            else {}
+        )
+
+        written_meals = []
+        if commit_meals:
+            for meal in suggested_meals:
+                if not isinstance(meal, dict):
+                    continue
+                raw_text = str(meal.get("raw_text", "")).strip()
+                if not raw_text:
+                    continue
+                written_meals.append(
+                    self.add_meal_log(
+                        scope,
+                        meal_type=str(meal.get("meal_type", "unknown")),
+                        raw_text=raw_text,
+                        meal_date=str(meal.get("meal_date", "")),
+                        estimated_calories=_as_float(meal.get("estimated_calories")),
+                        protein_g=_as_float(meal.get("protein_g")),
+                        carbs_g=_as_float(meal.get("carbs_g")),
+                        fat_g=_as_float(meal.get("fat_g")),
+                        confidence=_as_float(meal.get("confidence"), 0.5),
+                        metadata={"source": "diet_inbox_commit"},
+                    )
+                )
+
+        written_weight = None
+        if commit_weight and suggested_weight is not None:
+            weight_kg = _as_float(suggested_weight.get("weight_kg"))
+            if weight_kg > 0:
+                written_weight = self.add_weight_log(
+                    scope,
+                    weight_kg=weight_kg,
+                    source=str(suggested_weight.get("source", "user") or "user"),
+                    metadata={"raw_text": str(suggested_weight.get("raw_text", "")), "source": "diet_inbox_commit"},
+                )
+
+        written_profile = None
+        skipped = []
+        safe_profile_updates = dict(profile_updates)
+        memory_like_preferences = safe_profile_updates.pop("diet_preferences", None)
+        if commit_profile and safe_profile_updates:
+            written_profile = self.update_profile(scope, **safe_profile_updates)
+        if memory_like_preferences:
+            skipped.append(
+                {
+                    "type": "diet_preferences",
+                    "reason": "长期饮食偏好需要用户单独确认后再调用 profile_update 或 memory_write。",
+                    "candidate": memory_like_preferences,
+                }
+            )
+
+        return {
+            "generated_at": _now(),
+            "user_scope": scope,
+            "type": "diet_inbox_commit",
+            "written_meals": written_meals,
+            "written_weight": written_weight,
+            "written_profile": written_profile,
+            "skipped": skipped,
+            "source": {
+                "suggested_meal_count": len(suggested_meals),
+                "committed_meal_count": len(written_meals),
+                "has_weight": suggested_weight is not None,
+                "committed_weight": written_weight is not None,
+                "profile_update_keys": sorted(safe_profile_updates),
+                "has_preference_candidate": bool(memory_like_preferences),
+            },
+            "note": "这是基于已确认饮食整理结果的批量写入；长期偏好和记忆不会自动写入。",
+        }
+
     def summarize_day(self, user_scope: str, *, date: str = "") -> dict[str, Any]:
         scope = self._require_scope(user_scope)
         target_date = date or _today()
@@ -1166,6 +1258,8 @@ class DietStore:
 
     @classmethod
     def _suggest_meal_from_fragment(cls, fragment: str) -> dict[str, Any] | None:
+        if any(word in fragment for word in ["不吃", "忌口", "过敏", "喜欢", "偏好"]):
+            return None
         meal_type = cls._infer_meal_type(fragment)
         if meal_type == "unknown" and not any(
             word in fragment
@@ -1555,6 +1649,35 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             }
         )
 
+    def diet_inbox_commit(
+        *,
+        triage_json: str,
+        commit_meals: bool = True,
+        commit_weight: bool = True,
+        commit_profile: bool = True,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        if not triage_json.strip():
+            return "Error: triage_json is required"
+        data = json.loads(triage_json)
+        if not isinstance(data, dict):
+            return "Error: triage_json must be a JSON object"
+        if data.get("status") == "ok" and isinstance(data.get("triage"), dict):
+            data = data["triage"]
+        scope = _runtime_scope(__runtime_context, user_scope)
+        try:
+            result = diet_store.commit_inbox_triage(
+                scope,
+                data,
+                commit_meals=commit_meals,
+                commit_weight=commit_weight,
+                commit_profile=commit_profile,
+            )
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return _json({"status": "saved", "commit": result})
+
     registry.register(
         RegisteredTool(
             name="profile_get",
@@ -1803,5 +1926,30 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_inbox_triage,
             tags=("diet", "inbox", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_inbox_commit",
+            description=(
+                "Commit a confirmed diet_inbox_triage JSON into structured meals, weight, "
+                "and safe profile fields. It does not write long-term memory candidates."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["triage_json"],
+                "properties": {
+                    "triage_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_inbox_triage.",
+                    },
+                    "commit_meals": {"type": "boolean"},
+                    "commit_weight": {"type": "boolean"},
+                    "commit_profile": {"type": "boolean"},
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_inbox_commit,
+            tags=("diet", "inbox", "meal", "weight", "profile", "write"),
         )
     )
