@@ -36,6 +36,7 @@ agent-gateway doctor
 | 阶段规划 | `planning` | `planner` | 否 | 只读 | `plan_execution_stage`、`format_execution_stage_plan` |
 | Agent 能力目录 | `agent-capabilities` | `main` | 否 | 只读 | `list_agent_capabilities`、`format_agent_capability_catalog`、`explain_agent_capability_contract`、`format_agent_capability_contract` |
 | Agent 能力契约说明 | `agent-capability-contract` | `main` | 否 | 只读 | `explain_agent_capability_contract`、`format_agent_capability_contract` |
+| 报告产物查询 | `report-artifacts` | `main` | 否 | 只读 | `list_generated_reports`、`format_generated_report_list` |
 | 运维排障 | `ops` | `ops` | 否 | 只读 | `ops_readonly_health`、`ops_runtime_diagnostics` |
 | 饮食记录 | `diet` | `diet-assistant-zhanghaibo` | 否 | 写入 + 确认 | `meal_log_add`、`format_meal_log_entry` |
 | 个人待办/复盘 | `personal` | `personal-secretary-zhanghaibo` | 否 | 写入 + 确认 | `personal_todo_add`、`personal_review_add` |

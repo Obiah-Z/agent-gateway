@@ -96,6 +96,14 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
         required_tools=("explain_agent_capability_contract", "format_agent_capability_contract"),
     ),
     AgentRoutingContract(
+        name="report-artifacts",
+        user_text="最近生成了哪些报告？把报告路径和可下载产物列出来",
+        expected_intent="report-artifacts",
+        expected_agent_id="main",
+        expected_requires_collaboration=False,
+        required_tools=("list_generated_reports", "format_generated_report_list"),
+    ),
+    AgentRoutingContract(
         name="ops",
         user_text="帮我看一下 Docker 容器和 Redis、RabbitMQ、PostgreSQL 的运行状态",
         expected_intent="ops",
