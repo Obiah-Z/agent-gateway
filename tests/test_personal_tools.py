@@ -93,6 +93,41 @@ def test_format_personal_todo_list_outputs_user_facing_summary(tmp_path: Path) -
     assert "不会自动新增、完成或修改待办" in formatted
 
 
+def test_format_personal_todo_completion_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
+    context = {"memory_user_scope": "user:alice"}
+
+    todo = json.loads(
+        registry.dispatch(
+            "personal_todo_add",
+            {
+                "title": "完成一轮项目难点背诵",
+                "priority": "high",
+                "due_at": "today",
+            },
+            runtime_context=context,
+        )
+    )
+    completion_json = registry.dispatch(
+        "personal_todo_complete",
+        {"todo_id": todo["id"], "result": "已背诵并能口述"},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_todo_completion",
+        {"completion_json": completion_json},
+    )
+
+    assert "## 待办已完成" in formatted
+    assert "- 事项：完成一轮项目难点背诵" in formatted
+    assert "优先级：high" in formatted
+    assert "原计划时间：today" in formatted
+    assert "完成结果：已背诵并能口述" in formatted
+    assert "不会新增待办、复盘或长期记忆" in formatted
+
+
 def test_personal_review_tools_write_and_read_recent_reviews(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))

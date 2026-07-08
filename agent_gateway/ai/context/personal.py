@@ -1026,6 +1026,38 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             return f"Error: todo not found: {todo_id}"
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def format_personal_todo_completion(completion_json: str) -> str:
+        if not completion_json.strip():
+            return "Error: completion_json is required"
+        data = json.loads(completion_json)
+        if not isinstance(data, dict):
+            return "Error: completion_json must be a JSON object"
+        if data.get("status") != "done":
+            return "Error: completion_json must be a completed personal todo object"
+
+        title = str(data.get("title") or "未命名待办").strip()
+        result = str(data.get("result") or "").strip()
+        details = []
+        if data.get("priority"):
+            details.append(f"优先级：{data.get('priority')}")
+        if data.get("due_at"):
+            details.append(f"原计划时间：{data.get('due_at')}")
+        if data.get("completed_at"):
+            details.append(f"完成时间：{data.get('completed_at')}")
+        if result:
+            details.append(f"完成结果：{result}")
+
+        sections = [
+            "## 待办已完成",
+            f"- 事项：{title}",
+            "",
+            "## 完成信息",
+            _markdown_bullets(details),
+            "",
+            "> 边界：这是待办完成确认，只格式化已完成结果，不会新增待办、复盘或长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_review_add(
         summary: str,
         completed: list[str] | None = None,
@@ -1790,6 +1822,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_todo_complete,
             tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_completion",
+            description=(
+                "Format a personal_todo_complete JSON object into a concise "
+                "Chinese Markdown completion confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["completion_json"],
+                "properties": {
+                    "completion_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_complete.",
+                    },
+                },
+            },
+            handler=format_personal_todo_completion,
+            tags=("personal", "todo", "format", "user-facing"),
         )
     )
     registry.register(

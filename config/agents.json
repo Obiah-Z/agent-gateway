@@ -188,6 +188,7 @@
           "personal_todo_list",
           "format_personal_todo_list",
           "personal_todo_complete",
+          "format_personal_todo_completion",
           "personal_review_add",
           "personal_review_recent",
           "format_personal_review_recent",
