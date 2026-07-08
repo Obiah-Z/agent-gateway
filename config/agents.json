@@ -212,6 +212,7 @@
           "format_personal_inbox_commit",
           "get_current_time",
           "memory_write",
+          "format_memory_write",
           "memory_search",
           "web_search",
           "fetch_url"
@@ -270,7 +271,8 @@
           "diet_inbox_commit",
           "format_diet_inbox_commit",
           "memory_search",
-          "memory_write"
+          "memory_write",
+          "format_memory_write"
         ]
       },
       "memory_policy": {

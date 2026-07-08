@@ -572,6 +572,37 @@ def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> 
         scope = user_scope or str((__runtime_context or {}).get("memory_user_scope", ""))
         return memory_store.write_memory(content, category, user_scope=scope)
 
+    def format_memory_write_handler(
+        result_text: str,
+        content: str = "",
+        category: str = "",
+    ) -> str:
+        if not result_text.strip():
+            return "Error: result_text is required"
+        match = re.search(
+            r"Memory saved to (?P<file>[^ ]+) \((?P<category>[^,]+),\s*scope=(?P<scope>[^)]+)\)",
+            result_text.strip(),
+        )
+        saved_file = match.group("file") if match else "记忆文件"
+        saved_category = category.strip() or (match.group("category").strip() if match else "general")
+        saved_scope = match.group("scope").strip() if match else "当前用户"
+        content_preview = " ".join(content.strip().split())
+        if len(content_preview) > 120:
+            content_preview = content_preview[:117].rstrip() + "..."
+
+        sections = [
+            "## 长期记忆已保存",
+            f"- 分类：{saved_category}",
+            f"- 范围：{saved_scope}",
+            f"- 位置：{saved_file}",
+            "",
+            "## 保存内容",
+            f"- {content_preview}" if content_preview else "- 已保存用户确认的长期信息。",
+            "",
+            "> 边界：这只是长期记忆保存确认，不会自动新增待办、餐食、体重、复盘或修改档案。",
+        ]
+        return "\n".join(sections).strip()
+
     def memory_search_handler(
         query: str,
         top_k: int = 5,
@@ -598,6 +629,35 @@ def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> 
             },
             handler=memory_write_handler,
             tags=("memory", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_memory_write",
+            description=(
+                "Format a memory_write confirmation string into a concise Chinese "
+                "Markdown long-term memory save confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["result_text"],
+                "properties": {
+                    "result_text": {
+                        "type": "string",
+                        "description": "Text returned by memory_write.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Original memory content that was saved.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Original memory category.",
+                    },
+                },
+            },
+            handler=format_memory_write_handler,
+            tags=("memory", "write", "format", "user-facing"),
         )
     )
     registry.register(

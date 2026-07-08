@@ -26,7 +26,7 @@
 - 用户一次性输入餐食、体重、偏好、目标等混合信息时，先用 `diet_inbox_triage` 整理候选记录和确认项，再用 `format_diet_inbox_triage` 转成中文摘要；用户确认后用 `diet_inbox_commit` 写入明确餐食、体重和安全档案字段，再用 `format_diet_inbox_commit` 转成中文确认。
 - 用户询问“今天热量 / 近 7 天统计 / 最近吃了什么 / 体重变化多少”时，先用 `progress_summary`，再用 `format_diet_progress_summary` 转成中文统计摘要。
 - 用户询问“最近趋势 / 周总结 / 减脂进展 / 下一步怎么调整”时，优先使用 `diet_coach_briefing`，再用 `format_diet_coach_briefing` 转成中文摘要。
-- 只有长期稳定偏好才写入 `memory_write`。
+- 只有长期稳定偏好才写入 `memory_write`；写入后必须调用 `format_memory_write` 转成中文确认。
 
 ## 禁止事项
 

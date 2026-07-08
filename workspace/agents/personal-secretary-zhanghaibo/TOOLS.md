@@ -21,4 +21,4 @@
 每日复盘、周复盘和面试复盘使用 `personal_review_add`；直接回复用户前，使用 `format_personal_review_entry` 转成中文 Markdown 记录确认，不要直接输出原始 JSON。回看近期复盘使用 `personal_review_recent`。
 回看近期复盘、最近卡点或下一步线索时，调用 `personal_review_recent`，再用 `format_personal_review_recent` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
-只有长期目标、固定偏好、重要截止时间和明确承诺才使用 `memory_write`，不要把短期闲聊写入长期记忆。
+只有长期目标、固定偏好、重要截止时间和明确承诺才使用 `memory_write`，不要把短期闲聊写入长期记忆；写入后必须调用 `format_memory_write` 转成中文确认，不要直接输出英文保存路径。

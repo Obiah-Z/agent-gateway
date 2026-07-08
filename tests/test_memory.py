@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from agent_gateway.ai.context.memory import MemoryStore
+from agent_gateway.ai.context.memory import MemoryStore, register_memory_tools
+from agent_gateway.ai.tools.registry import ToolRegistry
 
 
 def test_memory_store_write_and_recall(tmp_path: Path) -> None:
@@ -15,6 +16,35 @@ def test_memory_store_write_and_recall(tmp_path: Path) -> None:
     assert results
     joined = " ".join(result.snippet for result in results)
     assert "Python" in joined or "concise" in joined
+
+
+def test_format_memory_write_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = MemoryStore(workspace)
+    registry = ToolRegistry()
+    register_memory_tools(registry, store)
+
+    result = registry.dispatch(
+        "memory_write",
+        {"content": "用户长期目标是月底前完成面试项目表达。", "category": "personal_goal"},
+        runtime_context={"memory_user_scope": "user:alice"},
+    )
+    formatted = registry.dispatch(
+        "format_memory_write",
+        {
+            "result_text": result,
+            "content": "用户长期目标是月底前完成面试项目表达。",
+            "category": "personal_goal",
+        },
+    )
+
+    assert "## 长期记忆已保存" in formatted
+    assert "- 分类：personal_goal" in formatted
+    assert "- 范围：user:alice" in formatted
+    assert "- 位置：" in formatted
+    assert "- 用户长期目标是月底前完成面试项目表达。" in formatted
+    assert "不会自动新增待办、餐食、体重、复盘或修改档案" in formatted
 
 
 def test_memory_store_lists_recent_entries(tmp_path: Path) -> None:
