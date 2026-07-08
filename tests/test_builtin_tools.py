@@ -3846,6 +3846,43 @@ def test_assess_research_confidence_marks_missing_time_sensitive_sources(tmp_pat
     assert "确认来源发布时间或最后更新时间。" in data["recommended_next_actions"]
 
 
+def test_format_research_confidence_assessment_outputs_user_facing_report(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    assessment = registry.dispatch(
+        "assess_research_confidence",
+        {
+            "topic": "RabbitMQ 是否适合可靠队列",
+            "conclusion": "RabbitMQ 适合可靠任务削峰。",
+            "sources": [
+                {
+                    "title": "RabbitMQ docs",
+                    "url": "https://www.rabbitmq.com/docs",
+                    "source_type": "official",
+                    "fact": "Supports durable queues and acknowledgements.",
+                }
+            ],
+            "uncertainty": ["仍需用本机压测确认容量边界"],
+            "time_sensitive": True,
+        },
+    )
+
+    formatted = registry.dispatch(
+        "format_research_confidence_assessment",
+        {"assessment_json": assessment},
+    )
+
+    assert "## 调研置信度评估" in formatted
+    assert "- 主题：RabbitMQ 是否适合可靠队列" in formatted
+    assert "- 置信度：" in formatted
+    assert "- 时效敏感：是" in formatted
+    assert "## 被评估结论" in formatted
+    assert "RabbitMQ 适合可靠任务削峰。" in formatted
+    assert "| RabbitMQ docs | https://www.rabbitmq.com/docs | high | Supports durable queues and acknowledgements. |" in formatted
+    assert "- 仍需用本机压测确认容量边界" in formatted
+    assert "确认来源发布时间或最后更新时间。" in formatted
+
+
 def test_compose_research_evidence_pack_prepares_downstream_payload(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

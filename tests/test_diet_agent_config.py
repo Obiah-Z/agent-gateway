@@ -206,6 +206,7 @@ def test_research_agent_has_brief_tool_and_source_prompt() -> None:
     )
 
     assert "assess_research_confidence" in tools["research"]
+    assert "format_research_confidence_assessment" in tools["research"]
     assert "compose_research_brief" in tools["research"]
     assert "format_research_brief" in tools["research"]
     assert "compose_research_evidence_pack" in tools["research"]
@@ -214,6 +215,9 @@ def test_research_agent_has_brief_tool_and_source_prompt() -> None:
     assert "assess_research_confidence" in identity
     assert "assess_research_confidence" in soul
     assert "assess_research_confidence" in tools_md
+    assert "format_research_confidence_assessment" in identity
+    assert "format_research_confidence_assessment" in soul
+    assert "format_research_confidence_assessment" in tools_md
     assert "compose_research_brief" in identity
     assert "compose_research_brief" in soul
     assert "compose_research_brief" in tools_md
@@ -772,6 +776,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
     for term in [
         "compose_research_evidence_pack",
         "compose_research_option_comparison",
+        "format_research_confidence_assessment",
         "render_github_repo_risk_markdown",
         "format_research_brief",
         "review_github_repo_risk_gate",

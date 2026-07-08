@@ -6488,6 +6488,66 @@ def register_builtin_tools(
             indent=2,
         )
 
+    def format_research_confidence_assessment(assessment_json: str) -> str:
+        """把 research_confidence_assessment JSON 转成可直接回复用户的中文报告。"""
+
+        if not assessment_json.strip():
+            return "Error: assessment_json is required"
+        data = json.loads(assessment_json)
+        if not isinstance(data, dict):
+            return "Error: assessment_json must be a JSON object"
+        if data.get("type") != "research_confidence_assessment":
+            return "Error: assessment_json type must be research_confidence_assessment"
+
+        sources = data.get("sources") if isinstance(data.get("sources"), list) else []
+        source_rows: list[list[object]] = []
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            source_rows.append(
+                [
+                    source.get("title") or "未命名来源",
+                    source.get("url") or "缺少 URL",
+                    source.get("quality") or "unknown",
+                    source.get("fact") or "未提取关键事实",
+                ]
+            )
+
+        confidence = data.get("confidence") or "unknown"
+        score = data.get("confidence_score")
+        score_text = f"{score}/100" if isinstance(score, int | float) else "未知"
+        time_sensitive = "是" if data.get("time_sensitive") else "否"
+        sections = [
+            "## 调研置信度评估",
+            f"- 主题：{data.get('topic') or '未命名主题'}",
+            f"- 置信度：{confidence}",
+            f"- 评分：{score_text}",
+            f"- 来源数量：{data.get('source_count', 0)}",
+            f"- 时效敏感：{time_sensitive}",
+            "",
+            "## 被评估结论",
+            str(data.get("conclusion") or "缺少明确结论。").strip(),
+            "",
+            "## 来源质量",
+            _markdown_table(["来源", "URL", "质量", "关键事实"], source_rows),
+            "",
+            "## 不确定点",
+            _markdown_bullets(data.get("uncertainty") if isinstance(data.get("uncertainty"), list) else []),
+            "",
+            "## 来源冲突",
+            _markdown_bullets(
+                data.get("source_conflicts") if isinstance(data.get("source_conflicts"), list) else []
+            ),
+            "",
+            "## 建议下一步",
+            _markdown_bullets(
+                data.get("recommended_next_actions")
+                if isinstance(data.get("recommended_next_actions"), list)
+                else []
+            ),
+        ]
+        return "\n".join(sections).strip()
+
     def compose_research_evidence_pack(
         topic: str,
         research_question: str,
@@ -8829,6 +8889,28 @@ def register_builtin_tools(
             },
             handler=assess_research_confidence,
             tags=("research", "confidence", "evidence"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_research_confidence_assessment",
+            description=(
+                "Format a research_confidence_assessment JSON object into a Chinese "
+                "user-facing Markdown report with confidence score, source quality, "
+                "uncertainty, conflicts, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["assessment_json"],
+                "properties": {
+                    "assessment_json": {
+                        "type": "string",
+                        "description": "JSON string returned by assess_research_confidence.",
+                    },
+                },
+            },
+            handler=format_research_confidence_assessment,
+            tags=("research", "confidence", "format", "user-facing"),
         )
     )
     registry.register(
