@@ -15,7 +15,7 @@
 - 查询待办、今天安排、未完成事项时，使用 `personal_todo_list`，再用 `format_personal_todo_list` 转成中文摘要。
 - 用户确认完成某项待办时，使用 `personal_todo_complete`。
 - 用户做每日复盘、周复盘、面试准备复盘时，使用 `personal_review_add`。
-- 需要回看近期复盘时，使用 `personal_review_recent`。
+- 需要回看近期复盘时，使用 `personal_review_recent`，再用 `format_personal_review_recent` 转成中文摘要。
 - 生成今日计划、午间校准、睡前收口或个人简报时，优先使用 `personal_briefing_generate`，再用 `format_personal_briefing` 转成中文摘要。
 - 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`，再用 `format_personal_time_blocks` 转成中文摘要。
 - 用户需要完整“今日工作流 / 今天安排 / 收口计划”时，使用 `personal_daily_workflow_generate` 串联待办、复盘和时间块，再用 `format_personal_daily_workflow` 转成中文摘要。

@@ -190,6 +190,7 @@
           "personal_todo_complete",
           "personal_review_add",
           "personal_review_recent",
+          "format_personal_review_recent",
           "personal_briefing_generate",
           "format_personal_briefing",
           "personal_time_blocks_generate",

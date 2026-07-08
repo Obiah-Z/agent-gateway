@@ -121,6 +121,56 @@ def test_personal_review_tools_write_and_read_recent_reviews(tmp_path: Path) -> 
     assert recent["items"][0]["next_step"] == "明天练秒杀设计"
 
 
+def test_format_personal_review_recent_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "今日完成项目复盘",
+            "completed": ["背项目难点"],
+            "blockers": ["场景题不熟"],
+            "next_step": "明天练秒杀设计",
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "今天整理了简历",
+            "completed": ["补充 Gateway 项目"],
+            "blockers": [],
+            "next_step": "明天模拟自我介绍",
+        },
+        runtime_context=context,
+    )
+    review_list_json = registry.dispatch(
+        "personal_review_recent",
+        {"limit": 5},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_review_recent",
+        {"review_list_json": review_list_json},
+    )
+
+    assert "## 最近复盘" in formatted
+    assert "- 当前显示：2 条" in formatted
+    assert "## 复盘明细" in formatted
+    assert "今天整理了简历" in formatted
+    assert "完成：补充 Gateway 项目" in formatted
+    assert "今日完成项目复盘" in formatted
+    assert "卡点：场景题不熟" in formatted
+    assert "## 近期卡点" in formatted
+    assert "- 场景题不熟" in formatted
+    assert "## 下一步线索" in formatted
+    assert "- 明天练秒杀设计" in formatted
+    assert "不会自动新增、修改待办或写入记忆" in formatted
+
+
 def test_personal_briefing_generate_summarizes_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

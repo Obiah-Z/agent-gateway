@@ -1058,6 +1058,54 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps({"items": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
 
+    def format_personal_review_recent(review_list_json: str) -> str:
+        if not review_list_json.strip():
+            return "Error: review_list_json is required"
+        data = json.loads(review_list_json)
+        if not isinstance(data, dict):
+            return "Error: review_list_json must be a JSON object"
+        items = data.get("items")
+        if not isinstance(items, list):
+            return "Error: review_list_json must contain an items list"
+
+        review_lines = []
+        next_steps = []
+        blockers = []
+        for index, item in enumerate([row for row in items if isinstance(row, dict)][:8], start=1):
+            summary = str(item.get("summary") or "").strip()
+            completed = item.get("completed") if isinstance(item.get("completed"), list) else []
+            item_blockers = item.get("blockers") if isinstance(item.get("blockers"), list) else []
+            next_step = str(item.get("next_step") or "").strip()
+            title = summary or "未填写复盘摘要"
+            details = []
+            if completed:
+                details.append("完成：" + "、".join(str(row) for row in completed[:3]))
+            if item_blockers:
+                details.append("卡点：" + "、".join(str(row) for row in item_blockers[:3]))
+                blockers.extend(str(row) for row in item_blockers if str(row).strip())
+            if next_step:
+                details.append(f"下一步：{next_step}")
+                next_steps.append(next_step)
+            suffix = f"\n   {'；'.join(details)}" if details else ""
+            review_lines.append(f"{index}. {title}{suffix}")
+
+        sections = [
+            "## 最近复盘",
+            f"- 当前显示：{len([row for row in items if isinstance(row, dict)])} 条",
+            "",
+            "## 复盘明细",
+            "\n".join(review_lines) if review_lines else "暂无近期复盘。",
+            "",
+            "## 近期卡点",
+            _markdown_bullets(blockers[:5]),
+            "",
+            "## 下一步线索",
+            _markdown_bullets(next_steps[:5]),
+            "",
+            "> 边界：这是复盘查询结果，只读取结构化复盘，不会自动新增、修改待办或写入记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_briefing_generate(
         todo_limit: int = 8,
         review_limit: int = 3,
@@ -1772,6 +1820,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_review_recent,
             tags=("personal", "review", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_review_recent",
+            description=(
+                "Format a personal_review_recent JSON object into a concise Chinese "
+                "Markdown review summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["review_list_json"],
+                "properties": {
+                    "review_list_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_review_recent.",
+                    },
+                },
+            },
+            handler=format_personal_review_recent,
+            tags=("personal", "review", "format", "user-facing"),
         )
     )
     registry.register(
