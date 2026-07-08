@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ def run_doctor(settings: GatewaySettings, *, env_file: Path | None = None) -> di
     checks.extend(_check_redis(settings))
     checks.extend(_check_postgres(settings))
     checks.extend(_check_rabbitmq(settings))
+    checks.extend(_check_agent_contracts(settings))
     checks.extend(_check_security_bindings(settings))
     summary = _summary(checks)
     return {
@@ -187,6 +189,115 @@ def _check_rabbitmq(settings: GatewaySettings) -> list[DoctorCheck]:
     if stats.get("error"):
         return [DoctorCheck("fail", "rabbitmq.stats", f"RabbitMQ unreachable: {stats.get('error')}", stats)]
     return [DoctorCheck("pass", "rabbitmq.stats", "RabbitMQ reachable", stats)]
+
+
+def _check_agent_contracts(settings: GatewaySettings) -> list[DoctorCheck]:
+    """Check that configured Agents still expose the baseline routed capabilities."""
+
+    config_path = settings.config_dir / "agents.json"
+    if not config_path.exists():
+        return [
+            DoctorCheck(
+                "warn",
+                "agent.contracts",
+                f"Agent config not found: {config_path}",
+                {"path": str(config_path)},
+            )
+        ]
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [
+            DoctorCheck(
+                "fail",
+                "agent.contracts",
+                f"Agent config cannot be parsed: {exc}",
+                {"path": str(config_path)},
+            )
+        ]
+
+    agents = data.get("agents", [])
+    if not isinstance(agents, list):
+        return [
+            DoctorCheck(
+                "fail",
+                "agent.contracts",
+                "Agent config field 'agents' must be a list",
+                {"path": str(config_path)},
+            )
+        ]
+
+    tool_allowlists = {
+        str(agent.get("id") or ""): set(agent.get("tool_policy", {}).get("tool_names", []))
+        for agent in agents
+        if isinstance(agent, dict) and agent.get("id")
+    }
+    required = _baseline_agent_required_tools()
+    missing_agents = [agent_id for agent_id in required if agent_id not in tool_allowlists]
+    missing_tools: dict[str, list[str]] = {}
+    for agent_id, tool_names in required.items():
+        if agent_id not in tool_allowlists:
+            continue
+        missing = [tool_name for tool_name in tool_names if tool_name not in tool_allowlists[agent_id]]
+        if missing:
+            missing_tools[agent_id] = missing
+
+    detail = {
+        "path": str(config_path),
+        "checked_agents": sorted(required),
+        "missing_agents": missing_agents,
+        "missing_tools": missing_tools,
+    }
+    if missing_agents or missing_tools:
+        return [
+            DoctorCheck(
+                "fail",
+                "agent.contracts",
+                "Agent routing capability contracts are incomplete",
+                detail,
+            )
+        ]
+    return [
+        DoctorCheck(
+            "pass",
+            "agent.contracts",
+            f"Agent routing capability contracts ok: {len(required)} agents checked",
+            detail,
+        )
+    ]
+
+
+def _baseline_agent_required_tools() -> dict[str, tuple[str, ...]]:
+    """Baseline tool allowlist required by entry routing and capability checks."""
+
+    return {
+        "main": (
+            "classify_task_intent",
+            "format_entry_response",
+            "list_agent_capabilities",
+            "format_agent_capability_catalog",
+        ),
+        "repo-analyzer": (
+            "compose_github_repo_analysis",
+            "format_github_repo_analysis",
+            "github_repo_reading_guide",
+            "format_github_repo_reading_guide",
+            "plan_github_repo_adoption",
+            "format_github_repo_adoption_plan",
+        ),
+        "research": ("compose_research_option_comparison",),
+        "planner": ("plan_execution_stage", "format_execution_stage_plan"),
+        "ops": ("ops_readonly_health", "ops_runtime_diagnostics"),
+        "diet-assistant-zhanghaibo": ("meal_log_add", "format_meal_log_entry"),
+        "personal-secretary-zhanghaibo": (
+            "personal_todo_add",
+            "personal_review_add",
+            "personal_due_todo_digest_generate",
+            "format_personal_due_todo_digest",
+        ),
+        "doc-writer": ("outline_structured_document", "save_structured_document"),
+        "reviewer": ("assess_risk_decision", "format_risk_decision_assessment"),
+    }
 
 
 def _check_security_bindings(settings: GatewaySettings) -> list[DoctorCheck]:

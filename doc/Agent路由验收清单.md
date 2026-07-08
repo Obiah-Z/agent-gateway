@@ -14,6 +14,14 @@ python scripts/eval_agent_routing.py
 python scripts/eval_agent_routing.py --json
 ```
 
+日常启动前也可以运行：
+
+```bash
+agent-gateway doctor
+```
+
+`doctor` 会执行轻量级 `agent.contracts` 检查，确认关键 Agent 仍然存在，并且关键工具仍在对应 Agent 的 allowlist 中。完整路由样例、风险契约和协作模式仍以 `scripts/eval_agent_routing.py` 为准。
+
 通过标准：默认样例全部 `PASS`，脚本退出码为 `0`。单条样例需要同时满足三个条件：入口意图正确、推荐 Agent 正确、目标 Agent 的 allowlist 包含该场景声明的关键工具。脚本还会输出风险契约，标明该场景是只读、写入、需要确认，还是需要多 Agent 协作。
 
 ## 当前覆盖场景

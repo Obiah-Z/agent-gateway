@@ -58,7 +58,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
     ),
     RoutingCase(
         name="repo-analysis",
-        user_text="帮我分析一下这个仓库 https://github.com/example/repo",
+        user_text="帮我分析一下这个仓库 https://github.com/Obiah-Z/agent-gateway",
         expected_intent="repo-analysis",
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=False,
@@ -66,7 +66,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
     ),
     RoutingCase(
         name="repo-reading-guide",
-        user_text="这个仓库 https://github.com/example/repo 我应该先看哪些文件，从哪里读起？",
+        user_text="这个仓库 https://github.com/Obiah-Z/agent-gateway 我应该先看哪些文件，从哪里读起？",
         expected_intent="repo-reading-guide",
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=False,
@@ -74,7 +74,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
     ),
     RoutingCase(
         name="repo-adoption",
-        user_text="分析这个 GitHub 仓库 https://github.com/example/repo，评估风险，并给出采纳计划和正式报告",
+        user_text="分析这个 GitHub 仓库 https://github.com/Obiah-Z/agent-gateway，评估风险，并给出采纳计划和正式报告",
         expected_intent="repo-adoption",
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=True,
