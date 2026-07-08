@@ -953,6 +953,38 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def format_personal_todo_entry(todo_json: str) -> str:
+        if not todo_json.strip():
+            return "Error: todo_json is required"
+        data = json.loads(todo_json)
+        if not isinstance(data, dict):
+            return "Error: todo_json must be a JSON object"
+        if not data.get("title"):
+            return "Error: todo_json must be a personal_todo_add object"
+
+        details = [
+            f"事项：{data.get('title')}",
+            f"状态：{data.get('status') or 'open'}",
+            f"优先级：{data.get('priority') or 'normal'}",
+        ]
+        if data.get("due_at"):
+            details.append(f"时间：{data.get('due_at')}")
+        notes = str(data.get("notes") or "").strip()
+        if notes:
+            details.append(f"备注：{notes}")
+
+        sections = [
+            "## 待办已记录",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 后续查询待办时可使用待办列表。",
+            "- 完成后可以告诉我“这项完成了”，我会把它标记为完成。",
+            "",
+            "> 边界：这是待办记录确认，只格式化已保存结果，不会自动完成待办、写复盘或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_todo_list(
         status: str = "open",
         limit: int = 20,
@@ -1770,6 +1802,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_todo_add,
             tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_entry",
+            description=(
+                "Format a personal_todo_add JSON object into a concise Chinese "
+                "Markdown todo creation confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["todo_json"],
+                "properties": {
+                    "todo_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_add.",
+                    },
+                },
+            },
+            handler=format_personal_todo_entry,
+            tags=("personal", "todo", "format", "user-facing"),
         )
     )
     registry.register(

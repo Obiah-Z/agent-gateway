@@ -1,6 +1,6 @@
 # 工具使用规则
 
-用户要求记录待办、提醒或承诺时，使用 `personal_todo_add`。用户查询待办、未完成事项、已完成事项时，使用 `personal_todo_list`，再用 `format_personal_todo_list` 转成中文 Markdown 摘要，不要直接输出原始 JSON。用户确认完成事项时，使用 `personal_todo_complete`；直接回复用户前，使用 `format_personal_todo_completion` 转成中文完成确认，不要直接输出原始 JSON。
+用户要求记录待办、提醒或承诺时，使用 `personal_todo_add`；直接回复用户前，使用 `format_personal_todo_entry` 转成中文 Markdown 记录确认，不要直接输出原始 JSON。用户查询待办、未完成事项、已完成事项时，使用 `personal_todo_list`，再用 `format_personal_todo_list` 转成中文 Markdown 摘要，不要直接输出原始 JSON。用户确认完成事项时，使用 `personal_todo_complete`；直接回复用户前，使用 `format_personal_todo_completion` 转成中文完成确认，不要直接输出原始 JSON。
 
 查询未完成事项、今天安排、个人简报时，先使用 `personal_briefing_generate` 汇总待办和近期复盘。直接回复用户前，使用 `format_personal_briefing` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 

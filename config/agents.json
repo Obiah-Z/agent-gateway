@@ -185,6 +185,7 @@
         "mode": "allowlist",
         "tool_names": [
           "personal_todo_add",
+          "format_personal_todo_entry",
           "personal_todo_list",
           "format_personal_todo_list",
           "personal_todo_complete",

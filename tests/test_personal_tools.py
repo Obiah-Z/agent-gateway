@@ -93,6 +93,33 @@ def test_format_personal_todo_list_outputs_user_facing_summary(tmp_path: Path) -
     assert "不会自动新增、完成或修改待办" in formatted
 
 
+def test_format_personal_todo_entry_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
+    context = {"memory_user_scope": "user:alice"}
+
+    todo_json = registry.dispatch(
+        "personal_todo_add",
+        {
+            "title": "准备明天面试自我介绍",
+            "priority": "high",
+            "due_at": "tomorrow",
+            "notes": "突出 Gateway 项目",
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_personal_todo_entry", {"todo_json": todo_json})
+
+    assert "## 待办已记录" in formatted
+    assert "- 事项：准备明天面试自我介绍" in formatted
+    assert "- 状态：open" in formatted
+    assert "- 优先级：high" in formatted
+    assert "- 时间：tomorrow" in formatted
+    assert "- 备注：突出 Gateway 项目" in formatted
+    assert "不会自动完成待办、写复盘或写入长期记忆" in formatted
+
+
 def test_format_personal_todo_completion_outputs_user_facing_confirmation(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
