@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_gateway.ai.agent_contracts import DEFAULT_AGENT_ROUTING_CONTRACTS
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
@@ -5626,6 +5627,151 @@ def register_builtin_tools(
         )
         return "\n".join(lines).strip()
 
+    def explain_agent_capability_contract(
+        case_name: str = "",
+        user_goal: str = "",
+        agent_id: str = "",
+    ) -> str:
+        """解释某类任务的 Agent 能力契约、写入风险和确认边界。"""
+
+        normalized_case = case_name.strip()
+        normalized_goal = user_goal.strip().lower()
+        normalized_agent = agent_id.strip()
+
+        def score_contract(contract: object) -> int:
+            score = 0
+            contract_name = str(getattr(contract, "name", ""))
+            expected_agent = str(getattr(contract, "expected_agent_id", ""))
+            user_text = str(getattr(contract, "user_text", "")).lower()
+            expected_intent = str(getattr(contract, "expected_intent", ""))
+            if normalized_case and normalized_case == contract_name:
+                score += 100
+            if normalized_agent and normalized_agent == expected_agent:
+                score += 30
+            if normalized_goal:
+                keywords = [
+                    word
+                    for word in re.split(r"[\s,，。；;：:/]+", normalized_goal)
+                    if len(word) >= 2
+                ]
+                score += sum(2 for word in keywords if word in user_text or word in expected_intent or word in expected_agent)
+            return score
+
+        candidates = sorted(
+            DEFAULT_AGENT_ROUTING_CONTRACTS,
+            key=score_contract,
+            reverse=True,
+        )
+        selected = [contract for contract in candidates if score_contract(contract) > 0]
+        if not selected:
+            selected = list(DEFAULT_AGENT_ROUTING_CONTRACTS)
+
+        contracts = []
+        for contract in selected[:5]:
+            requires_collaboration = bool(contract.expected_requires_collaboration)
+            read_only = bool(contract.read_only)
+            requires_confirmation = bool(contract.requires_confirmation)
+            risk_level = "low"
+            if not read_only and requires_confirmation:
+                risk_level = "medium"
+            elif not read_only:
+                risk_level = "medium-low"
+            if requires_collaboration:
+                risk_level = "medium"
+            contracts.append(
+                {
+                    "case_name": contract.name,
+                    "sample_user_text": contract.user_text,
+                    "expected_intent": contract.expected_intent,
+                    "expected_agent_id": contract.expected_agent_id,
+                    "requires_collaboration": requires_collaboration,
+                    "collaboration_mode": contract.collaboration_mode,
+                    "required_tools": list(contract.required_tools),
+                    "read_only": read_only,
+                    "requires_confirmation": requires_confirmation,
+                    "risk_level": risk_level,
+                    "execution_boundary": (
+                        "只读说明或规划，不应修改用户数据。"
+                        if read_only
+                        else "会产生写入或文档产物，应明确写入范围。"
+                    ),
+                    "confirmation_boundary": (
+                        "写入前需要用户明确确认。"
+                        if requires_confirmation
+                        else "该契约未要求额外确认，但仍不能越权执行。"
+                    ),
+                    "next_step": (
+                        "按协作模式生成路线或阶段交接，不要声称已经自动执行。"
+                        if requires_collaboration
+                        else "按目标 Agent 生成交接或直接使用对应能力。"
+                    ),
+                }
+            )
+
+        return json.dumps(
+            {
+                "type": "agent_capability_contract_explanation",
+                "query": {
+                    "case_name": normalized_case,
+                    "user_goal": user_goal.strip(),
+                    "agent_id": normalized_agent,
+                },
+                "count": len(contracts),
+                "contracts": contracts,
+                "note": "这是入口层能力契约说明，不会执行目标 Agent 或写入数据。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def format_agent_capability_contract(
+        contract_json: str,
+        include_tools: bool = True,
+    ) -> str:
+        """把 Agent 能力契约 JSON 转成入口层可直接回复用户的中文说明。"""
+
+        if not contract_json.strip():
+            return "Error: contract_json is required"
+        data = json.loads(contract_json)
+        if not isinstance(data, dict):
+            return "Error: contract_json must be a JSON object"
+        if data.get("type") != "agent_capability_contract_explanation":
+            return "Error: contract_json type must be agent_capability_contract_explanation"
+
+        contracts = [item for item in data.get("contracts", []) if isinstance(item, dict)]
+        if not contracts:
+            return "没有找到匹配的 Agent 能力契约。"
+
+        lines = [
+            "# Agent 能力契约说明",
+            "",
+            "这份说明只解释任务应该交给谁、会不会写入、是否需要确认，不代表目标 Agent 已经执行。",
+        ]
+        for item in contracts:
+            lines.extend(
+                [
+                    "",
+                    f"## {item.get('case_name', 'unknown')}",
+                    f"- 期望意图：`{item.get('expected_intent', '')}`",
+                    f"- 目标 Agent：`{item.get('expected_agent_id', '')}`",
+                    f"- 风险等级：{item.get('risk_level', 'unknown')}",
+                    f"- 执行边界：{item.get('execution_boundary', '')}",
+                    f"- 确认边界：{item.get('confirmation_boundary', '')}",
+                    f"- 是否多 Agent 协作：{'是' if item.get('requires_collaboration') else '否'}",
+                ]
+            )
+            collaboration_mode = str(item.get("collaboration_mode") or "single-agent")
+            if collaboration_mode != "single-agent":
+                lines.append(f"- 协作模式：`{collaboration_mode}`")
+            if include_tools:
+                tools = _clean_strings(item.get("required_tools") if isinstance(item.get("required_tools"), list) else [])
+                lines.append("- 关键工具门禁：")
+                lines.append(_markdown_bullets(tools))
+            lines.append(f"- 下一步：{item.get('next_step', '')}")
+
+        lines.extend(["", str(data.get("note") or "这是入口层说明，不会自动执行目标 Agent。")])
+        return "\n".join(lines).strip()
+
     def match_agent_capability(
         user_goal: str,
         catalog_json: str,
@@ -8867,6 +9013,60 @@ def register_builtin_tools(
             },
             handler=match_agent_capability,
             tags=("agent", "catalog", "match", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="explain_agent_capability_contract",
+            description=(
+                "Explain baseline routing capability contracts for a task, including "
+                "target agent, required tools, read/write boundary, confirmation requirement, "
+                "and collaboration mode. This does not execute agents."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "case_name": {
+                        "type": "string",
+                        "description": "Optional contract case name, such as diet or repo-adoption.",
+                    },
+                    "user_goal": {
+                        "type": "string",
+                        "description": "Optional user goal to match against known contracts.",
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Optional agent id to filter or boost.",
+                    },
+                },
+            },
+            handler=explain_agent_capability_contract,
+            tags=("agent", "catalog", "contract", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_agent_capability_contract",
+            description=(
+                "Format an agent_capability_contract_explanation JSON object into a Chinese "
+                "user-facing explanation."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["contract_json"],
+                "properties": {
+                    "contract_json": {
+                        "type": "string",
+                        "description": "JSON string returned by explain_agent_capability_contract.",
+                    },
+                    "include_tools": {
+                        "type": "boolean",
+                        "description": "Whether to include required tool names.",
+                    },
+                },
+            },
+            handler=format_agent_capability_contract,
+            tags=("agent", "catalog", "contract", "format", "routing"),
         )
     )
     registry.register(

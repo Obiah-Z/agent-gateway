@@ -3563,6 +3563,50 @@ def test_format_agent_capability_match_outputs_recommendation(tmp_path: Path) ->
     assert "不代表目标 Agent 已经自动执行" in result
 
 
+def test_explain_agent_capability_contract_outputs_boundaries(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "explain_agent_capability_contract",
+            {"case_name": "diet"},
+        )
+    )
+
+    assert data["type"] == "agent_capability_contract_explanation"
+    assert data["count"] == 1
+    contract = data["contracts"][0]
+    assert contract["case_name"] == "diet"
+    assert contract["expected_agent_id"] == "diet-assistant-zhanghaibo"
+    assert contract["read_only"] is False
+    assert contract["requires_confirmation"] is True
+    assert contract["risk_level"] == "medium"
+    assert "meal_log_add" in contract["required_tools"]
+    assert "不会执行目标 Agent" in data["note"]
+
+
+def test_format_agent_capability_contract_outputs_chinese_boundary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    contract_json = registry.dispatch(
+        "explain_agent_capability_contract",
+        {"case_name": "repo-adoption"},
+    )
+
+    reply = registry.dispatch(
+        "format_agent_capability_contract",
+        {"contract_json": contract_json, "include_tools": True},
+    )
+
+    assert reply.startswith("# Agent 能力契约说明")
+    assert "目标 Agent：`repo-analyzer`" in reply
+    assert "协作模式：`repo-adoption`" in reply
+    assert "- 关键工具门禁：" in reply
+    assert "- plan_github_repo_adoption" in reply
+    assert "不代表目标 Agent 已经执行" in reply
+
+
 def test_compose_agent_handoff_package_builds_prompt_and_suggestion(
     tmp_path: Path,
 ) -> None:

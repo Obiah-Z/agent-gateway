@@ -78,7 +78,12 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
         expected_intent="agent-capabilities",
         expected_agent_id="main",
         expected_requires_collaboration=False,
-        required_tools=("list_agent_capabilities", "format_agent_capability_catalog"),
+        required_tools=(
+            "list_agent_capabilities",
+            "format_agent_capability_catalog",
+            "explain_agent_capability_contract",
+            "format_agent_capability_contract",
+        ),
     ),
     AgentRoutingContract(
         name="ops",

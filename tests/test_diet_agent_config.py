@@ -96,6 +96,8 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_agent_capability_catalog" in tools
     assert "match_agent_capability" in tools
     assert "format_agent_capability_match" in tools
+    assert "explain_agent_capability_contract" in tools
+    assert "format_agent_capability_contract" in tools
     assert "compose_agent_handoff_package" in tools
     assert "format_agent_handoff_package" in tools
     assert "list_agent_collaboration_routes" in tools
@@ -123,6 +125,8 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_agent_capability_catalog" in combined_prompt
     assert "match_agent_capability" in combined_prompt
     assert "format_agent_capability_match" in combined_prompt
+    assert "explain_agent_capability_contract" in combined_prompt
+    assert "format_agent_capability_contract" in combined_prompt
     assert "compose_agent_handoff_package" in combined_prompt
     assert "format_agent_handoff_package" in combined_prompt
     assert "list_agent_collaboration_routes" in combined_prompt
@@ -152,6 +156,8 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_catalog" in tools
         assert "match_agent_capability" in tools
         assert "format_agent_capability_match" in tools
+        assert "explain_agent_capability_contract" in tools
+        assert "format_agent_capability_contract" in tools
         assert "compose_agent_handoff_package" in tools
         assert "format_agent_handoff_package" in tools
         assert "list_agent_collaboration_routes" in tools
@@ -180,11 +186,15 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_catalog" in identity
         assert "match_agent_capability" in identity
         assert "format_agent_capability_match" in identity
+        assert "explain_agent_capability_contract" in tools_md
+        assert "format_agent_capability_contract" in tools_md
         assert "compose_agent_handoff_package" in identity
         assert "format_agent_handoff_package" in identity
         assert "format_agent_capability_catalog" in soul
         assert "match_agent_capability" in soul
         assert "format_agent_capability_match" in soul
+        assert "explain_agent_capability_contract" in tools_md
+        assert "format_agent_capability_contract" in tools_md
         assert "compose_agent_handoff_package" in soul
         assert "format_agent_handoff_package" in soul
         assert "list_agent_collaboration_routes" in identity
@@ -208,6 +218,8 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_catalog" in tools_md
         assert "match_agent_capability" in tools_md
         assert "format_agent_capability_match" in tools_md
+        assert "explain_agent_capability_contract" in tools_md
+        assert "format_agent_capability_contract" in tools_md
         assert "compose_agent_handoff_package" in tools_md
         assert "format_agent_handoff_package" in tools_md
         assert "list_agent_collaboration_routes" in tools_md

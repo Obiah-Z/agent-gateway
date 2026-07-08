@@ -33,6 +33,8 @@
           "format_agent_capability_catalog",
           "match_agent_capability",
           "format_agent_capability_match",
+          "explain_agent_capability_contract",
+          "format_agent_capability_contract",
           "compose_agent_handoff_package",
           "format_agent_handoff_package"
         ]
@@ -113,6 +115,8 @@
           "format_agent_capability_catalog",
           "match_agent_capability",
           "format_agent_capability_match",
+          "explain_agent_capability_contract",
+          "format_agent_capability_contract",
           "compose_agent_handoff_package",
           "format_agent_handoff_package"
         ]
@@ -159,6 +163,8 @@
           "format_agent_capability_catalog",
           "match_agent_capability",
           "format_agent_capability_match",
+          "explain_agent_capability_contract",
+          "format_agent_capability_contract",
           "compose_agent_handoff_package",
           "format_agent_handoff_package"
         ]
