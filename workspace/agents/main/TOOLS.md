@@ -45,6 +45,7 @@
 - 如果用户问“这个任务会不会写入数据 / 是否需要确认 / 为什么不能直接执行 / 是否需要多 Agent 协作”，调用 `explain_agent_capability_contract`，再调用 `format_agent_capability_contract` 生成中文边界说明。
 - 如果用户问“当前 Agent 配置是否完整 / 契约是否通过 / 是否缺工具或缺 Agent”，调用 `check_agent_capability_contracts`，再调用 `format_agent_capability_contract_check` 生成中文检查结果。
 - 如果用户确认采用推荐 Agent，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议，再调用 `format_agent_handoff_package` 输出中文说明。
+- 如果用户询问“最近生成了哪些报告 / 报告路径在哪 / 有哪些可下载产物 / 附件路径是什么”，调用 `list_generated_reports`，再调用 `format_generated_report_list` 输出中文报告产物索引。
 - 不要凭记忆列 Agent 能力，避免和配置漂移。
 
 ## `format_entry_response`

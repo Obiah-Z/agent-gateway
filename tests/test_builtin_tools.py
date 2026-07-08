@@ -81,6 +81,48 @@ def test_save_markdown_report_sanitizes_unsafe_filename(tmp_path: Path) -> None:
     ) == "# 已有标题\n\n内容"
 
 
+def test_list_generated_reports_indexes_report_artifacts(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    registry.dispatch(
+        "save_markdown_report",
+        {
+            "title": "仓库分析 demo/repo",
+            "category": "github-repos",
+            "file_name": "仓库分析-demo-repo",
+            "content": "## 结论\n\n这是测试报告。",
+        },
+    )
+    (tmp_path / "reports" / "diagrams").mkdir(parents=True)
+    (tmp_path / "reports" / "diagrams" / "Agent执行流程.drawio").write_text(
+        "<mxfile></mxfile>",
+        encoding="utf-8",
+    )
+
+    report_list = json.loads(
+        registry.dispatch(
+            "list_generated_reports",
+            {"category": "github-repos", "query": "demo", "limit": 5},
+        )
+    )
+    formatted = registry.dispatch(
+        "format_generated_report_list",
+        {"report_list_json": json.dumps(report_list, ensure_ascii=False)},
+    )
+
+    assert report_list["type"] == "generated_report_list"
+    assert report_list["reports_root"] == "workspace/reports"
+    assert report_list["count"] == 1
+    assert report_list["items"][0]["title"] == "仓库分析 demo/repo"
+    assert report_list["items"][0]["category"] == "github-repos"
+    assert report_list["items"][0]["path"] == "workspace/reports/github-repos/仓库分析-demo-repo.md"
+    assert report_list["items"][0]["attachment_ready"] is True
+    assert "## 最近报告产物" in formatted
+    assert "仓库分析 demo/repo" in formatted
+    assert "workspace/reports/github-repos/仓库分析-demo-repo.md" in formatted
+    assert "这是只读报告产物索引" in formatted
+
+
 def test_save_task_plan_writes_structured_plan(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

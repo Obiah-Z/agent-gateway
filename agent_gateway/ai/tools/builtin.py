@@ -80,6 +80,18 @@ def _truncate(text: str, limit: int) -> str:
     return text[:limit] + f"\n... [truncated, {len(text)} total chars]"
 
 
+def _format_bytes(size: int) -> str:
+    """把字节数格式化为简短可读单位。"""
+
+    value = float(max(0, int(size)))
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024 or unit == "GiB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+
+
 def _slugify_report_name(value: str) -> str:
     """把模型给出的标题转换为安全文件名，保留中文标题可读性。"""
 
@@ -311,6 +323,131 @@ def register_builtin_tools(
         path.write_text(document, encoding="utf-8")
         relative = path.relative_to(workspace_root)
         return f"报告路径：workspace/{relative}"
+
+    def list_generated_reports(
+        category: str = "",
+        query: str = "",
+        limit: int = 12,
+    ) -> str:
+        """列出 workspace/reports 下最近生成的报告和可交付产物。"""
+
+        reports_root = _resolve_workspace_path(workspace_root, "reports")
+        safe_limit = max(1, min(int(limit), 50))
+        wanted_category = _slugify_report_name(category).lower() if category.strip() else ""
+        normalized_query = " ".join(query.strip().split()).lower()
+        allowed_suffixes = {
+            ".md",
+            ".markdown",
+            ".drawio",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".svg",
+            ".pdf",
+            ".csv",
+            ".json",
+            ".txt",
+        }
+        items = []
+        if reports_root.exists():
+            for path in reports_root.rglob("*"):
+                if not path.is_file() or path.suffix.lower() not in allowed_suffixes:
+                    continue
+                relative = path.relative_to(workspace_root)
+                parts = relative.parts
+                item_category = parts[1] if len(parts) > 2 and parts[0] == "reports" else "general"
+                if wanted_category and item_category.lower() != wanted_category:
+                    continue
+                haystack = " ".join([path.name, item_category, str(relative)]).lower()
+                if normalized_query and normalized_query not in haystack:
+                    continue
+                stat = path.stat()
+                title = path.stem
+                if path.suffix.lower() in {".md", ".markdown"}:
+                    try:
+                        for line in path.read_text(encoding="utf-8").splitlines()[:40]:
+                            stripped = line.strip()
+                            if stripped.startswith("#"):
+                                title = stripped.lstrip("#").strip() or title
+                                break
+                    except UnicodeDecodeError:
+                        title = path.stem
+                items.append(
+                    {
+                        "title": title,
+                        "file_name": path.name,
+                        "category": item_category,
+                        "suffix": path.suffix.lower(),
+                        "size_bytes": stat.st_size,
+                        "size_label": _format_bytes(stat.st_size),
+                        "modified_at": datetime.fromtimestamp(
+                            stat.st_mtime,
+                            tz=timezone.utc,
+                        ).isoformat(),
+                        "path": f"workspace/{relative.as_posix()}",
+                        "attachment_ready": True,
+                    }
+                )
+        items.sort(key=lambda row: str(row.get("modified_at", "")), reverse=True)
+        result = {
+            "type": "generated_report_list",
+            "reports_root": "workspace/reports",
+            "category": wanted_category,
+            "query": query.strip(),
+            "count": len(items),
+            "items": items[:safe_limit],
+            "truncated": len(items) > safe_limit,
+            "note": "这是只读报告产物索引，不会创建、修改、删除或上传文件。",
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def format_generated_report_list(report_list_json: str) -> str:
+        """把报告产物索引格式化为中文 Markdown。"""
+
+        if not report_list_json.strip():
+            return "Error: report_list_json is required"
+        data = json.loads(report_list_json)
+        if not isinstance(data, dict):
+            return "Error: report_list_json must be a JSON object"
+        if data.get("type") != "generated_report_list":
+            return "Error: report_list_json type must be generated_report_list"
+
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        rows = []
+        for item in items[:12]:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                [
+                    item.get("title") or item.get("file_name") or "未命名",
+                    item.get("category") or "general",
+                    item.get("size_label") or "",
+                    item.get("path") or "",
+                ]
+            )
+        next_actions = [
+            "如需发送附件，请明确指定其中一个 path。",
+            "如需查看内容，可用 read_file 读取对应 Markdown 报告。",
+        ]
+        if data.get("truncated"):
+            next_actions.append("结果已截断，可补充 category、query 或调大 limit 缩小范围。")
+
+        sections = [
+            "## 最近报告产物",
+            f"- 根目录：`{data.get('reports_root') or 'workspace/reports'}`",
+            f"- 匹配数量：{data.get('count', 0)}",
+            f"- 分类过滤：{data.get('category') or '全部'}",
+            f"- 关键词：{data.get('query') or '无'}",
+            "",
+            "## 文件列表",
+            _markdown_table(["标题", "分类", "大小", "路径"], rows),
+            "",
+            "## 下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{data.get('note') or '这是只读报告产物索引。'}",
+        ]
+        return "\n".join(sections).strip()
 
     def save_task_plan(
         title: str,
@@ -7476,6 +7613,51 @@ def register_builtin_tools(
             },
             handler=save_markdown_report,
             tags=("filesystem", "write", "report"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="list_generated_reports",
+            description=(
+                "List recent generated reports and deliverable files under workspace/reports. "
+                "Returns title, category, size, modified time, and attachment-ready workspace paths."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Optional report category folder, for example github-repos.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional keyword matched against file name, category, and path.",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 12},
+                },
+            },
+            handler=list_generated_reports,
+            tags=("filesystem", "read", "report", "artifact"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_generated_report_list",
+            description=(
+                "Format a generated_report_list JSON object into a Chinese Markdown report index."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["report_list_json"],
+                "properties": {
+                    "report_list_json": {
+                        "type": "string",
+                        "description": "JSON string returned by list_generated_reports.",
+                    },
+                },
+            },
+            handler=format_generated_report_list,
+            tags=("filesystem", "report", "artifact", "format", "user-facing"),
         )
     )
     registry.register(

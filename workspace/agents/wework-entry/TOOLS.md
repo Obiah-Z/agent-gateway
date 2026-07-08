@@ -36,6 +36,8 @@
 
 用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议，再调用 `format_agent_handoff_package` 输出中文说明。该工具链不执行目标 Agent。
 
+用户询问最近生成了哪些报告、报告路径、可下载产物或附件路径时，调用 `list_generated_reports`，再调用 `format_generated_report_list` 输出中文报告产物索引。
+
 个人计划、复盘和提醒建议交给 `personal-secretary-zhanghaibo`；饮食、体重和热量建议交给 `diet-assistant-zhanghaibo`。
 
 `web_search` 和 `fetch_url` 只用于轻量事实确认；深度调研应建议交给 `research`。

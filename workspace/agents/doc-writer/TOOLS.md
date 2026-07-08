@@ -30,4 +30,6 @@
 
 README、方案、复盘和技术报告优先使用 `save_structured_document` 落盘。自由格式或非标准结构文档才使用 `save_markdown_report` 或 `write_file`。
 
+用户询问最近生成了哪些报告、报告路径、可下载产物或附件路径时，调用 `list_generated_reports`，再调用 `format_generated_report_list` 输出中文报告产物索引。生成报告后如果需要确认最新落盘结果，也可以用这组工具列出对应 category。
+
 `doc-writer` 不负责事实核验，不要把委派摘要当成事实来源；材料不足时必须先说明缺口。

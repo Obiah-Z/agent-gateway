@@ -16,4 +16,6 @@
 
 只有用户要求生成正式报告，或分析结果需要长期沉淀时，才调用 `save_markdown_report` 写入 `reports/github-repos/`。
 
+用户询问最近生成的仓库分析报告、报告路径、可下载产物或附件路径时，调用 `list_generated_reports`，category 优先使用 `github-repos`，再调用 `format_generated_report_list` 输出中文报告产物索引。
+
 不要在没有仓库链接或 owner/repo 的情况下编造仓库内容。

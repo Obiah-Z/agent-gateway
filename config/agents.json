@@ -37,6 +37,8 @@
           "format_agent_capability_contract",
           "check_agent_capability_contracts",
           "format_agent_capability_contract_check",
+          "list_generated_reports",
+          "format_generated_report_list",
           "compose_agent_handoff_package",
           "format_agent_handoff_package"
         ]
@@ -121,6 +123,8 @@
           "format_agent_capability_contract",
           "check_agent_capability_contracts",
           "format_agent_capability_contract_check",
+          "list_generated_reports",
+          "format_generated_report_list",
           "compose_agent_handoff_package",
           "format_agent_handoff_package"
         ]
@@ -171,6 +175,8 @@
           "format_agent_capability_contract",
           "check_agent_capability_contracts",
           "format_agent_capability_contract_check",
+          "list_generated_reports",
+          "format_generated_report_list",
           "compose_agent_handoff_package",
           "format_agent_handoff_package"
         ]
@@ -381,7 +387,9 @@
           "memory_search",
           "web_search",
           "fetch_url",
-          "save_markdown_report"
+          "save_markdown_report",
+          "list_generated_reports",
+          "format_generated_report_list"
         ]
       },
       "memory_policy": {
@@ -424,6 +432,8 @@
           "render_collaboration_final_summary_gate_markdown",
           "save_structured_document",
           "save_markdown_report",
+          "list_generated_reports",
+          "format_generated_report_list",
           "get_current_time",
           "memory_search"
         ]
