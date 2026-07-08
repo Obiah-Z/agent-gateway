@@ -3482,6 +3482,8 @@ def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) 
         "`constraints`：时间、环境、权限或风险。",
     ]
     assert data["agents"][0]["tools"] == ["save_task_plan"]
+    assert data["agents"][0]["contract_summary"]["total"] >= 1
+    assert "planning" in data["agents"][0]["contract_summary"]["case_names"]
 
 
 def test_format_agent_capability_catalog_outputs_user_facing_directory(
@@ -3501,6 +3503,14 @@ def test_format_agent_capability_catalog_outputs_user_facing_directory(
                 "duties": ["拆解阶段任务。", "明确验收标准。"],
                 "handoff_inputs": ["`goal`：用户目标。"],
                 "tools": ["save_task_plan", "compose_repo_review_task_plan"],
+                "contract_summary": {
+                    "total": 1,
+                    "read_only": 1,
+                    "write": 0,
+                    "requires_confirmation": 0,
+                    "requires_collaboration": 0,
+                    "case_names": ["planning"],
+                },
             },
             {
                 "id": "reviewer",
@@ -3529,6 +3539,7 @@ def test_format_agent_capability_catalog_outputs_user_facing_directory(
     assert "- 拆解阶段任务。" in result
     assert "- `goal`：用户目标。" in result
     assert "save_task_plan, compose_repo_review_task_plan" in result
+    assert "能力契约：覆盖 1 类样例；只读 1，写入 0，需确认 0，协作 0。" in result
     assert "reviewer" not in result
     assert "不代表目标 Agent 已经自动执行" in result
 

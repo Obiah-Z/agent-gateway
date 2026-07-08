@@ -5561,6 +5561,33 @@ def register_builtin_tools(
                 return "personal"
             return "custom"
 
+        contract_summary_by_agent: dict[str, dict[str, object]] = {}
+        for contract in DEFAULT_AGENT_ROUTING_CONTRACTS:
+            agent_id = contract.expected_agent_id
+            summary = contract_summary_by_agent.setdefault(
+                agent_id,
+                {
+                    "total": 0,
+                    "read_only": 0,
+                    "write": 0,
+                    "requires_confirmation": 0,
+                    "requires_collaboration": 0,
+                    "case_names": [],
+                },
+            )
+            summary["total"] = int(summary["total"]) + 1
+            if contract.read_only:
+                summary["read_only"] = int(summary["read_only"]) + 1
+            else:
+                summary["write"] = int(summary["write"]) + 1
+            if contract.requires_confirmation:
+                summary["requires_confirmation"] = int(summary["requires_confirmation"]) + 1
+            if contract.expected_requires_collaboration:
+                summary["requires_collaboration"] = int(summary["requires_collaboration"]) + 1
+            case_names = summary["case_names"] if isinstance(summary["case_names"], list) else []
+            case_names.append(contract.name)
+            summary["case_names"] = case_names
+
         capabilities = []
         for agent in data.get("agents", []):
             agent_id = str(agent.get("id", "")).strip()
@@ -5583,6 +5610,17 @@ def register_builtin_tools(
                 "prompt_dir": prompt_dir,
                 "duties": duties[:8],
                 "handoff_inputs": handoff_inputs[:8],
+                "contract_summary": contract_summary_by_agent.get(
+                    agent_id,
+                    {
+                        "total": 0,
+                        "read_only": 0,
+                        "write": 0,
+                        "requires_confirmation": 0,
+                        "requires_collaboration": 0,
+                        "case_names": [],
+                    },
+                ),
             }
             if include_tools:
                 row["tools"] = agent.get("tool_policy", {}).get("tool_names", [])
@@ -5652,6 +5690,19 @@ def register_builtin_tools(
                 shown_tools = ", ".join(str(tool) for tool in tools[:12])
                 suffix = " ..." if len(tools) > 12 else ""
                 lines.append(f"- 可用工具：{shown_tools}{suffix}")
+            contract_summary = item.get("contract_summary") if isinstance(item.get("contract_summary"), dict) else {}
+            if contract_summary:
+                total = int(contract_summary.get("total") or 0)
+                read_only_count = int(contract_summary.get("read_only") or 0)
+                write_count = int(contract_summary.get("write") or 0)
+                confirmation_count = int(contract_summary.get("requires_confirmation") or 0)
+                collaboration_count = int(contract_summary.get("requires_collaboration") or 0)
+                lines.append(
+                    "- 能力契约："
+                    f"覆盖 {total} 类样例；"
+                    f"只读 {read_only_count}，写入 {write_count}，"
+                    f"需确认 {confirmation_count}，协作 {collaboration_count}。"
+                )
 
         lines.extend(
             [
