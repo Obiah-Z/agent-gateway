@@ -5665,12 +5665,38 @@ def register_builtin_tools(
         case_name: str = "",
         user_goal: str = "",
         agent_id: str = "",
+        contract_filter: str = "",
     ) -> str:
         """解释某类任务的 Agent 能力契约、写入风险和确认边界。"""
 
         normalized_case = case_name.strip()
         normalized_goal = user_goal.strip().lower()
         normalized_agent = agent_id.strip()
+        normalized_filter = contract_filter.strip().lower().replace("_", "-")
+        if not normalized_filter and normalized_goal:
+            if any(word in normalized_goal for word in ("需要确认", "是否需要确认", "确认吗", "confirmation")):
+                normalized_filter = "confirmation"
+            elif any(word in normalized_goal for word in ("会不会写入", "是否写入", "写入数据", "写数据", "write")):
+                normalized_filter = "write"
+            elif any(word in normalized_goal for word in ("为什么要协作", "为什么需要协作", "多 agent", "多agent", "协作", "collaboration")):
+                normalized_filter = "collaboration"
+            elif any(word in normalized_goal for word in ("只读", "read only", "read-only")):
+                normalized_filter = "read-only"
+        if normalized_filter not in {"", "all", "write", "confirmation", "collaboration", "read-only"}:
+            return "Error: contract_filter must be one of all, write, confirmation, collaboration, read-only"
+
+        def filter_contract(contract: object) -> bool:
+            if normalized_filter in {"", "all"}:
+                return True
+            if normalized_filter == "write":
+                return not bool(getattr(contract, "read_only", True))
+            if normalized_filter == "confirmation":
+                return bool(getattr(contract, "requires_confirmation", False))
+            if normalized_filter == "collaboration":
+                return bool(getattr(contract, "expected_requires_collaboration", False))
+            if normalized_filter == "read-only":
+                return bool(getattr(contract, "read_only", True))
+            return True
 
         def score_contract(contract: object) -> int:
             score = 0
@@ -5703,16 +5729,17 @@ def register_builtin_tools(
             return score
 
         candidates = sorted(
-            DEFAULT_AGENT_ROUTING_CONTRACTS,
+            [contract for contract in DEFAULT_AGENT_ROUTING_CONTRACTS if filter_contract(contract)],
             key=score_contract,
             reverse=True,
         )
         selected = [contract for contract in candidates if score_contract(contract) > 0]
         if not selected:
-            selected = list(DEFAULT_AGENT_ROUTING_CONTRACTS)
+            selected = candidates
 
         contracts = []
-        for contract in selected[:5]:
+        limit = 20 if normalized_filter and normalized_filter != "all" and not normalized_case and not normalized_agent else 5
+        for contract in selected[:limit]:
             requires_collaboration = bool(contract.expected_requires_collaboration)
             read_only = bool(contract.read_only)
             requires_confirmation = bool(contract.requires_confirmation)
@@ -5760,6 +5787,7 @@ def register_builtin_tools(
                     "case_name": normalized_case,
                     "user_goal": user_goal.strip(),
                     "agent_id": normalized_agent,
+                    "contract_filter": normalized_filter or "auto",
                 },
                 "count": len(contracts),
                 "contracts": contracts,
@@ -9090,6 +9118,11 @@ def register_builtin_tools(
                     "agent_id": {
                         "type": "string",
                         "description": "Optional agent id to filter or boost.",
+                    },
+                    "contract_filter": {
+                        "type": "string",
+                        "enum": ["all", "write", "confirmation", "collaboration", "read-only"],
+                        "description": "Optional contract filter. If omitted, it is inferred from user_goal.",
                     },
                 },
             },

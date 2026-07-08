@@ -3372,6 +3372,26 @@ def test_prepare_entry_route_response_formats_agent_capability_contract(tmp_path
     assert "写入前需要用户明确确认" in data["formatted_response"]
 
 
+def test_prepare_entry_route_response_lists_write_contracts(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {"user_text": "当前哪些 Agent 任务会写入数据？"},
+        )
+    )
+
+    assert data["classification"]["intent"] == "agent-capability-contract"
+    contracts = data["capability_contract"]["contracts"]
+    case_names = {item["case_name"] for item in contracts}
+    assert data["capability_contract"]["query"]["contract_filter"] == "write"
+    assert {"diet", "personal", "document"}.issubset(case_names)
+    assert all(item["read_only"] is False for item in contracts)
+    assert "Agent 能力契约说明" in data["formatted_response"]
+
+
 def test_prepare_entry_route_response_delegates_repo_reading_guide(
     tmp_path: Path,
 ) -> None:
@@ -3623,6 +3643,23 @@ def test_explain_agent_capability_contract_outputs_boundaries(tmp_path: Path) ->
     assert contract["risk_level"] == "medium"
     assert "meal_log_add" in contract["required_tools"]
     assert "不会执行目标 Agent" in data["note"]
+
+
+def test_explain_agent_capability_contract_filters_confirmation_tasks(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "explain_agent_capability_contract",
+            {"contract_filter": "confirmation"},
+        )
+    )
+
+    case_names = {item["case_name"] for item in data["contracts"]}
+    assert data["query"]["contract_filter"] == "confirmation"
+    assert {"diet", "personal"}.issubset(case_names)
+    assert all(item["requires_confirmation"] is True for item in data["contracts"])
 
 
 def test_format_agent_capability_contract_outputs_chinese_boundary(tmp_path: Path) -> None:
