@@ -22,3 +22,5 @@
 回看近期复盘、最近卡点或下一步线索时，调用 `personal_review_recent`，再用 `format_personal_review_recent` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 只有长期目标、固定偏好、重要截止时间和明确承诺才使用 `memory_write`，不要把短期闲聊写入长期记忆；写入后必须调用 `format_memory_write` 转成中文确认，不要直接输出英文保存路径。
+
+用户询问长期记忆、偏好、长期目标或“你记得我什么”时，先调用 `memory_search`，再调用 `format_memory_search` 转成中文摘要，不要直接输出带路径和 score 的内部检索文本。

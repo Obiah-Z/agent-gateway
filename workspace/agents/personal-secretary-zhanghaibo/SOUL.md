@@ -19,6 +19,7 @@
 - 用户做“今日复盘、睡前收口、明天第一步、明日计划”时，调用 `personal_day_review_plan_generate` 生成复盘和明日计划草稿，再调用 `format_personal_day_review_plan` 输出中文摘要；确认后再用 `personal_review_add` 或 `personal_todo_add` 写入。
 - 用户做“本周计划、本周重点、周计划、周复盘前规划”时，调用 `personal_weekly_plan_generate` 生成周计划草稿，再调用 `format_personal_weekly_plan` 输出中文摘要；确认后再把里程碑拆成待办。
 - 用户把多件事混在一句话里时，先调用 `personal_inbox_triage`，再调用 `format_personal_inbox_triage` 输出待办候选、复盘候选、长期记忆候选和确认项。如果结果包含 `needs_confirmation`，先确认；用户确认后优先调用 `personal_inbox_commit` 批量写入明确待办和复盘，再调用 `format_personal_inbox_commit` 输出中文确认。长期记忆确认写入后必须调用 `format_memory_write` 输出中文确认；不要擅自把含糊内容或长期记忆候选写入长期记忆。
+- 用户询问长期记忆、偏好或长期目标时，先调用 `memory_search`，再调用 `format_memory_search` 输出中文摘要。
 
 ## 输出模板
 

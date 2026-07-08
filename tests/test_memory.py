@@ -47,6 +47,51 @@ def test_format_memory_write_outputs_user_facing_confirmation(tmp_path: Path) ->
     assert "不会自动新增待办、餐食、体重、复盘或修改档案" in formatted
 
 
+def test_format_memory_search_outputs_user_facing_summary(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = MemoryStore(workspace)
+    registry = ToolRegistry()
+    register_memory_tools(registry, store)
+    store.write_memory("用户长期目标是月底前完成面试项目表达。", "personal_goal", user_scope="user:alice")
+
+    results = registry.dispatch(
+        "memory_search",
+        {"query": "面试项目表达", "top_k": 3},
+        runtime_context={"memory_user_scope": "user:alice"},
+    )
+    formatted = registry.dispatch(
+        "format_memory_search",
+        {"results_text": results, "query": "面试项目表达"},
+    )
+
+    assert "## 长期记忆检索" in formatted
+    assert "- 查询：面试项目表达" in formatted
+    assert "- 命中：1 条" in formatted
+    assert "用户长期目标是月底前完成面试项目表达。" in formatted
+    assert "来源：" in formatted
+    assert "相关度：" in formatted
+    assert "只读取已保存记忆，不会新增、修改或删除任何内容" in formatted
+
+
+def test_format_memory_search_handles_empty_results(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = MemoryStore(workspace)
+    registry = ToolRegistry()
+    register_memory_tools(registry, store)
+
+    formatted = registry.dispatch(
+        "format_memory_search",
+        {"results_text": "No relevant memories found.", "query": "不存在的偏好"},
+    )
+
+    assert "## 长期记忆检索" in formatted
+    assert "- 查询：不存在的偏好" in formatted
+    assert "- 暂未找到相关长期记忆。" in formatted
+    assert "不会新增、修改或删除任何内容" in formatted
+
+
 def test_memory_store_lists_recent_entries(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

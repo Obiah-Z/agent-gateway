@@ -42,6 +42,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "diet_inbox_commit" in agent["tool_policy"]["tool_names"]
     assert "format_diet_inbox_commit" in agent["tool_policy"]["tool_names"]
     assert "format_memory_write" in agent["tool_policy"]["tool_names"]
+    assert "format_memory_search" in agent["tool_policy"]["tool_names"]
     assert not any(row["agent_id"] == AGENT_ID and row["match_key"] == "peer_id" for row in bindings)
     assert secretary_binding["tier"] == 1
     assert secretary_binding["match_key"] == "peer_id"
@@ -309,6 +310,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "format_memory_write" in tools_md
     assert "format_memory_write" in identity
     assert "format_memory_write" in soul
+    assert "format_memory_search" in tools_md
+    assert "format_memory_search" in identity
+    assert "format_memory_search" in soul
     assert "meal_log_add" in tools_md
     assert "format_meal_log_entry" in tools_md
     assert "format_meal_log_entry" in identity
@@ -915,6 +919,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_personal_review_recent",
         "format_personal_inbox_commit",
         "format_memory_write",
+        "format_memory_search",
         "format_personal_briefing",
         "format_personal_time_blocks",
         "format_personal_daily_workflow",
@@ -933,6 +938,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "diet_inbox_commit",
         "format_diet_inbox_commit",
         "format_memory_write",
+        "format_memory_search",
         "build_agent_handoff_prompt",
         "build_collaboration_stage_handoff",
         "summarize_collaboration_progress",
@@ -998,6 +1004,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_inbox_commit",
         "format_personal_inbox_commit",
         "format_memory_write",
+        "format_memory_search",
     }.issubset(tools[SECRETARY_AGENT_ID])
 
 
@@ -1081,4 +1088,7 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_memory_write" in identity
     assert "format_memory_write" in soul
     assert "format_memory_write" in tools_md
+    assert "format_memory_search" in identity
+    assert "format_memory_search" in soul
+    assert "format_memory_search" in tools_md
     assert "上午下午晚上" in tools_md

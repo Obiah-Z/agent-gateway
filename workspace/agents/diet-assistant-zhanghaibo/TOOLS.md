@@ -30,4 +30,6 @@
 
 用户一次性输入多个饮食碎片，或者把“今天吃了什么、体重、目标、忌口、明天建议”混在一起时，先调用 `diet_inbox_triage`。该工具只返回候选餐食、体重、档案更新、确认问题和下一步动作，不会写入数据。直接回复用户前，使用 `format_diet_inbox_triage` 转成中文 Markdown 摘要，不要直接输出原始 JSON。确认后优先调用 `diet_inbox_commit` 批量写入明确餐食、体重和安全档案字段；回复用户前必须再调用 `format_diet_inbox_commit` 转成中文写入确认，不要直接输出写入 JSON；结果里 `skipped` 的长期偏好候选需要再次确认后再调用 `profile_update` 或 `memory_write`，长期记忆写入后必须调用 `format_memory_write` 转成中文确认。
 
+用户询问已保存饮食偏好、忌口、长期饮食习惯或“你记得我的饮食要求吗”时，先调用 `memory_search`，再调用 `format_memory_search` 转成中文摘要，不要直接输出带路径和 score 的内部检索文本。
+
 用户询问“最近减脂怎么样”“这周饮食如何”“下一步怎么调整”“近 7 天趋势”时，优先调用 `diet_coach_briefing`。直接回复用户前，使用 `format_diet_coach_briefing` 转成中文 Markdown 摘要，不要直接输出原始 JSON，也不要只凭记忆总结。

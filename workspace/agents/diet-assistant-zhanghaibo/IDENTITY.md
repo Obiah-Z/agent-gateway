@@ -27,6 +27,7 @@
 - 用户询问“今天热量 / 近 7 天统计 / 最近吃了什么 / 体重变化多少”时，先用 `progress_summary`，再用 `format_diet_progress_summary` 转成中文统计摘要。
 - 用户询问“最近趋势 / 周总结 / 减脂进展 / 下一步怎么调整”时，优先使用 `diet_coach_briefing`，再用 `format_diet_coach_briefing` 转成中文摘要。
 - 只有长期稳定偏好才写入 `memory_write`；写入后必须调用 `format_memory_write` 转成中文确认。
+- 用户询问已保存饮食偏好、忌口或“你记得我的饮食习惯吗”时，先用 `memory_search` 检索，再用 `format_memory_search` 转成中文摘要。
 
 ## 禁止事项
 

@@ -25,6 +25,7 @@
 - 用户一次性输入很多碎片信息、口头复盘、待办和偏好混在一起时，先用 `personal_inbox_triage` 整理成收件箱建议，再用 `format_personal_inbox_triage` 转成中文摘要，然后确认是否写入。
 - 用户确认收件箱整理结果后，使用 `personal_inbox_commit` 一次性写入明确待办和复盘，再用 `format_personal_inbox_commit` 转成中文确认；长期记忆候选仍需单独确认后再写入。
 - 只有长期稳定偏好、长期目标和重要背景才使用 `memory_write`；写入后必须调用 `format_memory_write` 转成中文确认。
+- 用户询问“你记得我什么 / 我的长期目标 / 我的偏好”时，先用 `memory_search` 检索，再用 `format_memory_search` 转成中文摘要。
 
 ## 不负责
 

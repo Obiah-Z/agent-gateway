@@ -615,6 +615,49 @@ def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> 
             memory_store.hybrid_search(query, top_k=top_k, user_scope=scope)
         )
 
+    def format_memory_search_handler(results_text: str, query: str = "") -> str:
+        if not results_text.strip():
+            return "Error: results_text is required"
+        if results_text.strip() == "No relevant memories found.":
+            query_line = f"- 查询：{query.strip()}" if query.strip() else "- 查询：未提供"
+            return "\n".join(
+                [
+                    "## 长期记忆检索",
+                    query_line,
+                    "",
+                    "## 结果",
+                    "- 暂未找到相关长期记忆。",
+                    "",
+                    "> 边界：这是长期记忆检索结果，只读取已保存记忆，不会新增、修改或删除任何内容。",
+                ]
+            )
+
+        memory_lines = []
+        for line in results_text.splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            match = re.match(r"^\[(?P<path>.+)\]\s+\(score:\s*(?P<score>[^)]+)\)\s*(?P<snippet>.*)$", text)
+            if match:
+                snippet = " ".join(match.group("snippet").strip().split())
+                if len(snippet) > 140:
+                    snippet = snippet[:137].rstrip() + "..."
+                memory_lines.append(f"- {snippet}（来源：{match.group('path')}，相关度：{match.group('score')}）")
+            else:
+                memory_lines.append(f"- {text}")
+
+        sections = [
+            "## 长期记忆检索",
+            f"- 查询：{query.strip()}" if query.strip() else "- 查询：未提供",
+            f"- 命中：{len(memory_lines)} 条",
+            "",
+            "## 结果",
+            "\n".join(memory_lines) if memory_lines else "- 暂未找到相关长期记忆。",
+            "",
+            "> 边界：这是长期记忆检索结果，只读取已保存记忆，不会新增、修改或删除任何内容。",
+        ]
+        return "\n".join(sections).strip()
+
     registry.register(
         RegisteredTool(
             name="memory_write",
@@ -674,5 +717,30 @@ def register_memory_tools(registry: ToolRegistry, memory_store: MemoryStore) -> 
             },
             handler=memory_search_handler,
             tags=("memory", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_memory_search",
+            description=(
+                "Format memory_search results into a concise Chinese Markdown "
+                "long-term memory lookup summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["results_text"],
+                "properties": {
+                    "results_text": {
+                        "type": "string",
+                        "description": "Text returned by memory_search.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Original memory search query.",
+                    },
+                },
+            },
+            handler=format_memory_search_handler,
+            tags=("memory", "read", "format", "user-facing"),
         )
     )
