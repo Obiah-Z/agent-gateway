@@ -20,6 +20,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "meal_log_add" in agent["tool_policy"]["tool_names"]
     assert "diet_coach_briefing" in agent["tool_policy"]["tool_names"]
     assert "diet_daily_loop_generate" in agent["tool_policy"]["tool_names"]
+    assert "diet_next_meal_card_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_day_review_plan_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_weekly_plan_generate" in agent["tool_policy"]["tool_names"]
     assert not any(row["agent_id"] == AGENT_ID and row["match_key"] == "peer_id" for row in bindings)
@@ -268,6 +269,7 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "profile_update" in tools_md
     assert "diet_coach_briefing" in tools_md
     assert "diet_daily_loop_generate" in tools_md
+    assert "diet_next_meal_card_generate" in tools_md
     assert "diet_day_review_plan_generate" in tools_md
     assert "diet_weekly_plan_generate" in tools_md
 
@@ -791,6 +793,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "ops_runtime_diagnostics",
         "personal_focus_card_generate",
         "personal_day_review_plan_generate",
+        "diet_next_meal_card_generate",
         "diet_day_review_plan_generate",
         "build_agent_handoff_prompt",
         "build_collaboration_stage_handoff",

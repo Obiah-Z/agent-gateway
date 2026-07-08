@@ -443,6 +443,60 @@ class DietStore:
             "note": "每日闭环只汇总已记录的数据；如果缺少计划或餐食，请先补齐后再复盘。",
         }
 
+    def generate_next_meal_card(
+        self,
+        user_scope: str,
+        *,
+        date: str = "",
+        meal_type: str = "",
+    ) -> dict[str, Any]:
+        """生成下一餐建议卡片，不自动写入餐食或计划。"""
+
+        scope = self._require_scope(user_scope)
+        status = self.today_status(scope, date=date)
+        target_date = str(status.get("date") or date or _today())
+        missing_meals = [str(item) for item in status.get("missing_meals", [])]
+        selected_meal = self._select_next_meal(meal_type, missing_meals)
+        plan = status.get("plan") if isinstance(status.get("plan"), dict) else {}
+        plan_meals = plan.get("meals") if isinstance(plan.get("meals"), dict) else {}
+        planned_options = _as_list(plan_meals.get(selected_meal))
+        target = _as_float(status.get("target_calories"))
+        actual = _as_float(status.get("actual_calories"))
+        protein = _as_float(status.get("protein_g"))
+        remaining = round(target - actual, 1)
+        risk_flags = [str(flag) for flag in status.get("risk_flags", [])]
+        guardrails = self._next_meal_guardrails(
+            selected_meal=selected_meal,
+            remaining_calories=remaining,
+            protein_g=protein,
+            risk_flags=risk_flags,
+            plan_available=bool(plan),
+        )
+        recommended_options = [str(item).strip() for item in planned_options if str(item).strip()]
+        if not recommended_options:
+            recommended_options = self._fallback_meal_options(selected_meal, guardrails)
+        return {
+            "type": "diet_next_meal_card",
+            "user_scope": scope,
+            "date": target_date,
+            "next_meal": selected_meal,
+            "next_meal_label": self._meal_label(selected_meal),
+            "target_calories": target,
+            "actual_calories": actual,
+            "remaining_calories": remaining,
+            "protein_g": protein,
+            "plan_status": "available" if plan else "missing",
+            "recommended_options": recommended_options[:3],
+            "guardrails": guardrails,
+            "first_action": self._next_meal_first_action(selected_meal, recommended_options),
+            "reminders": self._next_meal_reminders(
+                selected_meal=selected_meal,
+                missing_meals=missing_meals,
+                plan_available=bool(plan),
+            ),
+            "note": "这是下一餐建议卡片，只读取已有餐食、计划和体重信息，不会自动写入餐食或生成新计划。",
+        }
+
     def generate_day_review_plan(self, user_scope: str, *, date: str = "", days: int = 7) -> dict[str, Any]:
         """生成饮食日总结和明日建议草稿，不自动写入计划或记录。"""
 
@@ -842,6 +896,93 @@ class DietStore:
         return reminders
 
     @staticmethod
+    def _select_next_meal(meal_type: str, missing_meals: list[str]) -> str:
+        normalized = str(meal_type or "").strip().lower()
+        aliases = {
+            "早饭": "breakfast",
+            "早餐": "breakfast",
+            "午饭": "lunch",
+            "午餐": "lunch",
+            "晚饭": "dinner",
+            "晚餐": "dinner",
+            "加餐": "snack",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized in {"breakfast", "lunch", "dinner", "snack"}:
+            return normalized
+        for candidate in ("breakfast", "lunch", "dinner"):
+            if candidate in missing_meals:
+                return candidate
+        return "snack"
+
+    @staticmethod
+    def _meal_label(meal_type: str) -> str:
+        return {
+            "breakfast": "早餐",
+            "lunch": "午餐",
+            "dinner": "晚餐",
+            "snack": "加餐",
+        }.get(meal_type, meal_type or "下一餐")
+
+    @staticmethod
+    def _next_meal_guardrails(
+        *,
+        selected_meal: str,
+        remaining_calories: float,
+        protein_g: float,
+        risk_flags: list[str],
+        plan_available: bool,
+    ) -> list[str]:
+        guardrails: list[str] = []
+        if not plan_available:
+            guardrails.append("今日饮食计划缺失，建议先生成计划或按保守模板执行。")
+        if remaining_calories < 300 and selected_meal != "snack":
+            guardrails.append("今日剩余热量不多，下一餐优先清淡蛋白质和蔬菜，主食减半。")
+        elif remaining_calories > 800:
+            guardrails.append("今日摄入偏少，不要极端节食，下一餐补足蛋白质和基础主食。")
+        if "protein_low" in risk_flags or protein_g < 50:
+            guardrails.append("蛋白质偏低，下一餐优先补一掌蛋白质。")
+        if "calories_over_target" in risk_flags:
+            guardrails.append("今日热量已偏高，避开油炸、重酱汁和含糖饮料。")
+        if not guardrails:
+            guardrails.append("按计划执行，保持少油、足量蛋白质和蔬菜。")
+        return guardrails[:4]
+
+    @staticmethod
+    def _fallback_meal_options(meal_type: str, guardrails: list[str]) -> list[str]:
+        if meal_type == "breakfast":
+            return ["无糖豆浆/酸奶 + 鸡蛋 + 一份水果"]
+        if meal_type == "lunch":
+            return ["一掌蛋白质 + 一拳主食 + 两拳蔬菜，少油少酱"]
+        if meal_type == "dinner":
+            return ["清淡蛋白质 + 两拳蔬菜 + 半拳主食"]
+        if any("蛋白质" in item for item in guardrails):
+            return ["无糖酸奶、牛奶、豆浆或茶叶蛋，优先补蛋白质"]
+        return ["无糖饮品、低糖水果或一小把坚果"]
+
+    @staticmethod
+    def _next_meal_first_action(meal_type: str, options: list[str]) -> str:
+        label = DietStore._meal_label(meal_type)
+        option = str(options[0]).strip() if options else "按清淡高蛋白模板选择"
+        return f"下一餐按「{label}」处理：{option}。"
+
+    @staticmethod
+    def _next_meal_reminders(
+        *,
+        selected_meal: str,
+        missing_meals: list[str],
+        plan_available: bool,
+    ) -> list[str]:
+        reminders: list[str] = []
+        if selected_meal in missing_meals:
+            reminders.append(f"{DietStore._meal_label(selected_meal)}还未记录，吃完后补记。")
+        if not plan_available:
+            reminders.append("今日计划缺失，建议确认是否需要生成 diet_plan。")
+        if not reminders:
+            reminders.append("吃完后记录餐食，晚间再做一次闭环总结。")
+        return reminders
+
+    @staticmethod
     def _diet_day_review_summary(
         *,
         actual: float,
@@ -1125,6 +1266,25 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "loop": diet_store.daily_loop(scope, date=date, days=days)})
 
+    def diet_next_meal_card_generate(
+        *,
+        date: str = "",
+        meal_type: str = "",
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        scope = _runtime_scope(__runtime_context, user_scope)
+        return _json(
+            {
+                "status": "ok",
+                "next_meal_card": diet_store.generate_next_meal_card(
+                    scope,
+                    date=date,
+                    meal_type=meal_type,
+                ),
+            }
+        )
+
     def diet_day_review_plan_generate(
         *,
         date: str = "",
@@ -1329,6 +1489,28 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_daily_loop_generate,
             tags=("diet", "daily", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="diet_next_meal_card_generate",
+            description=(
+                "Generate a next-meal decision card from today's recorded meals, "
+                "daily plan, calorie gap, protein intake, and risk flags without writing data."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "meal_type": {
+                        "type": "string",
+                        "description": "Optional target meal: breakfast/lunch/dinner/snack or Chinese aliases.",
+                    },
+                    "user_scope": {"type": "string"},
+                },
+            },
+            handler=diet_next_meal_card_generate,
+            tags=("diet", "meal", "planning", "read"),
         )
     )
     registry.register(

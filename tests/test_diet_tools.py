@@ -355,6 +355,53 @@ def test_diet_daily_loop_reports_missing_plan_without_auto_generating(tmp_path: 
     assert any("生成今日饮食计划" in action for action in loop["next_actions"])
 
 
+def test_diet_next_meal_card_uses_today_plan_without_writing(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.generate_plan("user:wework:diet", plan_date="2026-07-06")
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="breakfast",
+        raw_text="鸡蛋和豆浆",
+        estimated_calories=320,
+        protein_g=22,
+    )
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="牛肉饭",
+        estimated_calories=760,
+        protein_g=30,
+    )
+
+    card = json.loads(
+        registry.dispatch(
+            "diet_next_meal_card_generate",
+            {"date": "2026-07-06"},
+            runtime_context=context,
+        )
+    )["next_meal_card"]
+
+    assert card["type"] == "diet_next_meal_card"
+    assert card["user_scope"] == "user:wework:diet"
+    assert card["date"] == "2026-07-06"
+    assert card["next_meal"] == "dinner"
+    assert card["next_meal_label"] == "晚餐"
+    assert card["plan_status"] == "available"
+    assert card["actual_calories"] == 1080
+    assert card["remaining_calories"] == 470.0
+    assert card["recommended_options"][0] == "清淡蛋白质 + 大量蔬菜 + 半拳主食"
+    assert card["first_action"].startswith("下一餐按「晚餐」处理")
+    assert "晚餐还未记录，吃完后补记。" in card["reminders"]
+    assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
+
+
 def test_diet_day_review_plan_generates_tomorrow_strategy_without_writing(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()
