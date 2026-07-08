@@ -141,6 +141,40 @@ def test_format_weight_log_entry_outputs_user_facing_confirmation(tmp_path: Path
     assert store.get_profile("user:wework:diet")["current_weight_kg"] == 81.6
 
 
+def test_format_meal_log_entry_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    meal_json = registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-08",
+            "meal_type": "lunch",
+            "raw_text": "鸡胸肉沙拉一份",
+            "estimated_calories": 520,
+            "protein_g": 42,
+            "carbs_g": 38,
+            "fat_g": 18,
+            "confidence": 0.8,
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_meal_log_entry", {"meal_json": meal_json})
+
+    assert "## 餐食已记录" in formatted
+    assert "- 日期：2026-07-08" in formatted
+    assert "- 餐次：lunch" in formatted
+    assert "- 内容：鸡胸肉沙拉一份" in formatted
+    assert "- 热量：约 520 kcal" in formatted
+    assert "- 蛋白质：约 42g" in formatted
+    assert "- 估算置信度：80%" in formatted
+    assert "不会自动生成饮食计划、写体重或写入长期记忆" in formatted
+    assert store.list_meal_logs("user:wework:diet")[0]["raw_text"] == "鸡胸肉沙拉一份"
+
+
 def test_format_nutrition_day_summary_outputs_user_facing_summary(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

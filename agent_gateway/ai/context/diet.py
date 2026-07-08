@@ -1594,6 +1594,43 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         )
         return _json({"status": "saved", "meal": row})
 
+    def format_meal_log_entry(meal_json: str) -> str:
+        if not meal_json.strip():
+            return "Error: meal_json is required"
+        data = json.loads(meal_json)
+        if not isinstance(data, dict):
+            return "Error: meal_json must be a JSON object"
+        meal = data.get("meal") if isinstance(data.get("meal"), dict) else data
+        if not isinstance(meal, dict):
+            return "Error: meal_json must contain a meal object"
+        if "raw_text" not in meal:
+            return "Error: meal_json must be a meal_log_add object"
+
+        details = [
+            f"日期：{meal.get('meal_date') or '今天'}",
+            f"餐次：{meal.get('meal_type') or 'unknown'}",
+            f"内容：{meal.get('raw_text') or '未填写'}",
+            f"热量：约 {_as_float(meal.get('estimated_calories')):.0f} kcal",
+            f"蛋白质：约 {_as_float(meal.get('protein_g')):.0f}g",
+            f"碳水：约 {_as_float(meal.get('carbs_g')):.0f}g",
+            f"脂肪：约 {_as_float(meal.get('fat_g')):.0f}g",
+        ]
+        confidence = _as_float(meal.get("confidence"))
+        if confidence:
+            details.append(f"估算置信度：{confidence:.0%}")
+
+        sections = [
+            "## 餐食已记录",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 如果估算不准，可以补充份量、品牌或做法后重新修正。",
+            "- 查询今天摄入时可使用今日营养汇总。",
+            "",
+            "> 边界：这是餐食记录确认，只格式化已保存结果，不会自动生成饮食计划、写体重或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def meal_log_list(
         *,
         meal_date: str = "",
@@ -2533,6 +2570,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=meal_log_add,
             tags=("diet", "meal", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_meal_log_entry",
+            description=(
+                "Format a meal_log_add JSON object into a concise Chinese "
+                "Markdown meal record confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["meal_json"],
+                "properties": {
+                    "meal_json": {
+                        "type": "string",
+                        "description": "JSON string returned by meal_log_add.",
+                    },
+                },
+            },
+            handler=format_meal_log_entry,
+            tags=("diet", "meal", "format", "user-facing"),
         )
     )
     registry.register(
