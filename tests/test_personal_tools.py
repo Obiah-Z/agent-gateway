@@ -212,6 +212,49 @@ def test_personal_time_blocks_generate_orders_open_todos_by_priority(tmp_path: P
     assert plan["note"] == "这是基于未完成待办生成的建议时间块，不会自动修改待办状态。"
 
 
+def test_format_personal_time_blocks_outputs_user_facing_plan(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理简历", "priority": "normal", "due_at": "2026-07-10"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "准备面试项目", "priority": "urgent", "due_at": "2026-07-08"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "看八股", "priority": "high", "due_at": "2026-07-09"},
+        runtime_context=context,
+    )
+    blocks_json = registry.dispatch(
+        "personal_time_blocks_generate",
+        {"todo_limit": 3},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_time_blocks",
+        {"time_blocks_json": blocks_json},
+    )
+
+    assert "## 时间块计划" in formatted
+    assert "- 待安排事项：3 项" in formatted
+    assert "- 第一步：先处理「准备面试项目」。" in formatted
+    assert "## 上午 / 下午 / 晚上" in formatted
+    assert "- 上午：准备面试项目" in formatted
+    assert "  - 准备面试项目（优先级：urgent；时间：2026-07-08）" in formatted
+    assert "- 下午：看八股" in formatted
+    assert "- 晚上：整理简历" in formatted
+    assert "不会自动修改待办状态" in formatted
+
+
 def test_personal_daily_workflow_combines_todos_reviews_and_time_blocks(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

@@ -17,7 +17,7 @@
 - 用户做每日复盘、周复盘、面试准备复盘时，使用 `personal_review_add`。
 - 需要回看近期复盘时，使用 `personal_review_recent`。
 - 生成今日计划、午间校准、睡前收口或个人简报时，优先使用 `personal_briefing_generate`，再用 `format_personal_briefing` 转成中文摘要。
-- 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`。
+- 用户询问今天怎么安排、时间怎么分配或执行顺序时，使用 `personal_time_blocks_generate`，再用 `format_personal_time_blocks` 转成中文摘要。
 - 用户需要完整“今日工作流 / 今天安排 / 收口计划”时，使用 `personal_daily_workflow_generate` 串联待办、复盘和时间块，再用 `format_personal_daily_workflow` 转成中文摘要。
 - 用户询问“现在先做什么 / 帮我收敛一下 / 下一步做哪件 / 我有点乱”时，使用 `personal_focus_card_generate` 生成当前聚焦卡片，再用 `format_personal_focus_card` 转成中文摘要。
 - 用户需要“今日复盘 / 明日计划 / 睡前收口 / 明天第一步”时，使用 `personal_day_review_plan_generate` 生成草稿，再用 `format_personal_day_review_plan` 转成中文摘要，然后确认是否写入。

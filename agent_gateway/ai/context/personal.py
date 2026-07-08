@@ -1121,6 +1121,54 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(plan, ensure_ascii=False, indent=2)
 
+    def format_personal_time_blocks(time_blocks_json: str) -> str:
+        if not time_blocks_json.strip():
+            return "Error: time_blocks_json is required"
+        data = json.loads(time_blocks_json)
+        if not isinstance(data, dict):
+            return "Error: time_blocks_json must be a JSON object"
+        if not {"blocks", "first_action", "source_todo_count"}.issubset(data):
+            return "Error: time_blocks_json must be a personal_time_blocks_generate object"
+
+        blocks = data.get("blocks") if isinstance(data.get("blocks"), list) else []
+        block_lines = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            name = str(block.get("name") or "时间块").strip()
+            focus = str(block.get("focus") or "留作缓冲").strip()
+            items = block.get("items") if isinstance(block.get("items"), list) else []
+            item_lines = []
+            for item in items[:4]:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "").strip()
+                if not title:
+                    continue
+                details = []
+                if item.get("priority"):
+                    details.append(f"优先级：{item.get('priority')}")
+                if item.get("due_at"):
+                    details.append(f"时间：{item.get('due_at')}")
+                suffix = f"（{'；'.join(details)}）" if details else ""
+                item_lines.append(f"  - {title}{suffix}")
+            if item_lines:
+                block_lines.append(f"- {name}：{focus}\n" + "\n".join(item_lines))
+            else:
+                block_lines.append(f"- {name}：{focus}")
+
+        sections = [
+            "## 时间块计划",
+            f"- 待安排事项：{data.get('source_todo_count') or 0} 项",
+            f"- 第一步：{data.get('first_action') or '先确认今天最重要的一件事。'}",
+            "",
+            "## 上午 / 下午 / 晚上",
+            "\n".join(block_lines) if block_lines else "- 暂无时间块，请先补充待办。",
+            "",
+            f"> 边界：{data.get('note') or '这是时间块建议，不会自动修改待办状态。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_daily_workflow_generate(
         todo_limit: int = 9,
         review_limit: int = 3,
@@ -1713,6 +1761,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_time_blocks_generate,
             tags=("personal", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_time_blocks",
+            description=(
+                "Format a personal_time_blocks_generate JSON object into a concise "
+                "Chinese Markdown time-block plan for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["time_blocks_json"],
+                "properties": {
+                    "time_blocks_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_time_blocks_generate.",
+                    },
+                },
+            },
+            handler=format_personal_time_blocks,
+            tags=("personal", "planning", "format", "user-facing"),
         )
     )
     registry.register(

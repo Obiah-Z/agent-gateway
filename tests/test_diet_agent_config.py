@@ -860,6 +860,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_diet_coach_briefing",
         "format_diet_daily_loop",
         "format_personal_briefing",
+        "format_personal_time_blocks",
         "format_personal_daily_workflow",
         "personal_focus_card_generate",
         "format_personal_focus_card",
@@ -919,6 +920,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_briefing_generate",
         "format_personal_briefing",
         "personal_time_blocks_generate",
+        "format_personal_time_blocks",
         "personal_daily_workflow_generate",
         "format_personal_daily_workflow",
         "personal_focus_card_generate",
@@ -949,6 +951,9 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_personal_briefing" in soul
     assert "format_personal_briefing" in tools_md
     assert "personal_time_blocks_generate" in identity
+    assert "format_personal_time_blocks" in identity
+    assert "format_personal_time_blocks" in soul
+    assert "format_personal_time_blocks" in tools_md
     assert "personal_time_blocks_generate" in soul
     assert "personal_time_blocks_generate" in tools_md
     assert "personal_daily_workflow_generate" in identity
