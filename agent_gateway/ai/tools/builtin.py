@@ -2787,6 +2787,69 @@ def register_builtin_tools(
             sections.extend(["", "## 已通过项", _markdown_table(["检查项", "状态", "依据"], passed_rows)])
         return "\n".join(sections).strip()
 
+    def format_github_repo_decision_card(decision_card_json: str) -> str:
+        """把 github_repo_decision_card JSON 转成可直接回复用户的中文摘要。"""
+
+        if not decision_card_json.strip():
+            return "Error: decision_card_json is required"
+        data = json.loads(decision_card_json)
+        if not isinstance(data, dict):
+            return "Error: decision_card_json must be a JSON object"
+        if data.get("type") != "github_repo_decision_card":
+            return "Error: decision_card_json type must be github_repo_decision_card"
+
+        fit = data.get("fit") if isinstance(data.get("fit"), dict) else {}
+        risk = data.get("risk") if isinstance(data.get("risk"), dict) else {}
+        snapshot = data.get("repo_snapshot") if isinstance(data.get("repo_snapshot"), dict) else {}
+        decision_labels = {
+            "deep-dive": "值得深入分析",
+            "skim": "适合快速浏览",
+            "watch": "保留观察",
+            "hold": "先暂缓",
+        }
+        decision = str(data.get("decision") or "").strip()
+        summary_rows = [
+            ["仓库", data.get("repository") or "未命名仓库"],
+            ["结论", data.get("decision_label") or decision_labels.get(decision, decision or "待判断")],
+            ["目标", data.get("decision_goal") or "判断是否值得继续分析或采纳。"],
+            ["适配分", fit.get("score", 0)],
+            ["优先级", fit.get("priority") or "unknown"],
+            ["风险", f"{risk.get('level') or 'unknown'} / {risk.get('decision') or 'unknown'}"],
+            ["语言", snapshot.get("language") or "unknown"],
+            ["Stars", snapshot.get("stars", 0)],
+            ["许可证", snapshot.get("license") or "unknown"],
+        ]
+        if snapshot.get("archived"):
+            summary_rows.append(["状态", "已归档"])
+        reason = str(data.get("reason") or "").strip() or "暂无明确理由。"
+        return "\n".join(
+            [
+                "## GitHub 仓库快速判断",
+                _markdown_table(["项目", "内容"], summary_rows),
+                "",
+                "## 判断理由",
+                reason,
+                "",
+                "## 适配信号",
+                _markdown_bullets(fit.get("signals") if isinstance(fit.get("signals"), list) else []),
+                "",
+                "## 风险提示",
+                _markdown_bullets(risk.get("items") if isinstance(risk.get("items"), list) else []),
+                "",
+                "## 可借鉴方向",
+                _markdown_bullets(
+                    data.get("reuse_ideas") if isinstance(data.get("reuse_ideas"), list) else []
+                ),
+                "",
+                "## 下一步",
+                _markdown_bullets(
+                    data.get("next_actions") if isinstance(data.get("next_actions"), list) else []
+                ),
+                "",
+                f"> 边界：{data.get('note') or '这是轻量决策卡片，不代表正式风险门禁或采纳计划。'}",
+            ]
+        ).strip()
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -7411,6 +7474,27 @@ def register_builtin_tools(
             },
             handler=format_github_repo_risk_gate_review,
             tags=("review", "github", "repository", "gate", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_github_repo_decision_card",
+            description=(
+                "Format a github_repo_decision_card JSON object into a concise Chinese "
+                "user-facing Markdown summary with decision, fit, risks, reuse ideas, and next actions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["decision_card_json"],
+                "properties": {
+                    "decision_card_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_decision_card.",
+                    },
+                },
+            },
+            handler=format_github_repo_decision_card,
+            tags=("github", "repository", "decision", "format", "user-facing"),
         )
     )
     registry.register(

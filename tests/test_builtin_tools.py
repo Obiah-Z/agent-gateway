@@ -1498,6 +1498,53 @@ def test_format_github_repo_risk_gate_review_outputs_user_facing_summary(
     assert "- 人工复核 LICENSE、README 授权说明或联系作者后再复用。" in formatted
 
 
+def test_format_github_repo_decision_card_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    decision_card = {
+        "type": "github_repo_decision_card",
+        "repository": "demo/workflow",
+        "url": "https://github.com/demo/workflow",
+        "decision_goal": "判断是否适合 Gateway 借鉴",
+        "decision": "deep-dive",
+        "decision_label": "值得深入分析",
+        "reason": "仓库与 Gateway 适配信号较强，适合进入深入分析或小实验。",
+        "fit": {
+            "score": 80,
+            "priority": "high",
+            "signals": ["包含 Agent / Skill / Tool / Workflow 相关信号。"],
+        },
+        "risk": {
+            "level": "low",
+            "decision": "pass",
+            "items": [],
+        },
+        "repo_snapshot": {
+            "language": "Markdown",
+            "stars": 2000,
+            "license": "MIT",
+            "archived": False,
+        },
+        "reuse_ideas": ["参考工作流或调度模式，改进 Cron / 主动任务的表达方式。"],
+        "next_actions": ["建议生成正式仓库分析报告，并列出可迁移到 Gateway 的小任务。"],
+        "note": "这是仓库轻量决策卡片，不代表已经完成正式分析、风险门禁或采纳计划。",
+    }
+
+    formatted = registry.dispatch(
+        "format_github_repo_decision_card",
+        {"decision_card_json": json.dumps(decision_card, ensure_ascii=False)},
+    )
+
+    assert "## GitHub 仓库快速判断" in formatted
+    assert "| 仓库 | demo/workflow |" in formatted
+    assert "| 结论 | 值得深入分析 |" in formatted
+    assert "| 适配分 | 80 |" in formatted
+    assert "## 判断理由" in formatted
+    assert "- 包含 Agent / Skill / Tool / Workflow 相关信号。" in formatted
+    assert "- 参考工作流或调度模式，改进 Cron / 主动任务的表达方式。" in formatted
+    assert "> 边界：这是仓库轻量决策卡片，不代表已经完成正式分析、风险门禁或采纳计划。" in formatted
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

@@ -296,6 +296,7 @@
           "github_repo_gateway_fit",
           "github_repo_risk_scan",
           "github_repo_decision_card",
+          "format_github_repo_decision_card",
           "compose_github_repo_analysis",
           "plan_github_repo_adoption",
           "read_file",
