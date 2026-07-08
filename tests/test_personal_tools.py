@@ -120,6 +120,53 @@ def test_personal_briefing_generate_summarizes_user_scope(tmp_path: Path) -> Non
     assert briefing["next_steps"] == ["明天练 RabbitMQ 选型"]
 
 
+def test_format_personal_briefing_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "背项目难点", "priority": "urgent", "due_at": "今天"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理简历", "priority": "normal"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "今天完成 Redis 复盘",
+            "completed": ["整理 Redis 面试表达"],
+            "next_step": "明天练 RabbitMQ 选型",
+        },
+        runtime_context=context,
+    )
+    briefing_json = registry.dispatch(
+        "personal_briefing_generate",
+        {"todo_limit": 5, "review_limit": 2},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_briefing",
+        {"briefing_json": briefing_json},
+    )
+
+    assert "## 个人简报" in formatted
+    assert "- 当前重点：背项目难点" in formatted
+    assert "- 未完成待办：2 项" in formatted
+    assert "- 紧急/高优先级：1 项" in formatted
+    assert "1. 背项目难点（优先级：urgent；时间：今天）" in formatted
+    assert "## 紧急项" in formatted
+    assert "- 背项目难点" in formatted
+    assert "今天完成 Redis 复盘；下一步：明天练 RabbitMQ 选型" in formatted
+    assert "不会自动新增、完成或修改待办" in formatted
+
+
 def test_personal_time_blocks_generate_orders_open_todos_by_priority(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")

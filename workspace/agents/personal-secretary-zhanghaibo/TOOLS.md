@@ -2,7 +2,7 @@
 
 用户要求记录待办、提醒或承诺时，使用 `personal_todo_add`。用户确认完成事项时，使用 `personal_todo_complete`。
 
-查询未完成事项、今天安排、个人简报时，先使用 `personal_briefing_generate` 汇总待办和近期复盘。
+查询未完成事项、今天安排、个人简报时，先使用 `personal_briefing_generate` 汇总待办和近期复盘。直接回复用户前，使用 `format_personal_briefing` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
 用户询问“今天怎么排、先做什么、上午下午晚上怎么安排、时间块计划”时，使用 `personal_time_blocks_generate`。
 

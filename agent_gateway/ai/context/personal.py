@@ -1029,6 +1029,86 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(briefing, ensure_ascii=False, indent=2)
 
+    def format_personal_briefing(briefing_json: str) -> str:
+        if not briefing_json.strip():
+            return "Error: briefing_json is required"
+        data = json.loads(briefing_json)
+        if not isinstance(data, dict):
+            return "Error: briefing_json must be a JSON object"
+        if not {"open_todos", "recent_reviews", "suggested_focus"}.issubset(data):
+            return "Error: briefing_json must be a personal_briefing_generate object"
+
+        open_todos = data.get("open_todos") if isinstance(data.get("open_todos"), list) else []
+        urgent_todos = data.get("urgent_todos") if isinstance(data.get("urgent_todos"), list) else []
+        recent_reviews = (
+            data.get("recent_reviews")
+            if isinstance(data.get("recent_reviews"), list)
+            else []
+        )
+        next_steps = data.get("next_steps") if isinstance(data.get("next_steps"), list) else []
+
+        todo_lines = []
+        sorted_todos = sorted(
+            [todo for todo in open_todos if isinstance(todo, dict)],
+            key=PersonalStore._todo_sort_key,
+        )
+        for index, todo in enumerate(sorted_todos[:6], start=1):
+            if not isinstance(todo, dict):
+                continue
+            title = str(todo.get("title") or "").strip()
+            if not title:
+                continue
+            details = []
+            if todo.get("priority"):
+                details.append(f"优先级：{todo.get('priority')}")
+            if todo.get("due_at"):
+                details.append(f"时间：{todo.get('due_at')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            todo_lines.append(f"{index}. {title}{suffix}")
+
+        urgent_lines = []
+        for todo in urgent_todos[:4]:
+            if not isinstance(todo, dict):
+                continue
+            title = str(todo.get("title") or "").strip()
+            if title:
+                urgent_lines.append(f"- {title}")
+
+        review_lines = []
+        for review in recent_reviews[:3]:
+            if not isinstance(review, dict):
+                continue
+            summary = str(review.get("summary") or "").strip()
+            next_step = str(review.get("next_step") or "").strip()
+            if summary and next_step:
+                review_lines.append(f"- {summary}；下一步：{next_step}")
+            elif summary:
+                review_lines.append(f"- {summary}")
+            elif next_step:
+                review_lines.append(f"- 下一步：{next_step}")
+
+        sections = [
+            "## 个人简报",
+            f"- 当前重点：{data.get('suggested_focus') or '待确认'}",
+            f"- 未完成待办：{len(open_todos)} 项",
+            f"- 紧急/高优先级：{len(urgent_todos)} 项",
+            "",
+            "## 待办",
+            "\n".join(todo_lines) if todo_lines else "暂无未完成待办。",
+            "",
+            "## 紧急项",
+            "\n".join(urgent_lines) if urgent_lines else "- 暂无紧急项。",
+            "",
+            "## 最近复盘",
+            "\n".join(review_lines) if review_lines else "- 暂无近期复盘。",
+            "",
+            "## 下一步",
+            _markdown_bullets(next_steps),
+            "",
+            "> 边界：这是个人简报，只读取待办和复盘，不会自动新增、完成或修改待办。",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_time_blocks_generate(
         todo_limit: int = 9,
         *,
@@ -1598,6 +1678,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_briefing_generate,
             tags=("personal", "briefing", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_briefing",
+            description=(
+                "Format a personal_briefing_generate JSON object into a concise "
+                "Chinese Markdown personal briefing for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["briefing_json"],
+                "properties": {
+                    "briefing_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_briefing_generate.",
+                    },
+                },
+            },
+            handler=format_personal_briefing,
+            tags=("personal", "briefing", "format", "user-facing"),
         )
     )
     registry.register(
