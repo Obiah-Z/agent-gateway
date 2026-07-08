@@ -16,6 +16,8 @@
 
 用户一次性输入多个碎片信息，或者把“待办、复盘、长期偏好、明天安排”混在一起时，先调用 `personal_inbox_triage`。该工具只给整理建议，不会写入数据。确认后再分别调用 `personal_todo_add`、`personal_review_add` 或 `memory_write`。
 
+用户确认 `personal_inbox_triage` 的整理结果后，优先调用 `personal_inbox_commit`。该工具会批量写入明确待办和复盘，但不会写入长期记忆候选；如果结果里有 `skipped` 的 memory 项，需要再次确认后再调用 `memory_write`。
+
 每日复盘、周复盘和面试复盘使用 `personal_review_add`；回看近期复盘使用 `personal_review_recent`。
 
 只有长期目标、固定偏好、重要截止时间和明确承诺才使用 `memory_write`，不要把短期闲聊写入长期记忆。

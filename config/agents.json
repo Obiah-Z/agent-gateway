@@ -194,6 +194,7 @@
           "personal_day_review_plan_generate",
           "personal_weekly_plan_generate",
           "personal_inbox_triage",
+          "personal_inbox_commit",
           "get_current_time",
           "memory_write",
           "memory_search",

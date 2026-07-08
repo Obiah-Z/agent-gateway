@@ -543,6 +543,91 @@ class PersonalStore:
             "note": "这是个人秘书收件箱整理建议，不会自动写入待办、复盘或长期记忆。",
         }
 
+    def commit_inbox_triage(
+        self,
+        triage: dict[str, Any],
+        *,
+        user_scope: str = "",
+        commit_todos: bool = True,
+        commit_review: bool = True,
+    ) -> dict[str, Any]:
+        """把用户已确认的收件箱整理结果批量写入待办和复盘。"""
+
+        if triage.get("type") != "personal_inbox_triage":
+            raise ValueError("triage type must be personal_inbox_triage")
+        scope = MemoryStore.normalize_scope(user_scope or str(triage.get("user_scope", "")))
+        suggested_todos = triage.get("suggested_todos") if isinstance(triage.get("suggested_todos"), list) else []
+        suggested_review = (
+            triage.get("suggested_review") if isinstance(triage.get("suggested_review"), dict) else None
+        )
+        suggested_memory = (
+            triage.get("suggested_memory") if isinstance(triage.get("suggested_memory"), dict) else None
+        )
+
+        written_todos = []
+        if commit_todos:
+            for item in suggested_todos:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title", "")).strip()
+                if not title:
+                    continue
+                written_todos.append(
+                    self.add_todo(
+                        title,
+                        priority=str(item.get("priority", "normal")),
+                        due_at=str(item.get("due_at", "")),
+                        notes=str(item.get("notes", "")),
+                        user_scope=scope,
+                    )
+                )
+
+        written_review = None
+        if commit_review and suggested_review is not None:
+            summary = str(suggested_review.get("summary", "")).strip()
+            if summary:
+                written_review = self.add_review(
+                    summary,
+                    completed=[
+                        str(item).strip()
+                        for item in suggested_review.get("completed", [])
+                        if str(item).strip()
+                    ],
+                    blockers=[
+                        str(item).strip()
+                        for item in suggested_review.get("blockers", [])
+                        if str(item).strip()
+                    ],
+                    next_step=str(suggested_review.get("next_step", "")),
+                    user_scope=scope,
+                )
+
+        skipped = []
+        if suggested_memory is not None:
+            skipped.append(
+                {
+                    "type": "memory",
+                    "reason": "长期记忆候选需要用户单独确认后再调用 memory_write。",
+                    "candidate": suggested_memory,
+                }
+            )
+        return {
+            "generated_at": self._now(),
+            "user_scope": scope,
+            "type": "personal_inbox_commit",
+            "written_todos": written_todos,
+            "written_review": written_review,
+            "skipped": skipped,
+            "source": {
+                "suggested_todo_count": len(suggested_todos),
+                "committed_todo_count": len(written_todos),
+                "has_review": suggested_review is not None,
+                "committed_review": written_review is not None,
+                "has_memory_candidate": suggested_memory is not None,
+            },
+            "note": "这是基于已确认收件箱整理结果的批量写入；长期记忆不会自动写入。",
+        }
+
     def _scope_dir(self, user_scope: str) -> Path:
         scope = MemoryStore.normalize_scope(user_scope)
         name = MemoryStore._scope_dir_name(scope) if scope else "global"
@@ -1025,6 +1110,30 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(triage, ensure_ascii=False, indent=2)
 
+    def personal_inbox_commit(
+        triage_json: str,
+        commit_todos: bool = True,
+        commit_review: bool = True,
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        if not triage_json.strip():
+            return "Error: triage_json is required"
+        data = json.loads(triage_json)
+        if not isinstance(data, dict):
+            return "Error: triage_json must be a JSON object"
+        try:
+            result = personal_store.commit_inbox_triage(
+                data,
+                user_scope=_scope(__runtime_context, user_scope),
+                commit_todos=commit_todos,
+                commit_review=commit_review,
+            )
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
     registry.register(
         RegisteredTool(
             name="personal_todo_add",
@@ -1232,5 +1341,28 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_inbox_triage,
             tags=("personal", "inbox", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="personal_inbox_commit",
+            description=(
+                "Commit a confirmed personal_inbox_triage JSON into structured todos "
+                "and optional review. It does not write long-term memory candidates."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["triage_json"],
+                "properties": {
+                    "triage_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_inbox_triage.",
+                    },
+                    "commit_todos": {"type": "boolean"},
+                    "commit_review": {"type": "boolean"},
+                },
+            },
+            handler=personal_inbox_commit,
+            tags=("personal", "inbox", "todo", "review", "write"),
         )
     )

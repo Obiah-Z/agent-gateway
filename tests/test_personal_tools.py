@@ -401,3 +401,40 @@ def test_personal_inbox_triage_handles_plain_chat(tmp_path: Path) -> None:
     assert triage["intent"] == "chat"
     assert triage["suggested_todos"] == []
     assert any("这段内容更像普通对话" in item for item in triage["needs_confirmation"])
+
+
+def test_personal_inbox_commit_writes_confirmed_todos_and_review(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    triage_json = registry.dispatch(
+        "personal_inbox_triage",
+        {
+            "text": (
+                "今天完成 Redis 复盘，但场景题还是卡点。"
+                "明天要练 RabbitMQ 选型，记一下长期目标是月底前完成面试项目表达。"
+            )
+        },
+        runtime_context=context,
+    )
+
+    result = json.loads(
+        registry.dispatch(
+            "personal_inbox_commit",
+            {"triage_json": triage_json},
+            runtime_context=context,
+        )
+    )
+
+    assert result["type"] == "personal_inbox_commit"
+    assert result["user_scope"] == "user:alice"
+    assert result["source"]["committed_todo_count"] == 1
+    assert result["source"]["committed_review"] is True
+    assert result["source"]["has_memory_candidate"] is True
+    assert result["written_todos"][0]["title"] == "要练 RabbitMQ 选型"
+    assert result["written_review"]["blockers"] == ["但场景题还是卡点"]
+    assert result["skipped"][0]["type"] == "memory"
+    assert "不会自动写入" in result["note"]
+    assert store.list_todos(user_scope="user:alice")[0]["title"] == "要练 RabbitMQ 选型"
+    assert store.recent_reviews(user_scope="user:alice")[0]["summary"].startswith("今天完成 Redis")

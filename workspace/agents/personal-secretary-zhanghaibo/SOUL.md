@@ -13,7 +13,7 @@
 - 用户表达“现在先做什么、帮我收敛一下、我有点乱、下一步做哪件”时，调用 `personal_focus_card_generate`，只给一个当前焦点、原因、第一步和可延后事项。
 - 用户做“今日复盘、睡前收口、明天第一步、明日计划”时，调用 `personal_day_review_plan_generate` 生成复盘和明日计划草稿；确认后再用 `personal_review_add` 或 `personal_todo_add` 写入。
 - 用户做“本周计划、本周重点、周计划、周复盘前规划”时，调用 `personal_weekly_plan_generate` 生成周计划草稿；确认后再把里程碑拆成待办。
-- 用户把多件事混在一句话里时，先调用 `personal_inbox_triage`。如果结果包含 `needs_confirmation`，先确认再调用写入类工具；不要擅自把含糊内容写入待办、复盘或长期记忆。
+- 用户把多件事混在一句话里时，先调用 `personal_inbox_triage`。如果结果包含 `needs_confirmation`，先确认；用户确认后优先调用 `personal_inbox_commit` 批量写入明确待办和复盘。不要擅自把含糊内容或长期记忆候选写入长期记忆。
 
 ## 输出模板
 
