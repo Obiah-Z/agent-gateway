@@ -20,6 +20,7 @@ class RoutingCase:
     expected_agent_id: str
     expected_requires_collaboration: bool
     context_hint: str = ""
+    required_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class RoutingResult:
     actual_agent_id: str
     expected_requires_collaboration: bool
     actual_requires_collaboration: bool
+    missing_required_tools: tuple[str, ...]
     confidence: float
     reason: str
     suggested_next_step: str
@@ -46,6 +48,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="chat",
         expected_agent_id="main",
         expected_requires_collaboration=False,
+        required_tools=("classify_task_intent", "format_entry_response"),
     ),
     RoutingCase(
         name="repo-analysis",
@@ -53,6 +56,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="repo-analysis",
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=False,
+        required_tools=("compose_github_repo_analysis", "format_github_repo_analysis"),
     ),
     RoutingCase(
         name="repo-reading-guide",
@@ -60,6 +64,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="repo-reading-guide",
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=False,
+        required_tools=("github_repo_reading_guide", "format_github_repo_reading_guide"),
     ),
     RoutingCase(
         name="repo-adoption",
@@ -67,6 +72,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="repo-adoption",
         expected_agent_id="repo-analyzer",
         expected_requires_collaboration=True,
+        required_tools=("plan_github_repo_adoption", "format_github_repo_adoption_plan"),
     ),
     RoutingCase(
         name="research-option-validation",
@@ -74,6 +80,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="research-option-validation",
         expected_agent_id="research",
         expected_requires_collaboration=True,
+        required_tools=("compose_research_option_comparison",),
     ),
     RoutingCase(
         name="planning",
@@ -81,6 +88,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="planning",
         expected_agent_id="planner",
         expected_requires_collaboration=False,
+        required_tools=("plan_execution_stage", "format_execution_stage_plan"),
     ),
     RoutingCase(
         name="agent-capabilities",
@@ -88,6 +96,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="agent-capabilities",
         expected_agent_id="main",
         expected_requires_collaboration=False,
+        required_tools=("list_agent_capabilities", "format_agent_capability_catalog"),
     ),
     RoutingCase(
         name="ops",
@@ -95,6 +104,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="ops",
         expected_agent_id="ops",
         expected_requires_collaboration=False,
+        required_tools=("ops_readonly_health", "ops_runtime_diagnostics"),
     ),
     RoutingCase(
         name="diet",
@@ -102,6 +112,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="diet",
         expected_agent_id="diet-assistant-zhanghaibo",
         expected_requires_collaboration=False,
+        required_tools=("meal_log_add", "format_meal_log_entry"),
     ),
     RoutingCase(
         name="personal",
@@ -109,6 +120,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="personal",
         expected_agent_id="personal-secretary-zhanghaibo",
         expected_requires_collaboration=False,
+        required_tools=("personal_todo_add", "personal_review_add"),
     ),
     RoutingCase(
         name="personal-due-reminders",
@@ -116,6 +128,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="personal",
         expected_agent_id="personal-secretary-zhanghaibo",
         expected_requires_collaboration=False,
+        required_tools=("personal_due_todo_digest_generate", "format_personal_due_todo_digest"),
     ),
     RoutingCase(
         name="document",
@@ -123,6 +136,7 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="document",
         expected_agent_id="doc-writer",
         expected_requires_collaboration=False,
+        required_tools=("outline_structured_document", "save_structured_document"),
     ),
     RoutingCase(
         name="review",
@@ -130,19 +144,34 @@ DEFAULT_CASES: tuple[RoutingCase, ...] = (
         expected_intent="review",
         expected_agent_id="reviewer",
         expected_requires_collaboration=False,
+        required_tools=("assess_risk_decision", "format_risk_decision_assessment"),
     ),
 )
+
+
+def _agent_tool_allowlists(config_path: Path) -> dict[str, set[str]]:
+    """读取 Agent 工具白名单，用于验证路由结果是否具备执行能力。"""
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    agents = data.get("agents", [])
+    return {
+        str(agent.get("id") or ""): set(agent.get("tool_policy", {}).get("tool_names", []))
+        for agent in agents
+        if agent.get("id")
+    }
 
 
 def evaluate_cases(
     cases: tuple[RoutingCase, ...] = DEFAULT_CASES,
     *,
     workspace_root: Path | None = None,
+    agent_config_path: Path = Path("config/agents.json"),
 ) -> list[RoutingResult]:
     """执行入口 Agent 路由验收用例。"""
 
     registry = ToolRegistry()
     register_builtin_tools(registry, workspace_root or Path("workspace"))
+    agent_tools = _agent_tool_allowlists(agent_config_path)
     results: list[RoutingResult] = []
     for case in cases:
         raw = registry.dispatch(
@@ -153,10 +182,13 @@ def evaluate_cases(
         actual_intent = str(data.get("intent") or "")
         actual_agent_id = str(data.get("recommended_agent_id") or "")
         actual_requires = bool(data.get("requires_collaboration"))
+        allowlist = agent_tools.get(case.expected_agent_id, set())
+        missing_tools = tuple(tool for tool in case.required_tools if tool not in allowlist)
         passed = (
             actual_intent == case.expected_intent
             and actual_agent_id == case.expected_agent_id
             and actual_requires == case.expected_requires_collaboration
+            and not missing_tools
         )
         results.append(
             RoutingResult(
@@ -168,6 +200,7 @@ def evaluate_cases(
                 actual_agent_id=actual_agent_id,
                 expected_requires_collaboration=case.expected_requires_collaboration,
                 actual_requires_collaboration=actual_requires,
+                missing_required_tools=missing_tools,
                 confidence=float(data.get("confidence") or 0.0),
                 reason=str(data.get("reason") or ""),
                 suggested_next_step=str(data.get("suggested_next_step") or ""),
@@ -177,7 +210,7 @@ def evaluate_cases(
 
 
 def _format_table(results: list[RoutingResult]) -> str:
-    headers = ["case", "status", "intent", "agent", "collab", "confidence"]
+    headers = ["case", "status", "intent", "agent", "collab", "tools", "confidence"]
     rows = [
         [
             row.name,
@@ -185,6 +218,7 @@ def _format_table(results: list[RoutingResult]) -> str:
             f"{row.actual_intent} / expected {row.expected_intent}",
             f"{row.actual_agent_id} / expected {row.expected_agent_id}",
             f"{row.actual_requires_collaboration} / expected {row.expected_requires_collaboration}",
+            "ok" if not row.missing_required_tools else ", ".join(row.missing_required_tools),
             f"{row.confidence:.2f}",
         ]
         for row in results
@@ -207,10 +241,18 @@ def _format_table(results: list[RoutingResult]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate entry-agent routing cases.")
     parser.add_argument("--workspace", default="workspace", help="Workspace root used by builtin tools.")
+    parser.add_argument(
+        "--agents-config",
+        default="config/agents.json",
+        help="Agent config used to verify required tool allowlists.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON instead of a table.")
     args = parser.parse_args(argv)
 
-    results = evaluate_cases(workspace_root=Path(args.workspace))
+    results = evaluate_cases(
+        workspace_root=Path(args.workspace),
+        agent_config_path=Path(args.agents_config),
+    )
     if args.json:
         print(json.dumps([asdict(row) for row in results], ensure_ascii=False, indent=2))
     else:

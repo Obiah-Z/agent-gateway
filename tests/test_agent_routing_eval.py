@@ -38,6 +38,13 @@ def test_default_routing_eval_cases_pass() -> None:
     assert by_name["personal"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["personal-due-reminders"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["diet"].actual_agent_id == "diet-assistant-zhanghaibo"
+    assert all(not row.missing_required_tools for row in results)
+
+
+def test_default_routing_eval_cases_declare_required_tools() -> None:
+    missing = [case.name for case in DEFAULT_CASES if not case.required_tools]
+
+    assert not missing
 
 
 def test_agent_routing_eval_cli_outputs_summary() -> None:
