@@ -1578,6 +1578,75 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         scope = _runtime_scope(__runtime_context, user_scope)
         return _json({"status": "ok", "briefing": diet_store.coach_briefing(scope, days=days)})
 
+    def format_diet_coach_briefing(briefing_json: str) -> str:
+        if not briefing_json.strip():
+            return "Error: briefing_json is required"
+        data = json.loads(briefing_json)
+        if not isinstance(data, dict):
+            return "Error: briefing_json must be a JSON object"
+        briefing = data.get("briefing") if isinstance(data.get("briefing"), dict) else data
+        if not isinstance(briefing, dict):
+            return "Error: briefing_json must contain a briefing object"
+        if not {"days", "meal_count", "risk_flags", "suggested_actions"}.issubset(briefing):
+            return "Error: briefing_json must be a diet_coach_briefing object"
+
+        days = _as_int(briefing.get("days"))
+        meal_count = _as_int(briefing.get("meal_count"))
+        weight_change = _as_float(briefing.get("weight_change_kg"))
+        average_calories = _as_float(briefing.get("average_calories"))
+        average_protein = _as_float(briefing.get("average_protein_g"))
+        missing_days = _as_int(briefing.get("missing_meal_days"))
+        recent_daily = (
+            briefing.get("recent_daily")
+            if isinstance(briefing.get("recent_daily"), list)
+            else []
+        )
+        recent_lines = []
+        for row in recent_daily[:5]:
+            if not isinstance(row, dict):
+                continue
+            recent_lines.append(
+                "- {date}：约 {calories:.0f} kcal，蛋白质约 {protein:.0f}g，记录 {count} 餐".format(
+                    date=row.get("date") or "未知日期",
+                    calories=_as_float(row.get("calories")),
+                    protein=_as_float(row.get("protein_g")),
+                    count=_as_int(row.get("meal_count")),
+                )
+            )
+
+        sections = [
+            "## 饮食趋势简报",
+            f"- 观察窗口：近 {days or 0} 天",
+            f"- 已记录餐次：{meal_count} 餐",
+            f"- 体重变化：{weight_change:+.1f} kg",
+            f"- 平均热量：约 {average_calories:.0f} kcal",
+            f"- 平均蛋白质：约 {average_protein:.0f}g",
+            f"- 漏记天数：{missing_days} 天",
+            "",
+            "## 亮点",
+            _markdown_bullets(
+                briefing.get("highlights") if isinstance(briefing.get("highlights"), list) else []
+            ),
+            "",
+            "## 风险提醒",
+            _markdown_bullets(
+                briefing.get("risk_flags") if isinstance(briefing.get("risk_flags"), list) else []
+            ),
+            "",
+            "## 建议动作",
+            _markdown_bullets(
+                briefing.get("suggested_actions")
+                if isinstance(briefing.get("suggested_actions"), list)
+                else []
+            ),
+            "",
+            "## 近期记录",
+            "\n".join(recent_lines) if recent_lines else "- 暂无近期餐食记录。",
+            "",
+            "> 边界：这是饮食趋势简报，只读取已有餐食和体重记录，不会自动写入餐食、体重或生成计划。",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_daily_loop_generate(
         *,
         date: str = "",
@@ -2179,6 +2248,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_coach_briefing,
             tags=("diet", "briefing", "summary", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_coach_briefing",
+            description=(
+                "Format a diet_coach_briefing JSON object into a concise Chinese "
+                "Markdown trend briefing for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["briefing_json"],
+                "properties": {
+                    "briefing_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_coach_briefing.",
+                    },
+                },
+            },
+            handler=format_diet_coach_briefing,
+            tags=("diet", "briefing", "summary", "format", "user-facing"),
         )
     )
     registry.register(

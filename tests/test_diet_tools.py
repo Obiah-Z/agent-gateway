@@ -294,6 +294,66 @@ def test_diet_coach_briefing_reports_risks_and_actions(tmp_path: Path) -> None:
     assert briefing["recent_daily"][0]["date"] == "2026-07-06"
 
 
+def test_format_diet_coach_briefing_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    registry.dispatch(
+        "profile_update",
+        {"height_cm": 178, "current_weight_kg": 82, "target_weight_kg": 75},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "weight_log_add",
+        {"weight_kg": 82.0},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-05",
+            "meal_type": "lunch",
+            "raw_text": "炸鸡饭和奶茶",
+            "estimated_calories": 1200,
+            "protein_g": 20,
+        },
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "meal_log_add",
+        {
+            "meal_date": "2026-07-06",
+            "meal_type": "dinner",
+            "raw_text": "炒饭",
+            "estimated_calories": 900,
+            "protein_g": 15,
+        },
+        runtime_context=context,
+    )
+    briefing_json = registry.dispatch(
+        "diet_coach_briefing",
+        {"days": 7},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_coach_briefing", {"briefing_json": briefing_json})
+
+    assert "## 饮食趋势简报" in formatted
+    assert "- 观察窗口：近 7 天" in formatted
+    assert "- 已记录餐次：2 餐" in formatted
+    assert "- 平均蛋白质：约" in formatted
+    assert "## 亮点" in formatted
+    assert "最近共记录 2 餐" in formatted
+    assert "- meal_logging_incomplete" in formatted
+    assert "- protein_low" in formatted
+    assert "补齐早餐、午餐、晚餐" in formatted
+    assert "一掌蛋白质" in formatted
+    assert "- 2026-07-06：约 900 kcal" in formatted
+    assert "不会自动写入餐食、体重或生成计划" in formatted
+
+
 def test_diet_daily_loop_combines_today_plan_weight_and_actions(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()
