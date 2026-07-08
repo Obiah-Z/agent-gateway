@@ -1664,6 +1664,81 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             }
         )
 
+    def format_diet_day_review_plan(plan_json: str) -> str:
+        if not plan_json.strip():
+            return "Error: plan_json is required"
+        data = json.loads(plan_json)
+        if not isinstance(data, dict):
+            return "Error: plan_json must be a JSON object"
+        plan = data.get("review_plan") if isinstance(data.get("review_plan"), dict) else data
+        if not isinstance(plan, dict):
+            return "Error: plan_json must contain a review_plan object"
+        if plan.get("type") != "diet_day_review_plan":
+            return "Error: plan_json type must be diet_day_review_plan"
+
+        review = plan.get("review") if isinstance(plan.get("review"), dict) else {}
+        trend = plan.get("trend") if isinstance(plan.get("trend"), dict) else {}
+        strategy = (
+            plan.get("tomorrow_strategy")
+            if isinstance(plan.get("tomorrow_strategy"), dict)
+            else {}
+        )
+        target = _as_float(review.get("target_calories"))
+        actual = _as_float(review.get("actual_calories"))
+        delta = _as_float(review.get("calorie_delta"))
+        protein = _as_float(review.get("protein_g"))
+        average_calories = _as_float(trend.get("average_calories"))
+        average_protein = _as_float(trend.get("average_protein_g"))
+        weight_change = _as_float(trend.get("weight_change_kg"))
+        trend_days = _as_int(trend.get("days"))
+        confirmations = plan.get("needs_confirmation")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        next_actions = plan.get("next_actions")
+        if not isinstance(next_actions, list):
+            next_actions = []
+
+        sections = [
+            "## 今日饮食总结",
+            f"- 日期：{plan.get('date') or '今天'}",
+            f"- 结论：{review.get('summary') or '今日饮食记录待补全。'}",
+            f"- 摄入：约 {actual:.0f} / {target:.0f} kcal",
+            f"- 热量差：{delta:+.0f} kcal",
+            f"- 蛋白质：约 {protein:.0f}g",
+            f"- 已记录餐次：{_as_int(review.get('meal_count'))} 餐",
+            "",
+            "## 缺失餐次",
+            _markdown_bullets(
+                review.get("missing_meals")
+                if isinstance(review.get("missing_meals"), list)
+                else []
+            ),
+            "",
+            "## 近期趋势",
+            f"- 观察窗口：近 {trend_days or 0} 天",
+            f"- 体重变化：{weight_change:+.1f} kg",
+            f"- 平均热量：约 {average_calories:.0f} kcal",
+            f"- 平均蛋白质：约 {average_protein:.0f}g",
+            f"- 漏记天数：{_as_int(trend.get('missing_meal_days'))} 天",
+            "",
+            "## 风险提醒",
+            _markdown_bullets(plan.get("risk_flags") if isinstance(plan.get("risk_flags"), list) else []),
+            "",
+            "## 明日策略",
+            f"- 重点：{strategy.get('focus') or '先补齐记录，再做饮食微调。'}",
+            "动作：",
+            _markdown_bullets(strategy.get("actions") if isinstance(strategy.get("actions"), list) else []),
+            "",
+            "## 需要确认",
+            _markdown_bullets(confirmations),
+            "",
+            "## 可执行下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{plan.get('note') or '这是饮食日总结和明日建议草稿，不会自动生成计划、写入体重或补记餐食。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_weekly_plan_generate(
         *,
         week_goal: str = "",
@@ -1963,6 +2038,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_day_review_plan_generate,
             tags=("diet", "review", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_day_review_plan",
+            description=(
+                "Format a diet_day_review_plan JSON object into a concise Chinese "
+                "Markdown day review and tomorrow strategy for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["plan_json"],
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_day_review_plan_generate.",
+                    },
+                },
+            },
+            handler=format_diet_day_review_plan,
+            tags=("diet", "review", "planning", "format", "user-facing"),
         )
     )
     registry.register(

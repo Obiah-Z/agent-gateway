@@ -12,7 +12,7 @@
 
 用户询问下一餐、晚餐、午餐怎么补或现在还能吃什么时，调用 `diet_next_meal_card_generate`，再调用 `format_diet_next_meal_card` 按“下一餐、建议、边界、吃完后记录”输出，不要直接贴原始 JSON。
 
-用户询问今日总结、晚间总结、明天怎么吃或明日饮食建议时，调用 `diet_day_review_plan_generate`。该工具只生成总结和建议草稿，不会自动补记餐食、写体重或生成新计划。
+用户询问今日总结、晚间总结、明天怎么吃或明日饮食建议时，调用 `diet_day_review_plan_generate`，再调用 `format_diet_day_review_plan` 输出今日总结、近期趋势、风险提醒和明日策略，不要直接贴原始 JSON。该工具只生成总结和建议草稿，不会自动补记餐食、写体重或生成新计划。
 
 用户询问本周怎么吃、周饮食计划、本周减脂安排或这周饮食重点时，调用 `diet_weekly_plan_generate`。该工具只生成周计划草稿，不会自动生成每日计划、写体重或补记餐食。
 

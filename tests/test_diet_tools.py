@@ -482,6 +482,45 @@ def test_diet_day_review_plan_generates_tomorrow_strategy_without_writing(tmp_pa
     assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
 
 
+def test_format_diet_day_review_plan_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=1783290000.0)
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="lunch",
+        raw_text="炸鸡饭和奶茶",
+        estimated_calories=1200,
+        protein_g=20,
+    )
+    plan_json = registry.dispatch(
+        "diet_day_review_plan_generate",
+        {"date": "2026-07-06", "days": 7},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_day_review_plan", {"plan_json": plan_json})
+
+    assert "## 今日饮食总结" in formatted
+    assert "- 日期：2026-07-06" in formatted
+    assert "- 摄入：约 1200 / 1550 kcal" in formatted
+    assert "- 热量差：-350 kcal" in formatted
+    assert "- 蛋白质：约 20g" in formatted
+    assert "- breakfast" in formatted
+    assert "- dinner" in formatted
+    assert "## 近期趋势" in formatted
+    assert "- missing_meals" in formatted
+    assert "- 重点：" in formatted
+    assert "- 明天先把早餐、午餐、晚餐都记录下来" in formatted
+    assert "- 是否生成明日饮食计划？" in formatted
+    assert "不会自动生成计划、写入体重或补记餐食" in formatted
+
+
 def test_diet_weekly_plan_generates_draft_without_writing(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

@@ -23,6 +23,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "diet_next_meal_card_generate" in agent["tool_policy"]["tool_names"]
     assert "format_diet_next_meal_card" in agent["tool_policy"]["tool_names"]
     assert "diet_day_review_plan_generate" in agent["tool_policy"]["tool_names"]
+    assert "format_diet_day_review_plan" in agent["tool_policy"]["tool_names"]
     assert "diet_weekly_plan_generate" in agent["tool_policy"]["tool_names"]
     assert "diet_inbox_triage" in agent["tool_policy"]["tool_names"]
     assert "diet_inbox_commit" in agent["tool_policy"]["tool_names"]
@@ -287,6 +288,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "format_diet_next_meal_card" in identity
     assert "format_diet_next_meal_card" in soul
     assert "diet_day_review_plan_generate" in tools_md
+    assert "format_diet_day_review_plan" in tools_md
+    assert "format_diet_day_review_plan" in identity
+    assert "format_diet_day_review_plan" in soul
     assert "diet_weekly_plan_generate" in tools_md
     assert "diet_inbox_triage" in tools_md
     assert "diet_inbox_commit" in tools_md
@@ -840,6 +844,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_personal_weekly_plan",
         "format_diet_next_meal_card",
         "diet_day_review_plan_generate",
+        "format_diet_day_review_plan",
         "diet_inbox_triage",
         "diet_inbox_commit",
         "build_agent_handoff_prompt",

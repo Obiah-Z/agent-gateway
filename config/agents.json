@@ -243,6 +243,7 @@
           "diet_next_meal_card_generate",
           "format_diet_next_meal_card",
           "diet_day_review_plan_generate",
+          "format_diet_day_review_plan",
           "diet_weekly_plan_generate",
           "diet_inbox_triage",
           "diet_inbox_commit",

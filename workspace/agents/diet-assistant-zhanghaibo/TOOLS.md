@@ -16,7 +16,7 @@
 
 用户询问“下一餐吃什么”“晚餐怎么吃”“午餐怎么补”“现在还能吃什么”时，使用 `diet_next_meal_card_generate`。这个工具只读取今日餐食、计划、热量缺口和风险，不会自动写入餐食或生成新计划。直接回复用户前，使用 `format_diet_next_meal_card` 转成中文 Markdown 摘要，不要直接输出原始 JSON。
 
-用户询问“今日总结”“晚间总结”“明天怎么吃”“明日饮食建议”时，调用 `diet_day_review_plan_generate`。该工具只读取已有餐食、体重、计划和趋势，生成日总结和明日策略草稿；用户确认后再调用 `nutrition_day_summary`、`diet_plan_generate` 或 `weight_log_add`。
+用户询问“今日总结”“晚间总结”“明天怎么吃”“明日饮食建议”时，调用 `diet_day_review_plan_generate`。该工具只读取已有餐食、体重、计划和趋势，生成日总结和明日策略草稿；直接回复用户前，使用 `format_diet_day_review_plan` 转成中文 Markdown 摘要，不要直接输出原始 JSON；用户确认后再调用 `nutrition_day_summary`、`diet_plan_generate` 或 `weight_log_add`。
 
 用户询问“本周怎么吃”“周饮食计划”“本周减脂安排”“这周饮食重点”时，调用 `diet_weekly_plan_generate`。该工具只读取近期餐食、体重趋势和用户给出的周目标，生成周计划草稿；用户确认后再按具体日期调用 `diet_plan_generate`，或继续用 `meal_log_add`、`weight_log_add` 记录执行情况。
 

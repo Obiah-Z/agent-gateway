@@ -32,7 +32,7 @@
 
 `personal-secretary-zhanghaibo` 只服务指定企业微信用户，负责待办、复盘、时间块、每日工作流、当前聚焦卡片、个人日复盘草稿、周计划草稿和收件箱整理闭环。`personal_daily_workflow_generate` 用于把待办、近期复盘、时间块、第一步和确认项组合成结构化每日工作流，`format_personal_daily_workflow` 用于把该工作流转成用户可读中文摘要；`personal_focus_card_generate` 用于把未完成待办和近期复盘收敛成一个当前最该推进的动作，`format_personal_focus_card` 用于把聚焦卡片转成用户可读中文摘要；`personal_day_review_plan_generate` 用于生成日复盘和明日计划草稿，`format_personal_day_review_plan` 用于把草稿转成用户可读中文摘要；`personal_weekly_plan_generate` 用于生成周计划草稿，`format_personal_weekly_plan` 用于把周计划转成用户可读中文摘要；`personal_inbox_triage` 用于把混杂输入整理成待办、复盘和长期记忆候选；`personal_inbox_commit` 只在用户确认后批量写入明确待办和复盘，不自动写入长期记忆。
 
-`diet-assistant-zhanghaibo` 只服务指定企业微信用户，负责餐食、体重、饮食计划、趋势简报、下一餐建议卡片、饮食日总结草稿、周饮食计划草稿和混合饮食输入整理。`diet_inbox_triage` 用于把用户一次性输入的餐食、体重、目标和偏好拆成候选记录与确认项，不自动写入；`diet_inbox_commit` 只在用户确认后批量写入明确餐食、体重和安全档案字段，不自动写入长期偏好或记忆；`diet_next_meal_card_generate` 用于根据今日餐食、计划、热量缺口和风险生成只读下一餐建议，`format_diet_next_meal_card` 用于把该建议卡片转成用户可读中文摘要；`diet_day_review_plan_generate` 与 `diet_weekly_plan_generate` 只读取已有记录生成建议，不自动补记餐食、写体重或生成新计划。
+`diet-assistant-zhanghaibo` 只服务指定企业微信用户，负责餐食、体重、饮食计划、趋势简报、下一餐建议卡片、饮食日总结草稿、周饮食计划草稿和混合饮食输入整理。`diet_inbox_triage` 用于把用户一次性输入的餐食、体重、目标和偏好拆成候选记录与确认项，不自动写入；`diet_inbox_commit` 只在用户确认后批量写入明确餐食、体重和安全档案字段，不自动写入长期偏好或记忆；`diet_next_meal_card_generate` 用于根据今日餐食、计划、热量缺口和风险生成只读下一餐建议，`format_diet_next_meal_card` 用于把该建议卡片转成用户可读中文摘要；`diet_day_review_plan_generate` 用于生成饮食日总结和明日建议草稿，`format_diet_day_review_plan` 用于把草稿转成用户可读中文摘要；`diet_weekly_plan_generate` 只读取已有记录生成周计划建议，不自动补记餐食、写体重或生成新计划。
 
 ## 运维 Agent
 
