@@ -2530,6 +2530,100 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             return f"Error: {exc}"
         return _json({"status": "saved", "commit": result})
 
+    def format_diet_inbox_commit(commit_json: str) -> str:
+        if not commit_json.strip():
+            return "Error: commit_json is required"
+        data = json.loads(commit_json)
+        if not isinstance(data, dict):
+            return "Error: commit_json must be a JSON object"
+        commit = data.get("commit") if isinstance(data.get("commit"), dict) else data
+        if not isinstance(commit, dict):
+            return "Error: commit_json must contain a commit object"
+        if commit.get("type") != "diet_inbox_commit":
+            return "Error: commit_json type must be diet_inbox_commit"
+
+        written_meals = commit.get("written_meals") if isinstance(commit.get("written_meals"), list) else []
+        meal_lines = []
+        for meal in written_meals:
+            if not isinstance(meal, dict):
+                continue
+            meal_type = str(meal.get("meal_type") or "unknown").strip()
+            raw_text = str(meal.get("raw_text") or "").strip()
+            details = []
+            calories = _as_float(meal.get("estimated_calories"))
+            protein = _as_float(meal.get("protein_g"))
+            if calories:
+                details.append(f"约 {calories:.0f} kcal")
+            if protein:
+                details.append(f"蛋白质约 {protein:.0f}g")
+            if meal.get("meal_date"):
+                details.append(f"日期 {meal.get('meal_date')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            meal_lines.append(f"- {meal_type}：{raw_text or '已记录'}{suffix}")
+
+        weight = commit.get("written_weight") if isinstance(commit.get("written_weight"), dict) else None
+        if weight:
+            weight_line = f"- 体重：{_as_float(weight.get('weight_kg')):.1f} kg"
+        else:
+            weight_line = "- 暂无体重写入"
+
+        profile = commit.get("written_profile") if isinstance(commit.get("written_profile"), dict) else {}
+        source = commit.get("source") if isinstance(commit.get("source"), dict) else {}
+        profile_keys = source.get("profile_update_keys") if isinstance(source.get("profile_update_keys"), list) else []
+        profile_lines = []
+        for key in profile_keys:
+            text_key = str(key).strip()
+            if not text_key:
+                continue
+            value = profile.get(text_key)
+            if isinstance(value, list):
+                text = "、".join(_clean_strings(value))
+            else:
+                text = str(value).strip()
+            if text:
+                profile_lines.append(f"- {text_key}：{text}")
+
+        skipped = commit.get("skipped") if isinstance(commit.get("skipped"), list) else []
+        skipped_lines = []
+        for item in skipped:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "unknown").strip()
+            reason = str(item.get("reason") or "需要单独确认").strip()
+            value = item.get("value")
+            if isinstance(value, list):
+                value_text = "、".join(_clean_strings(value))
+            else:
+                value_text = str(value or "").strip()
+            label = f"{item_type}：{value_text}" if value_text else item_type
+            skipped_lines.append(f"- {label}（{reason}）")
+
+        sections = [
+            "## 饮食记录已批量写入",
+            f"- 餐食：{len(meal_lines)} 条",
+            f"- 体重：{'已写入' if weight else '未写入'}",
+            f"- 档案字段：{len(profile_lines)} 项",
+            "",
+            "## 已记录餐食",
+            "\n".join(meal_lines) if meal_lines else "暂无餐食写入。",
+            "",
+            "## 已记录体重",
+            weight_line,
+            "",
+            "## 已更新档案",
+            "\n".join(profile_lines) if profile_lines else "暂无档案字段更新。",
+            "",
+            "## 暂未写入",
+            "\n".join(skipped_lines) if skipped_lines else "- 暂无",
+            "",
+            "## 下一步",
+            "- 如果有长期偏好或记忆类内容，需要你再次确认后再保存。",
+            "- 后续查看今日摄入或减脂进展时，会读取这些结构化记录。",
+            "",
+            f"> 边界：{commit.get('note') or '这是批量写入确认，不会自动写入长期记忆。'}",
+        ]
+        return "\n".join(sections).strip()
+
     registry.register(
         RegisteredTool(
             name="profile_get",
@@ -3097,5 +3191,26 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_inbox_commit,
             tags=("diet", "inbox", "meal", "weight", "profile", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_inbox_commit",
+            description=(
+                "Format a diet_inbox_commit JSON object into a concise Chinese "
+                "Markdown confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["commit_json"],
+                "properties": {
+                    "commit_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_inbox_commit.",
+                    },
+                },
+            },
+            handler=format_diet_inbox_commit,
+            tags=("diet", "inbox", "format", "user-facing"),
         )
     )

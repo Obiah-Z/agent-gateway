@@ -40,6 +40,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     assert "diet_inbox_triage" in agent["tool_policy"]["tool_names"]
     assert "format_diet_inbox_triage" in agent["tool_policy"]["tool_names"]
     assert "diet_inbox_commit" in agent["tool_policy"]["tool_names"]
+    assert "format_diet_inbox_commit" in agent["tool_policy"]["tool_names"]
     assert not any(row["agent_id"] == AGENT_ID and row["match_key"] == "peer_id" for row in bindings)
     assert secretary_binding["tier"] == 1
     assert secretary_binding["match_key"] == "peer_id"
@@ -301,6 +302,9 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "format_diet_profile_update" in tools_md
     assert "format_diet_profile_update" in identity
     assert "format_diet_profile_update" in soul
+    assert "format_diet_inbox_commit" in tools_md
+    assert "format_diet_inbox_commit" in identity
+    assert "format_diet_inbox_commit" in soul
     assert "meal_log_add" in tools_md
     assert "format_meal_log_entry" in tools_md
     assert "format_meal_log_entry" in identity
@@ -921,6 +925,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "diet_inbox_triage",
         "format_diet_inbox_triage",
         "diet_inbox_commit",
+        "format_diet_inbox_commit",
         "build_agent_handoff_prompt",
         "build_collaboration_stage_handoff",
         "summarize_collaboration_progress",

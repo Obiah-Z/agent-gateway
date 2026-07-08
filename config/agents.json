@@ -267,6 +267,7 @@
           "diet_inbox_triage",
           "format_diet_inbox_triage",
           "diet_inbox_commit",
+          "format_diet_inbox_commit",
           "memory_search",
           "memory_write"
         ]

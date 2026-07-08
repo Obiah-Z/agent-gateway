@@ -1155,3 +1155,43 @@ def test_diet_inbox_commit_writes_confirmed_records_but_skips_preferences(tmp_pa
     assert result["skipped"][0]["type"] == "diet_preferences"
     assert store.list_meal_logs("user:wework:diet")[0]["estimated_calories"] == 320
     assert store.get_profile("user:wework:diet")["target_weight_kg"] == 75
+
+
+def test_format_diet_inbox_commit_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+    triage_json = registry.dispatch(
+        "diet_inbox_triage",
+        {
+            "text": (
+                "今天早餐吃了鸡蛋豆浆约 320 kcal，蛋白 22g；"
+                "体重 81.5kg；目标降到 75kg；我不吃香菜。"
+            )
+        },
+        runtime_context=context,
+    )
+    commit_json = registry.dispatch(
+        "diet_inbox_commit",
+        {"triage_json": triage_json},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_diet_inbox_commit",
+        {"commit_json": commit_json},
+    )
+
+    assert "## 饮食记录已批量写入" in formatted
+    assert "- 餐食：1 条" in formatted
+    assert "- 体重：已写入" in formatted
+    assert "- 档案字段：1 项" in formatted
+    assert "- breakfast：今天早餐吃了鸡蛋豆浆约 320 kcal" in formatted
+    assert "约 320 kcal" in formatted
+    assert "蛋白质约 22g" in formatted
+    assert "- 体重：81.5 kg" in formatted
+    assert "- target_weight_kg：75" in formatted
+    assert "diet_preferences" in formatted
+    assert "需要你再次确认后再保存" in formatted
+    assert "长期偏好和记忆不会自动写入" in formatted
