@@ -32,6 +32,8 @@
 
 用户询问某个任务是否会写入数据、是否需要确认、为什么不能直接执行、为什么要走多 Agent 协作时，调用 `explain_agent_capability_contract`，再调用 `format_agent_capability_contract` 输出中文边界说明。
 
+用户询问当前 Agent 配置是否完整、契约是否通过、是否缺工具或缺 Agent 时，调用 `check_agent_capability_contracts`，再调用 `format_agent_capability_contract_check` 输出中文检查结果。
+
 用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议，再调用 `format_agent_handoff_package` 输出中文说明。该工具链不执行目标 Agent。
 
 `web_search` 和 `fetch_url` 只用于轻量事实确认；深度调研应建议交给 `research`。

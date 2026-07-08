@@ -98,6 +98,8 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_agent_capability_match" in tools
     assert "explain_agent_capability_contract" in tools
     assert "format_agent_capability_contract" in tools
+    assert "check_agent_capability_contracts" in tools
+    assert "format_agent_capability_contract_check" in tools
     assert "compose_agent_handoff_package" in tools
     assert "format_agent_handoff_package" in tools
     assert "list_agent_collaboration_routes" in tools
@@ -127,6 +129,8 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_agent_capability_match" in combined_prompt
     assert "explain_agent_capability_contract" in combined_prompt
     assert "format_agent_capability_contract" in combined_prompt
+    assert "check_agent_capability_contracts" in combined_prompt
+    assert "format_agent_capability_contract_check" in combined_prompt
     assert "compose_agent_handoff_package" in combined_prompt
     assert "format_agent_handoff_package" in combined_prompt
     assert "list_agent_collaboration_routes" in combined_prompt
@@ -158,6 +162,8 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_match" in tools
         assert "explain_agent_capability_contract" in tools
         assert "format_agent_capability_contract" in tools
+        assert "check_agent_capability_contracts" in tools
+        assert "format_agent_capability_contract_check" in tools
         assert "compose_agent_handoff_package" in tools
         assert "format_agent_handoff_package" in tools
         assert "list_agent_collaboration_routes" in tools
@@ -220,6 +226,8 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_match" in tools_md
         assert "explain_agent_capability_contract" in tools_md
         assert "format_agent_capability_contract" in tools_md
+        assert "check_agent_capability_contracts" in tools_md
+        assert "format_agent_capability_contract_check" in tools_md
         assert "compose_agent_handoff_package" in tools_md
         assert "format_agent_handoff_package" in tools_md
         assert "list_agent_collaboration_routes" in tools_md

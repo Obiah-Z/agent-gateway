@@ -5,6 +5,9 @@ from agent_gateway.ai.tools.builtin import register_builtin_tools
 from agent_gateway.ai.tools.registry import ToolRegistry
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_write_file_accepts_path_alias(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
@@ -3671,6 +3674,38 @@ def test_explain_agent_capability_contract_filters_confirmation_tasks(tmp_path: 
     assert data["query"]["contract_filter"] == "confirmation"
     assert {"diet", "personal"}.issubset(case_names)
     assert all(item["requires_confirmation"] is True for item in data["contracts"])
+
+
+def test_check_agent_capability_contracts_reports_project_config_ok(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, ROOT / "workspace")
+
+    data = json.loads(registry.dispatch("check_agent_capability_contracts", {}))
+
+    assert data["type"] == "agent_capability_contract_check"
+    assert data["ok"] is True
+    assert data["missing_agents"] == []
+    assert data["missing_tools"] == {}
+    assert "main" in data["required_tools"]
+    assert "check_agent_capability_contracts" in data["required_tools"]["main"]
+
+
+def test_format_agent_capability_contract_check_outputs_report(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, ROOT / "workspace")
+    check_json = registry.dispatch("check_agent_capability_contracts", {})
+
+    reply = registry.dispatch(
+        "format_agent_capability_contract_check",
+        {"check_json": check_json, "include_required_tools": True},
+    )
+
+    assert reply.startswith("# Agent 能力契约检查")
+    assert "- 结论：通过" in reply
+    assert "## 缺失 Agent" in reply
+    assert "## 缺失工具" in reply
+    assert "## 基线工具要求" in reply
+    assert "check_agent_capability_contracts" in reply
 
 
 def test_format_agent_capability_contract_outputs_chinese_boundary(tmp_path: Path) -> None:

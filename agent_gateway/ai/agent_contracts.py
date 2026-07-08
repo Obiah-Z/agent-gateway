@@ -83,6 +83,8 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
             "format_agent_capability_catalog",
             "explain_agent_capability_contract",
             "format_agent_capability_contract",
+            "check_agent_capability_contracts",
+            "format_agent_capability_contract_check",
         ),
     ),
     AgentRoutingContract(

@@ -7,7 +7,12 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_gateway.ai.agent_contracts import DEFAULT_AGENT_ROUTING_CONTRACTS
+from agent_gateway.ai.agent_contracts import (
+    DEFAULT_AGENT_ROUTING_CONTRACTS,
+    baseline_agent_required_tools,
+    find_agent_contract_gaps,
+    load_agent_tool_allowlists,
+)
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
@@ -5896,6 +5901,118 @@ def register_builtin_tools(
         lines.extend(["", str(data.get("note") or "这是入口层说明，不会自动执行目标 Agent。")])
         return "\n".join(lines).strip()
 
+    def check_agent_capability_contracts() -> str:
+        """检查当前 Agent 配置是否满足入口路由能力契约。"""
+
+        config_path = workspace_root.parent / "config" / "agents.json"
+        if not config_path.exists():
+            return json.dumps(
+                {
+                    "type": "agent_capability_contract_check",
+                    "ok": False,
+                    "config_path": str(config_path),
+                    "checked_agents": [],
+                    "missing_agents": [],
+                    "missing_tools": {},
+                    "required_tools": {},
+                    "error": "config/agents.json not found",
+                    "next_actions": ["恢复 config/agents.json 后重新运行检查。"],
+                    "note": "这是只读契约检查，不会修改配置。",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        try:
+            tool_allowlists = load_agent_tool_allowlists(config_path)
+            required = baseline_agent_required_tools()
+            missing_agents, missing_tools = find_agent_contract_gaps(tool_allowlists, required)
+        except Exception as exc:
+            return json.dumps(
+                {
+                    "type": "agent_capability_contract_check",
+                    "ok": False,
+                    "config_path": str(config_path),
+                    "checked_agents": [],
+                    "missing_agents": [],
+                    "missing_tools": {},
+                    "required_tools": {},
+                    "error": str(exc),
+                    "next_actions": ["修复 config/agents.json 格式或 agents 字段后重新运行检查。"],
+                    "note": "这是只读契约检查，不会修改配置。",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        next_actions = []
+        if missing_agents:
+            next_actions.append("补齐缺失 Agent，或从共享契约中移除已废弃的路由样例。")
+        if missing_tools:
+            next_actions.append("把缺失工具加入对应 Agent 的 tool_policy allowlist，并同步提示词。")
+        if not next_actions:
+            next_actions.append("当前配置满足入口路由能力契约；新增能力时继续同步契约和测试。")
+
+        return json.dumps(
+            {
+                "type": "agent_capability_contract_check",
+                "ok": not missing_agents and not missing_tools,
+                "config_path": str(config_path),
+                "checked_agents": sorted(required),
+                "missing_agents": missing_agents,
+                "missing_tools": missing_tools,
+                "required_tools": {agent_id: list(tools) for agent_id, tools in required.items()},
+                "error": "",
+                "next_actions": next_actions,
+                "note": "这是只读契约检查，不会修改配置。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def format_agent_capability_contract_check(check_json: str, include_required_tools: bool = False) -> str:
+        """把 Agent 能力契约检查结果格式化成中文说明。"""
+
+        if not check_json.strip():
+            return "Error: check_json is required"
+        data = json.loads(check_json)
+        if not isinstance(data, dict):
+            return "Error: check_json must be a JSON object"
+        if data.get("type") != "agent_capability_contract_check":
+            return "Error: check_json type must be agent_capability_contract_check"
+
+        ok = bool(data.get("ok"))
+        lines = [
+            "# Agent 能力契约检查",
+            "",
+            f"- 结论：{'通过' if ok else '未通过'}",
+            f"- 配置文件：`{data.get('config_path') or 'unknown'}`",
+            f"- 检查 Agent 数：{len(data.get('checked_agents') or [])}",
+            f"- 边界：{data.get('note') or '只读检查，不会修改配置。'}",
+        ]
+        if data.get("error"):
+            lines.append(f"- 错误：{data.get('error')}")
+
+        missing_agents = _clean_strings(data.get("missing_agents") if isinstance(data.get("missing_agents"), list) else [])
+        missing_tools = data.get("missing_tools") if isinstance(data.get("missing_tools"), dict) else {}
+        lines.extend(["", "## 缺失 Agent", _markdown_bullets(missing_agents)])
+
+        rows = []
+        for agent_id, tools in sorted(missing_tools.items(), key=lambda item: str(item[0])):
+            tool_names = _clean_strings(tools if isinstance(tools, list) else [])
+            rows.append([agent_id, ", ".join(tool_names) or "暂无"])
+        lines.extend(["", "## 缺失工具", _markdown_table(["Agent", "缺失工具"], rows)])
+
+        if include_required_tools:
+            required = data.get("required_tools") if isinstance(data.get("required_tools"), dict) else {}
+            rows = []
+            for agent_id, tools in sorted(required.items(), key=lambda item: str(item[0])):
+                tool_names = _clean_strings(tools if isinstance(tools, list) else [])
+                rows.append([agent_id, ", ".join(tool_names) or "暂无"])
+            lines.extend(["", "## 基线工具要求", _markdown_table(["Agent", "必需工具"], rows)])
+
+        lines.extend(["", "## 下一步", _markdown_bullets(data.get("next_actions"))])
+        return "\n".join(lines).strip()
+
     def match_agent_capability(
         user_goal: str,
         catalog_json: str,
@@ -9204,6 +9321,43 @@ def register_builtin_tools(
             },
             handler=format_agent_capability_contract,
             tags=("agent", "catalog", "contract", "format", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="check_agent_capability_contracts",
+            description=(
+                "Check whether config/agents.json satisfies baseline agent routing capability "
+                "contracts. Returns missing agents and missing tools. This is read-only."
+            ),
+            input_schema={"type": "object", "properties": {}},
+            handler=check_agent_capability_contracts,
+            tags=("agent", "catalog", "contract", "check", "routing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_agent_capability_contract_check",
+            description=(
+                "Format an agent_capability_contract_check JSON object into a Chinese "
+                "user-facing diagnostics report."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["check_json"],
+                "properties": {
+                    "check_json": {
+                        "type": "string",
+                        "description": "JSON string returned by check_agent_capability_contracts.",
+                    },
+                    "include_required_tools": {
+                        "type": "boolean",
+                        "description": "Whether to include the full baseline required tool matrix.",
+                    },
+                },
+            },
+            handler=format_agent_capability_contract_check,
+            tags=("agent", "catalog", "contract", "check", "format", "routing"),
         )
     )
     registry.register(
