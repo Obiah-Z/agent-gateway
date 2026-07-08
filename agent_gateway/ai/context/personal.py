@@ -113,6 +113,31 @@ class PersonalStore:
         self._write_jsonl(self._todos_path(user_scope), rows)
         return updated
 
+    def cancel_todo(
+        self,
+        todo_id: str,
+        *,
+        reason: str = "",
+        user_scope: str = "",
+    ) -> dict[str, Any] | None:
+        """取消指定待办，同时保留原始记录用于审计。"""
+
+        rows = self._read_jsonl(self._todos_path(user_scope))
+        now = self._now()
+        updated = None
+        for row in rows:
+            if str(row.get("id", "")) == todo_id:
+                row["status"] = "canceled"
+                row["canceled_at"] = now
+                if reason.strip():
+                    row["cancel_reason"] = reason.strip()
+                updated = row
+                break
+        if updated is None:
+            return None
+        self._write_jsonl(self._todos_path(user_scope), rows)
+        return updated
+
     def update_todo(
         self,
         todo_id: str,
@@ -1174,6 +1199,43 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             return f"Error: todo not found after title match: {title_query}"
         return json.dumps(row, ensure_ascii=False, indent=2)
 
+    def personal_todo_cancel_by_title(
+        title_query: str,
+        reason: str = "",
+        *,
+        user_scope: str = "",
+        __runtime_context: dict[str, Any] | None = None,
+    ) -> str:
+        query = " ".join(title_query.strip().split()).lower()
+        if not query:
+            return "Error: title_query is required"
+        scope = _scope(__runtime_context, user_scope)
+        open_todos = personal_store.list_todos(status="open", limit=100, user_scope=scope)
+        exact_matches = [
+            todo
+            for todo in open_todos
+            if str(todo.get("title", "")).strip().lower() == query
+        ]
+        partial_matches = [
+            todo
+            for todo in open_todos
+            if query in str(todo.get("title", "")).strip().lower()
+        ]
+        matches = exact_matches or partial_matches
+        if not matches:
+            return f"Error: no open todo matched title: {title_query}"
+        if len(matches) > 1:
+            titles = "；".join(str(todo.get("title", "")) for todo in matches[:5])
+            return f"Error: multiple open todos matched title: {titles}"
+        row = personal_store.cancel_todo(
+            str(matches[0].get("id", "")),
+            reason=reason,
+            user_scope=scope,
+        )
+        if row is None:
+            return f"Error: todo not found after title match: {title_query}"
+        return json.dumps(row, ensure_ascii=False, indent=2)
+
     def format_personal_todo_update(todo_json: str) -> str:
         if not todo_json.strip():
             return "Error: todo_json is required"
@@ -1205,6 +1267,38 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             "- 如果这项已完成，可以继续告诉我完成结果。",
             "",
             "> 边界：这是待办更新确认，只修改已匹配的结构化待办，不会新增待办、完成待办或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
+    def format_personal_todo_cancellation(cancellation_json: str) -> str:
+        if not cancellation_json.strip():
+            return "Error: cancellation_json is required"
+        data = json.loads(cancellation_json)
+        if not isinstance(data, dict):
+            return "Error: cancellation_json must be a JSON object"
+        if data.get("status") != "canceled":
+            return "Error: cancellation_json must be a canceled personal todo object"
+
+        title = str(data.get("title") or "未命名待办").strip()
+        details = []
+        if data.get("priority"):
+            details.append(f"优先级：{data.get('priority')}")
+        if data.get("due_at"):
+            details.append(f"原计划时间：{data.get('due_at')}")
+        reason = str(data.get("cancel_reason") or "").strip()
+        if reason:
+            details.append(f"取消原因：{reason}")
+        if data.get("canceled_at"):
+            details.append(f"取消时间：{data.get('canceled_at')}")
+
+        sections = [
+            "## 待办已取消",
+            f"- 事项：{title}",
+            "",
+            "## 取消信息",
+            _markdown_bullets(details),
+            "",
+            "> 边界：这是待办取消确认，只把已匹配的结构化待办标记为 canceled，不会删除记录或写入长期记忆。",
         ]
         return "\n".join(sections).strip()
 
@@ -2177,6 +2271,25 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
     )
     registry.register(
         RegisteredTool(
+            name="personal_todo_cancel_by_title",
+            description=(
+                "Cancel one open personal todo by matching a title fragment. "
+                "Returns an error when none or multiple open todos match."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["title_query"],
+                "properties": {
+                    "title_query": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+            handler=personal_todo_cancel_by_title,
+            tags=("personal", "todo", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
             name="format_personal_todo_update",
             description=(
                 "Format a personal_todo_update_by_title JSON object into a concise "
@@ -2193,6 +2306,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
                 },
             },
             handler=format_personal_todo_update,
+            tags=("personal", "todo", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_todo_cancellation",
+            description=(
+                "Format a personal_todo_cancel_by_title JSON object into a concise "
+                "Chinese Markdown todo cancellation confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["cancellation_json"],
+                "properties": {
+                    "cancellation_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_todo_cancel_by_title.",
+                    },
+                },
+            },
+            handler=format_personal_todo_cancellation,
             tags=("personal", "todo", "format", "user-facing"),
         )
     )

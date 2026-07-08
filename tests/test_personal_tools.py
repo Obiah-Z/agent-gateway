@@ -151,6 +151,65 @@ def test_personal_todo_update_by_title_refuses_ambiguous_matches(tmp_path: Path)
     assert {todo["priority"] for todo in store.list_todos(status="open", user_scope="user:alice")} == {"normal"}
 
 
+def test_personal_todo_cancel_by_title_cancels_unique_match(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "整理旧的面试题清单", "priority": "normal", "due_at": "today"},
+        runtime_context=context,
+    )
+
+    canceled = json.loads(
+        registry.dispatch(
+            "personal_todo_cancel_by_title",
+            {"title_query": "面试题", "reason": "已合并到新的复习计划"},
+            runtime_context=context,
+        )
+    )
+    formatted = registry.dispatch(
+        "format_personal_todo_cancellation",
+        {"cancellation_json": json.dumps(canceled, ensure_ascii=False)},
+    )
+
+    assert canceled["status"] == "canceled"
+    assert canceled["title"] == "整理旧的面试题清单"
+    assert canceled["cancel_reason"] == "已合并到新的复习计划"
+    assert store.list_todos(status="open", user_scope="user:alice") == []
+    assert store.list_todos(status="canceled", user_scope="user:alice")[0]["id"] == canceled["id"]
+    assert "## 待办已取消" in formatted
+    assert "- 取消原因：已合并到新的复习计划" in formatted
+
+
+def test_personal_todo_cancel_by_title_refuses_ambiguous_matches(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "取消 RabbitMQ 复盘"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "取消 RabbitMQ 压测整理"},
+        runtime_context=context,
+    )
+
+    result = registry.dispatch(
+        "personal_todo_cancel_by_title",
+        {"title_query": "RabbitMQ", "reason": "暂时不用"},
+        runtime_context=context,
+    )
+
+    assert result.startswith("Error: multiple open todos matched title:")
+    assert len(store.list_todos(status="open", user_scope="user:alice")) == 2
+    assert store.list_todos(status="canceled", user_scope="user:alice") == []
+
+
 def test_personal_tools_use_runtime_user_scope(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_personal_tools(registry, PersonalStore(tmp_path / "workspace"))
