@@ -92,6 +92,7 @@ class GatewayDispatcher:
                 else "",
             },
         )
+        final_route = route
         try:
             reply = await self._execute_lane_task(
                 lane_name=route.session_key,
@@ -103,6 +104,12 @@ class GatewayDispatcher:
                     correlation_id=correlation_id,
                 ),
             )
+            if reply.handoff_request is not None:
+                reply, final_route = await self._execute_handoff(
+                    inbound,
+                    source_reply=reply,
+                    correlation_id=correlation_id,
+                )
         except Exception as exc:
             self._record(
                 "agent.turn.failed",
@@ -118,7 +125,115 @@ class GatewayDispatcher:
                 error=exc,
             )
             raise
-        return DispatchResult(inbound=inbound, route=route, reply=reply)
+        return DispatchResult(inbound=inbound, route=final_route, reply=reply)
+
+    async def _execute_handoff(
+        self,
+        inbound: InboundMessage,
+        *,
+        source_reply: AgentReply,
+        correlation_id: str,
+    ):
+        """执行 Agent 请求的 one-shot 专家转交。"""
+
+        request = source_reply.handoff_request
+        if request is None:
+            route = resolve_route(self.bindings, self.agents, inbound)
+            return source_reply, route
+        target_agent_id = request.target_agent_id.strip()
+        if not target_agent_id:
+            raise ValueError("handoff target_agent_id is empty")
+        if target_agent_id == source_reply.agent_id:
+            raise ValueError("handoff target_agent_id must differ from source agent_id")
+        if self.agents.get(target_agent_id) is None:
+            raise ValueError(f"handoff target agent not found: {target_agent_id}")
+
+        target_route = resolve_route(
+            self.bindings,
+            self.agents,
+            inbound,
+            forced_agent_id=target_agent_id,
+        )
+        self._record(
+            "agent.handoff.requested",
+            status="ok",
+            component="dispatcher",
+            message=(
+                f"Agent handoff requested: {source_reply.agent_id} -> "
+                f"{target_route.agent_id}"
+            ),
+            correlation_id=correlation_id,
+            agent_id=source_reply.agent_id,
+            session_key=source_reply.session_key,
+            channel=inbound.channel,
+            account_id=inbound.account_id,
+            peer_id=inbound.peer_id,
+            metadata={
+                "source_agent_id": source_reply.agent_id,
+                "target_agent_id": target_route.agent_id,
+                "target_session_key": target_route.session_key,
+                "scope": request.scope,
+                "reason": request.reason,
+                "user_goal": request.user_goal,
+            },
+        )
+        try:
+            target_reply = await self._execute_lane_task(
+                lane_name=target_route.session_key,
+                coroutine_factory=lambda: self.runner.run_turn(
+                    target_route.agent_id,
+                    target_route.session_key,
+                    request.handoff_prompt,
+                    channel=inbound.channel,
+                    correlation_id=correlation_id,
+                ),
+            )
+        except Exception as exc:
+            self._record(
+                "agent.handoff.failed",
+                status="error",
+                component="dispatcher",
+                message=(
+                    f"Agent handoff failed: {source_reply.agent_id} -> "
+                    f"{target_route.agent_id}"
+                ),
+                correlation_id=correlation_id,
+                agent_id=target_route.agent_id,
+                session_key=target_route.session_key,
+                channel=inbound.channel,
+                account_id=inbound.account_id,
+                peer_id=inbound.peer_id,
+                error=exc,
+                metadata={
+                    "source_agent_id": source_reply.agent_id,
+                    "target_agent_id": target_route.agent_id,
+                    "scope": request.scope,
+                },
+            )
+            raise
+        self._record(
+            "agent.handoff.completed",
+            status="ok",
+            component="dispatcher",
+            message=(
+                f"Agent handoff completed: {source_reply.agent_id} -> "
+                f"{target_reply.agent_id}"
+            ),
+            correlation_id=correlation_id,
+            agent_id=target_reply.agent_id,
+            session_key=target_reply.session_key,
+            channel=inbound.channel,
+            account_id=inbound.account_id,
+            peer_id=inbound.peer_id,
+            metadata={
+                "source_agent_id": source_reply.agent_id,
+                "source_session_key": source_reply.session_key,
+                "target_agent_id": target_reply.agent_id,
+                "scope": request.scope,
+                "reason": request.reason,
+            },
+        )
+        return target_reply, target_route
 
     async def dispatch_background(
         self,

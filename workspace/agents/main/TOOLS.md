@@ -44,7 +44,7 @@
 - 如果用户问“这个任务该交给谁”，在读取目录后调用 `match_agent_capability`，再调用 `format_agent_capability_match` 生成中文推荐说明。
 - 如果用户问“这个任务会不会写入数据 / 是否需要确认 / 为什么不能直接执行 / 是否需要多 Agent 协作”，调用 `explain_agent_capability_contract`，再调用 `format_agent_capability_contract` 生成中文边界说明。
 - 如果用户问“当前 Agent 配置是否完整 / 契约是否通过 / 是否缺工具或缺 Agent”，调用 `check_agent_capability_contracts`，再调用 `format_agent_capability_contract_check` 生成中文检查结果。
-- 如果用户确认采用推荐 Agent，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议，再调用 `format_agent_handoff_package` 输出中文说明。
+- 如果用户确认采用推荐 Agent，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议；如果用户明确要求交给目标 Agent 处理，继续调用 `request_agent_handoff` 执行一次性真实转交。只解释路线时再调用 `format_agent_handoff_package`。
 - 如果用户询问“最近生成了哪些报告 / 报告路径在哪 / 有哪些可下载产物 / 附件路径是什么”，调用 `list_generated_reports`，再调用 `format_generated_report_list` 输出中文报告产物索引。
 - 不要凭记忆列 Agent 能力，避免和配置漂移。
 
@@ -158,3 +158,4 @@
 - `memory_write`：只保存长期稳定事实或用户明确要求记住的信息。
 - `web_search` / `fetch_url`：用于需要联网核验的事实，不要替代 research 的深度调研职责。
 - `read_file` / `list_directory`：只读取 workspace 内用户明确要求查看的文件。
+- `request_agent_handoff`：只在用户明确要求“交给/切换到/让某 Agent 处理”时调用；默认 one-shot，不修改长期绑定。

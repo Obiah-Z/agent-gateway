@@ -66,6 +66,14 @@ def _build_control(tmp_path: Path) -> GatewayControlPlane:
                         "model": "",
                         "dm_scope": "per-peer",
                         "extra_system": "",
+                    },
+                    {
+                        "id": "feishu-entry",
+                        "name": "FeishuEntry",
+                        "personality": "",
+                        "model": "",
+                        "dm_scope": "per-account-channel-peer",
+                        "extra_system": "",
                     }
                 ]
             }
@@ -90,6 +98,7 @@ def _build_control(tmp_path: Path) -> GatewayControlPlane:
     )
     agents = AgentManager()
     agents.register(AgentConfig(id="main", name="Main"))
+    agents.register(AgentConfig(id="feishu-entry", name="FeishuEntry"))
     bindings = BindingTable()
     control = GatewayControlPlane(
         settings=settings,
@@ -157,7 +166,7 @@ def test_feishu_onboarding_store_falls_back_to_local_when_postgres_fails(tmp_pat
     assert local_payload["sessions"][0]["session_id"] == session.session_id
 
 
-def test_feishu_onboarding_consumes_binding_code_and_creates_agent(tmp_path: Path) -> None:
+def test_feishu_onboarding_consumes_binding_code_and_binds_entry_agent(tmp_path: Path) -> None:
     control = _build_control(tmp_path)
     dispatcher = FakeDispatcher()
     service = FeishuOnboardingService(
@@ -185,8 +194,12 @@ def test_feishu_onboarding_consumes_binding_code_and_creates_agent(tmp_path: Pat
     assert status is not None
     assert status["status"] == "bound"
     assert status["bound_peer_id"] == "ou_user"
-    assert control.agents.get(status["agent_id"]) is not None
-    assert any(binding.match_value == "ou_user" for binding in control.bindings.list_all())
+    assert status["agent_id"] == "feishu-entry"
+    assert control.agents.get("feishu-user-ou-user") is None
+    assert any(
+        binding.agent_id == "feishu-entry" and binding.match_value == "ou_user"
+        for binding in control.bindings.list_all()
+    )
     assert dispatcher.delivered[0][0] == "ou_user"
     assert "接入成功" in dispatcher.delivered[0][1]
 
@@ -215,7 +228,11 @@ def test_feishu_onboarding_auto_binds_first_p2p_message(tmp_path: Path) -> None:
     )
 
     assert consumed is True
-    assert any(binding.match_value == "ou_user" for binding in control.bindings.list_all())
+    assert control.agents.get("feishu-user-ou-user") is None
+    assert any(
+        binding.agent_id == "feishu-entry" and binding.match_value == "ou_user"
+        for binding in control.bindings.list_all()
+    )
     assert dispatcher.delivered[0][0] == "ou_user"
     assert "接入成功" in dispatcher.delivered[0][1]
 
@@ -261,7 +278,11 @@ def test_feishu_onboarding_group_binding_uses_chat_peer(tmp_path: Path) -> None:
     )
 
     assert consumed is True
-    assert any(binding.match_value == "oc_group" for binding in control.bindings.list_all())
+    assert control.agents.get("feishu-group-oc-group") is None
+    assert any(
+        binding.agent_id == "feishu-entry" and binding.match_value == "oc_group"
+        for binding in control.bindings.list_all()
+    )
     assert dispatcher.delivered[0][0] == "oc_group"
 
 

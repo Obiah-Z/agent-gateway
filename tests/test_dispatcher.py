@@ -3,7 +3,12 @@ import asyncio
 from agent_gateway.runtime.domain.agents import AgentManager
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.state.queue import DeliveryQueue
-from agent_gateway.runtime.domain.models import AgentConfig, Binding, InboundMessage
+from agent_gateway.runtime.domain.models import (
+    AgentConfig,
+    AgentHandoffRequest,
+    Binding,
+    InboundMessage,
+)
 from agent_gateway.runtime.domain.router import BindingTable
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 from agent_gateway.runtime.execution.lanes import CommandQueue
@@ -11,6 +16,9 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 
 
 class FakeRunner:
+    def __init__(self) -> None:
+        self.calls = []
+
     async def run_turn(
         self,
         agent_id: str,
@@ -20,6 +28,7 @@ class FakeRunner:
         channel: str,
         correlation_id: str = "",
     ):
+        self.calls.append((agent_id, session_key, user_text))
         self.correlation_id = correlation_id
         from agent_gateway.runtime.domain.models import AgentReply
 
@@ -27,6 +36,44 @@ class FakeRunner:
             agent_id=agent_id,
             session_key=session_key,
             text=f"echo:{user_text}",
+            stop_reason="end_turn",
+            tool_calls=[],
+        )
+
+
+class HandoffRunner(FakeRunner):
+    async def run_turn(
+        self,
+        agent_id: str,
+        session_key: str,
+        user_text: str,
+        *,
+        channel: str,
+        correlation_id: str = "",
+    ):
+        self.calls.append((agent_id, session_key, user_text))
+        from agent_gateway.runtime.domain.models import AgentReply
+
+        if agent_id == "personal-secretary-zhanghaibo":
+            return AgentReply(
+                agent_id=agent_id,
+                session_key=session_key,
+                text="正在转交饮食助手处理。",
+                stop_reason="end_turn",
+                tool_calls=["request_agent_handoff"],
+                handoff_request=AgentHandoffRequest(
+                    target_agent_id="diet-assistant-zhanghaibo",
+                    handoff_prompt="请记录早餐：鸡蛋和牛奶。",
+                    reason="饮食记录应由饮食助手处理。",
+                    scope="one-shot",
+                    source_agent_id=agent_id,
+                    user_goal="记录早餐",
+                ),
+            )
+        return AgentReply(
+            agent_id=agent_id,
+            session_key=session_key,
+            text=f"diet-result:{user_text}",
             stop_reason="end_turn",
             tool_calls=[],
         )
@@ -61,6 +108,57 @@ def test_dispatcher_routes_executes_and_enqueues_reply(tmp_path) -> None:
     assert queued[0].text == "echo:hello"
     assert queued[0].metadata["account_id"] == "cli-local"
     assert queued[0].metadata["session_key"] == result.reply.session_key
+
+
+def test_dispatcher_executes_one_shot_agent_handoff(tmp_path) -> None:
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            dm_scope="per-account-channel-peer",
+        )
+    )
+    agents.register(
+        AgentConfig(
+            id="diet-assistant-zhanghaibo",
+            name="Diet",
+            dm_scope="per-account-channel-peer",
+        )
+    )
+    bindings = BindingTable()
+    bindings.add(
+        Binding(
+            agent_id="personal-secretary-zhanghaibo",
+            tier=1,
+            match_key="peer_id",
+            match_value="zhanghaibo",
+            priority=100,
+        )
+    )
+    queue = DeliveryQueue(tmp_path / "delivery")
+    runner = HandoffRunner()
+    dispatcher = GatewayDispatcher(agents, bindings, runner, CommandQueue(), queue)
+    inbound = InboundMessage(
+        text="帮我切换到饮食 Agent，记录早餐",
+        sender_id="zhanghaibo",
+        channel="wework",
+        account_id="wework-main",
+        peer_id="zhanghaibo",
+    )
+
+    result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+
+    assert result.route.agent_id == "diet-assistant-zhanghaibo"
+    assert result.reply.agent_id == "diet-assistant-zhanghaibo"
+    assert result.reply.text == "diet-result:请记录早餐：鸡蛋和牛奶。"
+    assert [call[0] for call in runner.calls] == [
+        "personal-secretary-zhanghaibo",
+        "diet-assistant-zhanghaibo",
+    ]
+    assert runner.calls[1][1].startswith(
+        "agent:diet-assistant-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+    )
 
 
 def test_dispatcher_propagates_correlation_id_to_events_and_delivery(tmp_path) -> None:

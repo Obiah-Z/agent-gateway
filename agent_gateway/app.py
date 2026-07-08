@@ -399,6 +399,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
             use_lane_lock=session_scheduler is None,
             feishu_progress_notice_enabled=settings.feishu_progress_notice_enabled,
             feishu_progress_notice_text=settings.feishu_progress_notice_text,
+            refresh_bindings=config_loader.reload_bindings,
         ),
     )
     delivery_runtime = DeliveryRuntime(

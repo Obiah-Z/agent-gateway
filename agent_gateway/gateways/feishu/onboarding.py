@@ -1,6 +1,6 @@
 """飞书低门槛接入流程。
 
-该模块负责扫码/绑定码会话、首条私聊自动绑定、自动创建 Agent 和写入绑定规则。
+该模块负责扫码/绑定码会话、首条私聊自动绑定，以及把飞书 peer 接入统一入口 Agent。
 它不直接处理飞书 HTTP 或长连接细节，只消费已经标准化的 InboundMessage / event。
 """
 
@@ -14,13 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_gateway.runtime.domain.ids import normalize_agent_id
 from agent_gateway.runtime.domain.models import Binding, InboundMessage, ProactiveTarget
 from agent_gateway.runtime.execution.control_plane import GatewayControlPlane
 from agent_gateway.runtime.execution.dispatcher import GatewayDispatcher
 
 
 BINDING_CODE_PATTERN = re.compile(r"\bGATEWAY-[A-Z0-9]{4,10}\b", re.IGNORECASE)
+FEISHU_ENTRY_AGENT_ID = "feishu-entry"
 
 
 @dataclass(slots=True)
@@ -385,40 +385,18 @@ class FeishuOnboardingService:
         return True
 
     async def _bind_session(self, session: FeishuOnboardingSession, inbound: InboundMessage) -> None:
-        """把会话绑定到飞书 peer，并创建对应 Agent / Binding。"""
+        """把飞书 peer 绑定到统一入口 Agent，不再创建 per-user Agent。"""
 
         peer_id = inbound.peer_id
         if not peer_id:
             raise ValueError("飞书消息缺少 peer_id，无法绑定")
         if session.account_id and inbound.account_id and session.account_id != inbound.account_id:
             raise ValueError(f"请使用账号 {session.account_id} 对应的机器人完成绑定")
-        agent_id = self._build_agent_id(session, inbound)
-        agent_name = session.agent_name or self._build_agent_name(session, inbound)
-        prompt_dir = f"agents/{agent_id}"
-        self.control_plane.set_agent(
-            agent_id=agent_id,
-            name=agent_name,
-            personality="亲和、简洁、耐心，适合飞书日常对话",
-            dm_scope="per-account-channel-peer",
-            extra_system=(
-                "你是通过飞书扫码接入 Gateway 的智能助手。"
-                "优先用简洁中文回答，必要时再使用工具。"
-            ),
-            tool_policy_mode="allowlist",
-            tool_names=[
-                "get_current_time",
-                "memory_search",
-                "web_search",
-                "fetch_url",
-            ],
-            memory_enabled=True,
-            memory_auto_recall=False,
-            memory_top_k=2,
-            prompt_dir=prompt_dir,
-            use_global_prompt_files=True,
-            skills_enabled=True,
-        )
-        self._write_prompt_files(agent_id, agent_name, session, inbound)
+        agent_id = FEISHU_ENTRY_AGENT_ID
+        agent = self.control_plane.agents.get(agent_id)
+        if agent is None:
+            raise ValueError(f"飞书入口 Agent 未配置：{agent_id}")
+        agent_name = agent.name or self._build_agent_name(session, inbound)
         if not self._has_peer_binding(peer_id):
             self.control_plane.add_binding(
                 Binding(
@@ -440,11 +418,11 @@ class FeishuOnboardingService:
         self.store.update(session)
         await self._reply(
             inbound,
-            f"接入成功：当前{'群聊' if inbound.is_group else '私聊'}已创建 {agent_name}。你可以直接开始对话。",
+            f"接入成功：当前{'群聊' if inbound.is_group else '私聊'}已接入 {agent_name}。你可以直接开始对话。",
         )
 
     def _should_auto_bind_first_message(self, inbound: InboundMessage) -> bool:
-        """判断是否允许用用户第一条私聊消息直接创建个人 Agent。"""
+        """判断是否允许用用户第一条私聊消息直接接入飞书入口 Agent。"""
 
         if not self.auto_bind_first_message:
             return False
@@ -497,35 +475,6 @@ class FeishuOnboardingService:
             metadata=metadata,
         )
 
-    def _write_prompt_files(
-        self,
-        agent_id: str,
-        agent_name: str,
-        session: FeishuOnboardingSession,
-        inbound: InboundMessage,
-    ) -> None:
-        """为新建 Agent 写入局部 prompt 文件。"""
-
-        root = self.control_plane.settings.workspace_root / "agents" / agent_id
-        root.mkdir(parents=True, exist_ok=True)
-        identity = root / "IDENTITY.md"
-        soul = root / "SOUL.md"
-        if not identity.exists():
-            identity.write_text(
-                f"# {agent_name}\n\n"
-                "你是接入飞书会话的 Gateway 智能助手，负责在当前会话中提供清晰、可靠的帮助。\n",
-                encoding="utf-8",
-            )
-        if not soul.exists():
-            target = "群聊" if inbound.is_group else "个人私聊"
-            soul.write_text(
-                f"# 行为准则\n\n"
-                f"- 当前绑定目标：{target}。\n"
-                "- 回答保持简洁，优先给出可执行建议。\n"
-                "- 不确定的信息应说明不确定性；需要实时信息时再使用检索工具。\n",
-                encoding="utf-8",
-            )
-
     def _session_response(self, session: FeishuOnboardingSession) -> dict[str, Any]:
         """转换为 dashboard/onboarding 页面可直接消费的数据。"""
 
@@ -547,16 +496,6 @@ class FeishuOnboardingService:
 
         match = BINDING_CODE_PATTERN.search(text or "")
         return match.group(0).upper() if match else ""
-
-    @staticmethod
-    def _build_agent_id(session: FeishuOnboardingSession, inbound: InboundMessage) -> str:
-        """根据个人/群聊场景生成稳定 Agent ID。"""
-
-        if session.mode == "group" or inbound.is_group:
-            raw = f"feishu-group-{inbound.peer_id}"
-        else:
-            raw = f"feishu-user-{inbound.sender_id}"
-        return normalize_agent_id(raw.replace("_", "-").replace(":", "-"))
 
     @staticmethod
     def _build_agent_name(session: FeishuOnboardingSession, inbound: InboundMessage) -> str:

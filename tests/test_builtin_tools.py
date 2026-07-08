@@ -3858,6 +3858,29 @@ def test_format_agent_handoff_package_outputs_user_facing_summary(
     assert "不要声称目标 Agent 已经自动执行" in result
 
 
+def test_request_agent_handoff_outputs_runtime_request(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "request_agent_handoff",
+            {
+                "target_agent_id": "diet-assistant-zhanghaibo",
+                "handoff_prompt": "请记录早餐：鸡蛋和牛奶。",
+                "reason": "饮食记录应由饮食助手处理。",
+                "user_goal": "记录早餐",
+            },
+        )
+    )
+
+    assert data["type"] == "agent_handoff_request"
+    assert data["target_agent_id"] == "diet-assistant-zhanghaibo"
+    assert data["handoff_prompt"] == "请记录早餐：鸡蛋和牛奶。"
+    assert data["scope"] == "one-shot"
+    assert "不修改长期绑定" in data["boundary"]
+
+
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)

@@ -674,6 +674,45 @@ def test_task_worker_executes_agent_inbound_task(tmp_path: Path) -> None:
     ]
 
 
+def test_agent_inbound_task_refreshes_bindings_before_dispatch(tmp_path: Path) -> None:
+    queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
+    queue.enqueue(
+        task_type="agent_inbound",
+        source="feishu",
+        payload={
+            "text": "hello",
+            "sender_id": "user-1",
+            "channel": "feishu",
+            "account_id": "bot-a",
+            "peer_id": "user-1",
+        },
+    )
+    calls: list[str] = []
+    dispatcher = FakeInboundDispatcher()
+    original_dispatch = dispatcher.dispatch_inbound
+
+    async def dispatch_after_refresh(inbound: InboundMessage, *, forced_agent_id: str = ""):
+        assert calls == ["refresh"]
+        return await original_dispatch(inbound, forced_agent_id=forced_agent_id)
+
+    dispatcher.dispatch_inbound = dispatch_after_refresh  # type: ignore[method-assign]
+    worker = TaskWorkerRuntime(queue)
+    worker.register_handler(
+        "agent_inbound",
+        AgentInboundTaskHandler(
+            dispatcher,
+            ChannelManager(),
+            refresh_bindings=lambda: calls.append("refresh"),
+        ),
+    )
+
+    handled = asyncio.run(worker.run_once())
+
+    assert handled is True
+    assert calls == ["refresh"]
+    assert dispatcher.delivered == 1
+
+
 def test_agent_inbound_task_can_disable_feishu_progress_notice(tmp_path: Path) -> None:
     queue = LocalTaskQueue(LocalTaskStore(tmp_path / "tasks"))
     queue.enqueue(

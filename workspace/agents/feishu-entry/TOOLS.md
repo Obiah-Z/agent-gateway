@@ -34,7 +34,7 @@
 
 用户询问当前 Agent 配置是否完整、契约是否通过、是否缺工具或缺 Agent 时，调用 `check_agent_capability_contracts`，再调用 `format_agent_capability_contract_check` 输出中文检查结果。
 
-用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议，再调用 `format_agent_handoff_package` 输出中文说明。该工具链不执行目标 Agent。
+用户确认采用推荐 Agent 或要求继续交接时，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议。用户明确要求“交给/切换到/让某 Agent 处理”时，再调用 `request_agent_handoff` 执行一次性真实转交；只解释路线时才调用 `format_agent_handoff_package` 输出中文说明。
 
 用户询问最近生成了哪些报告、报告路径、可下载产物或附件路径时，调用 `list_generated_reports`，再调用 `format_generated_report_list` 输出中文报告产物索引。
 

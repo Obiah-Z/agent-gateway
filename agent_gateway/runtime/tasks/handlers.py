@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.infra.redis_client import RedisClient
@@ -67,6 +68,7 @@ class AgentInboundTaskHandler:
         use_lane_lock: bool = True,
         feishu_progress_notice_enabled: bool = True,
         feishu_progress_notice_text: str = "已收到，正在处理。本轮结果生成后会继续推送。",
+        refresh_bindings: Callable[[], object] | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.channels = channels
@@ -86,6 +88,7 @@ class AgentInboundTaskHandler:
         self.use_lane_lock = use_lane_lock
         self.feishu_progress_notice_enabled = feishu_progress_notice_enabled
         self.feishu_progress_notice_text = feishu_progress_notice_text.strip()
+        self.refresh_bindings = refresh_bindings
 
     async def __call__(self, task: TaskInstance) -> str:
         """按原 dispatcher 链路执行入站消息并投递最终回复。"""
@@ -117,6 +120,7 @@ class AgentInboundTaskHandler:
             )
         try:
             inbound = inbound_from_task(task)
+            self._refresh_bindings_before_dispatch()
             await self._deliver_progress_notice(inbound)
             result = await self.dispatcher.dispatch_inbound(inbound)
             delivery_id = await self.dispatcher.deliver_reply(self.channels, result)
@@ -135,6 +139,17 @@ class AgentInboundTaskHandler:
                     self.lane_coordinator.release(ownership_ref.get("current", ownership))
                 except Exception:
                     pass
+
+    def _refresh_bindings_before_dispatch(self) -> None:
+        """刷新 worker 内存里的路由绑定，避免后台任务使用启动时旧快照。"""
+
+        if self.refresh_bindings is None:
+            return
+        try:
+            self.refresh_bindings()
+        except Exception:
+            # 路由刷新失败不应丢弃已领取任务；后续会按当前内存配置执行并保留事件日志。
+            return
 
     def is_session_locked(self, task: TaskInstance) -> bool:
         """检查任务 session 当前是否已被其他 worker 持锁。"""

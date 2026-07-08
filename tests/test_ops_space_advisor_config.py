@@ -12,12 +12,19 @@ def test_ops_agent_can_run_read_only_space_advisor() -> None:
     assert ops["prompt_policy"]["prompt_dir"] == "agents/ops"
     assert ops["memory_policy"]["enabled"] is False
     assert ops["tool_policy"]["mode"] == "allowlist"
-    assert set(ops["tool_policy"]["tool_names"]) == {
+    tools = set(ops["tool_policy"]["tool_names"])
+    assert tools == {
         "bash",
         "get_current_time",
         "list_directory",
+        "ops_readonly_health",
+        "ops_runtime_diagnostics",
+        "ops_troubleshooting_plan",
         "read_file",
+        "summarize_ops_health",
     }
+    assert "write_file" not in tools
+    assert "memory_write" not in tools
 
 
 def test_space_advisor_cron_targets_ops_agent() -> None:

@@ -1,15 +1,6 @@
 {
-  "_comment": "消息路由表：平台账号先进入平台通用入口；用户专属 Agent 通过更明确的 peer 规则或后续 handoff/协作机制接入。数字越小越精确；同一 tier 下 priority 越大越优先。",
-  "_tier_notes": {
-    "1": "peer_id：指定某个用户或某个群，最精确。仅用于明确用户专属入口，不建议把所有业务专属 Agent 都直接绑在 peer 上。",
-    "2": "guild_id：指定群组空间，目前飞书通道基本不用。",
-    "3": "account_id：指定某个平台账号，例如 feishu-secondary、wework-main。",
-    "4": "channel：指定整个通道，例如 feishu。",
-    "5": "default：兜底规则，所有未命中更精确规则的消息都会走这里。"
-  },
   "bindings": [
     {
-      "_comment": "企业微信张海波个人秘书入口。饮食助手不再直接绑定整个 peer，避免所有消息都进入饮食 Agent；饮食场景后续由个人秘书 handoff/委派。",
       "agent_id": "personal-secretary-zhanghaibo",
       "tier": 1,
       "match_key": "peer_id",
@@ -17,7 +8,13 @@
       "priority": 160
     },
     {
-      "_comment": "飞书机器人账号默认入口：来自 account_id=feishu-secondary 的消息进入飞书通用入口。",
+      "agent_id": "feishu-entry",
+      "tier": 1,
+      "match_key": "peer_id",
+      "match_value": "ou_7d7ecc3911714f2cf6905b0d7215ca5e",
+      "priority": 120
+    },
+    {
       "agent_id": "feishu-entry",
       "tier": 3,
       "match_key": "account_id",
@@ -25,7 +22,6 @@
       "priority": 50
     },
     {
-      "_comment": "企业微信账号默认入口：未命中个人专属规则的 wework-main 消息进入企业微信通用入口。",
       "agent_id": "wework-entry",
       "tier": 3,
       "match_key": "account_id",
@@ -33,7 +29,6 @@
       "priority": 50
     },
     {
-      "_comment": "飞书长连接本地快速接入：启用 feishu-long-local 后，消息默认进入飞书通用入口。",
       "agent_id": "feishu-entry",
       "tier": 3,
       "match_key": "account_id",
@@ -41,7 +36,6 @@
       "priority": 40
     },
     {
-      "_comment": "默认兜底路由：除非前面的更精确规则命中，否则所有消息都交给 main Agent。",
       "agent_id": "main",
       "tier": 5,
       "match_key": "default",

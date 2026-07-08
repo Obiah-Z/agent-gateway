@@ -40,7 +40,8 @@
           "list_generated_reports",
           "format_generated_report_list",
           "compose_agent_handoff_package",
-          "format_agent_handoff_package"
+          "format_agent_handoff_package",
+          "request_agent_handoff"
         ]
       },
       "memory_policy": {
@@ -126,7 +127,8 @@
           "list_generated_reports",
           "format_generated_report_list",
           "compose_agent_handoff_package",
-          "format_agent_handoff_package"
+          "format_agent_handoff_package",
+          "request_agent_handoff"
         ]
       },
       "memory_policy": {
@@ -178,7 +180,8 @@
           "list_generated_reports",
           "format_generated_report_list",
           "compose_agent_handoff_package",
-          "format_agent_handoff_package"
+          "format_agent_handoff_package",
+          "request_agent_handoff"
         ]
       },
       "memory_policy": {
@@ -249,7 +252,8 @@
           "memory_search",
           "format_memory_search",
           "web_search",
-          "fetch_url"
+          "fetch_url",
+          "request_agent_handoff"
         ]
       },
       "memory_policy": {

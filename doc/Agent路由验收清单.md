@@ -24,6 +24,30 @@ agent-gateway doctor
 
 通过标准：默认样例全部 `PASS`，脚本退出码为 `0`。单条样例需要同时满足三个条件：入口意图正确、推荐 Agent 正确、目标 Agent 的 allowlist 包含该场景声明的关键工具。脚本还会输出风险契约，标明该场景是只读、写入、需要确认，还是需要多 Agent 协作。
 
+## 专家 Handoff 验收
+
+入口路由和专家 handoff 是两层能力：路由验收证明“该交给谁”的判断正确，专家 handoff 证明“用户明确要求交给目标 Agent 时，运行时真的执行目标 Agent”。当前实现支持 one-shot handoff，不修改长期绑定，不改变用户后续消息默认归属。
+
+典型路径：
+
+```text
+personal-secretary-zhanghaibo
+  -> request_agent_handoff(target_agent_id=diet-assistant-zhanghaibo)
+  -> dispatcher 验证目标 Agent
+  -> forced_agent_id 执行 diet-assistant-zhanghaibo
+  -> 本轮最终回复来自 diet-assistant-zhanghaibo
+```
+
+针对性测试：
+
+```bash
+pytest tests/test_dispatcher.py::test_dispatcher_executes_one_shot_agent_handoff \
+  tests/test_builtin_tools.py::test_request_agent_handoff_outputs_runtime_request \
+  tests/test_diet_agent_config.py::test_platform_entry_agents_have_delegation_tool_only_at_entry_layer -q
+```
+
+通过标准：`DispatchResult.route.agent_id` 和最终 `reply.agent_id` 都是目标专家 Agent；源 Agent 只负责发起 handoff 请求，最终投递内容来自目标 Agent。
+
 ## 当前覆盖场景
 
 | 场景 | 期望入口判断 | 期望 Agent | 是否多 Agent 协作 | 风险契约 | 关键工具门禁 |

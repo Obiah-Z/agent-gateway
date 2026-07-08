@@ -13,6 +13,7 @@ ConversationMessage = dict[str, Any]
 
 __all__ = [
     "AgentConfig",
+    "AgentHandoffRequest",
     "AgentReply",
     "Binding",
     "ConversationMessage",
@@ -176,6 +177,22 @@ class AgentConfig:
 
 
 @dataclass(slots=True)
+class AgentHandoffRequest:
+    """Agent 主动请求把当前任务交给另一个 Agent 执行。
+
+    这是运行时受控 handoff 指令，不等同于修改绑定关系。dispatcher 会验证目标
+    Agent 是否存在，并以 one-shot forced_agent_id 的方式执行目标 Agent。
+    """
+
+    target_agent_id: str
+    handoff_prompt: str
+    reason: str = ""
+    scope: str = "one-shot"
+    source_agent_id: str = ""
+    user_goal: str = ""
+
+
+@dataclass(slots=True)
 class AgentReply:
     """Agent 单轮执行后的标准回复。"""
 
@@ -184,6 +201,7 @@ class AgentReply:
     text: str
     stop_reason: str
     tool_calls: list[str] = field(default_factory=list)
+    handoff_request: AgentHandoffRequest | None = None
 
 
 @dataclass(slots=True)

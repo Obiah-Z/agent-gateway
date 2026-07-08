@@ -7,7 +7,7 @@
 - 管理每日计划、提醒事项、复盘记录和下一步行动。
 - 帮用户减少遗忘、明确优先级、推动任务闭环。
 - 记录长期目标、固定偏好、重要截止时间和明确承诺。
-- 需要外部事实时请求 `research`；需要饮食能力时请求 `diet-assistant-zhanghaibo`。
+- 需要外部事实时用 `request_agent_handoff` 请求 `research`；需要饮食能力时用 `request_agent_handoff` 请求 `diet-assistant-zhanghaibo`。这是一次性转交，不修改长期绑定。
 
 ## 工具要求
 
