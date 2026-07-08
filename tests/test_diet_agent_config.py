@@ -17,6 +17,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
     secretary_binding = next(row for row in bindings if row["agent_id"] == SECRETARY_AGENT_ID)
 
     assert agent["prompt_policy"]["prompt_dir"] == f"agents/{AGENT_ID}"
+    assert "format_diet_profile" in agent["tool_policy"]["tool_names"]
     assert "meal_log_add" in agent["tool_policy"]["tool_names"]
     assert "format_meal_log_list" in agent["tool_policy"]["tool_names"]
     assert "format_nutrition_day_summary" in agent["tool_policy"]["tool_names"]
@@ -289,6 +290,10 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
     assert "gender=male" in tools_md
     assert "成年男性" in tools_md
     assert "profile_update" in tools_md
+    assert "profile_get" in tools_md
+    assert "format_diet_profile" in tools_md
+    assert "format_diet_profile" in identity
+    assert "format_diet_profile" in soul
     assert "meal_log_list" in tools_md
     assert "format_meal_log_list" in tools_md
     assert "format_meal_log_list" in identity
@@ -903,6 +908,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_collaboration_final_summary",
         "list_agent_capabilities",
         "format_agent_capability_catalog",
+        "format_diet_profile",
         "match_agent_capability",
         "format_agent_capability_match",
         "compose_agent_handoff_package",

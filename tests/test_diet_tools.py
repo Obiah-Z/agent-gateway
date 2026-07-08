@@ -82,6 +82,43 @@ def test_diet_tools_use_runtime_context_scope(tmp_path: Path) -> None:
     assert plan["plan"]["meals"]["breakfast"]
 
 
+def test_format_diet_profile_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    registry.dispatch(
+        "profile_update",
+        {
+            "display_name": "张海波",
+            "gender": "male",
+            "height_cm": 178,
+            "current_weight_kg": 82,
+            "target_weight_kg": 75,
+            "diet_preferences": ["中餐", "少油"],
+            "allergies": ["无"],
+        },
+        runtime_context=context,
+    )
+    profile_json = registry.dispatch("profile_get", {}, runtime_context=context)
+
+    formatted = registry.dispatch("format_diet_profile", {"profile_json": profile_json})
+
+    assert "## 饮食档案" in formatted
+    assert "- 昵称：张海波" in formatted
+    assert "- 性别：male" in formatted
+    assert "- 身高：178" in formatted
+    assert "- 当前体重：82" in formatted
+    assert "- 目标体重：75" in formatted
+    assert "## 偏好与限制" in formatted
+    assert "- 饮食偏好：中餐、少油" in formatted
+    assert "## 仍需补充" in formatted
+    assert "- 出生年份" in formatted
+    assert "- 活动水平" in formatted
+    assert "不会自动修改档案、餐食、体重或长期记忆" in formatted
+
+
 def test_format_nutrition_day_summary_outputs_user_facing_summary(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()

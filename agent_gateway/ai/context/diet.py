@@ -1454,6 +1454,82 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             )
         return _json({"status": "ok", "profile": profile})
 
+    def format_diet_profile(profile_json: str) -> str:
+        if not profile_json.strip():
+            return "Error: profile_json is required"
+        data = json.loads(profile_json)
+        if not isinstance(data, dict):
+            return "Error: profile_json must be a JSON object"
+
+        if data.get("status") == "ok" and isinstance(data.get("profile"), dict):
+            profile = data["profile"]
+            status = "ok"
+        elif "profile" not in data and any(
+            key in data
+            for key in (
+                "height_cm",
+                "current_weight_kg",
+                "target_weight_kg",
+                "activity_level",
+            )
+        ):
+            profile = data
+            status = "ok"
+        else:
+            profile = {}
+            status = str(data.get("status") or "missing")
+
+        required_fields = [
+            ("gender", "性别"),
+            ("birth_year", "出生年份"),
+            ("height_cm", "身高"),
+            ("current_weight_kg", "当前体重"),
+            ("target_weight_kg", "目标体重"),
+            ("activity_level", "活动水平"),
+        ]
+        missing_fields = [
+            label for key, label in required_fields if not profile.get(key)
+        ]
+        if status != "ok" and isinstance(data.get("missing_fields"), list):
+            labels_by_key = dict(required_fields)
+            missing_fields = [
+                labels_by_key.get(str(key), str(key)) for key in data["missing_fields"]
+            ]
+
+        def value_or_missing(key: str, suffix: str = "") -> str:
+            value = profile.get(key)
+            if value in (None, "", []):
+                return "未填写"
+            return f"{value}{suffix}"
+
+        def list_or_none(key: str) -> str:
+            values = _clean_strings(_as_list(profile.get(key)))
+            return "、".join(values) if values else "暂无"
+
+        display_name = value_or_missing("display_name")
+        lines = [
+            "## 饮食档案",
+            f"- 昵称：{display_name}",
+            f"- 性别：{value_or_missing('gender')}",
+            f"- 出生年份：{value_or_missing('birth_year')}",
+            f"- 身高：{value_or_missing('height_cm', ' cm')}",
+            f"- 当前体重：{value_or_missing('current_weight_kg', ' kg')}",
+            f"- 目标体重：{value_or_missing('target_weight_kg', ' kg')}",
+            f"- 活动水平：{value_or_missing('activity_level')}",
+            f"- 时区：{value_or_missing('timezone')}",
+            "",
+            "## 偏好与限制",
+            f"- 饮食偏好：{list_or_none('diet_preferences')}",
+            f"- 过敏/忌口：{list_or_none('allergies')}",
+            f"- 医疗备注：{value_or_missing('medical_notes')}",
+            "",
+            "## 仍需补充",
+            _markdown_bullets(missing_fields),
+            "",
+            "> 边界：这是饮食档案查询结果，只读取已保存档案，不会自动修改档案、餐食、体重或长期记忆。",
+        ]
+        return "\n".join(lines).strip()
+
     def profile_update(
         *,
         display_name: str | None = None,
@@ -2344,6 +2420,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             input_schema={"type": "object", "properties": {"user_scope": {"type": "string"}}},
             handler=profile_get,
             tags=("diet", "profile", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_profile",
+            description=(
+                "Format a profile_get JSON object into a concise Chinese Markdown "
+                "diet profile summary for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["profile_json"],
+                "properties": {
+                    "profile_json": {
+                        "type": "string",
+                        "description": "JSON string returned by profile_get.",
+                    },
+                },
+            },
+            handler=format_diet_profile,
+            tags=("diet", "profile", "format", "user-facing"),
         )
     )
     registry.register(
