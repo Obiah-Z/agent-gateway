@@ -434,10 +434,8 @@ workspace/reports/capacity-baseline.md
 | [项目计划](PROJECT_PLAN.md) | 阶段状态、能力基线和后续优先级。 |
 | [项目架构说明](doc/项目架构说明.md) | 目录结构和主要模块职责。 |
 | [Phase21 Redis 会话调度器改造说明](doc/Phase21%20Redis会话调度器改造说明.md) | 会话级 FIFO 调度、恢复和观测说明。 |
-| [Redis 与 RabbitMQ 使用代码片段](doc/Redis与RabbitMQ使用代码片段.md) | 中间件使用位置和关键代码。 |
 | [键名与 ID 命名规范](doc/键名与ID命名规范.md) | Redis key、任务 ID、投递 ID、session key 规范。 |
 | [Docker Compose 部署说明](deploy/docker-compose.md) | 单进程、多角色、多 worker 部署。 |
-| [企业微信通道接入调研](doc/企业微信通道接入调研.md) | 企业微信 Key、回调、文本闭环和后续扩展边界。 |
 | [备份与恢复指南](deploy/backup-restore.md) | 数据卷、PostgreSQL、workspace 和恢复流程。 |
 | [反向代理与 HTTPS 部署指南](deploy/reverse-proxy.md) | Caddy/Nginx 暴露 Webhook 和 Dashboard。 |
 | [20.8 压测执行清单](doc/20.8%20压测执行清单.md) | QPS、吞吐、延迟和容量边界测试。 |
