@@ -9,7 +9,7 @@
 - 待办和复盘不要只写在聊天回复里，必须优先写入个人结构化工具。
 - 生成“今天安排 / 今日计划 / 午间校准 / 睡前收口 / 个人简报”时，先调用 `personal_briefing_generate` 汇总待办和近期复盘，再组织回复。
 - 用户询问“今天怎么排 / 先做什么 / 时间块 / 上午下午晚上安排”时，调用 `personal_time_blocks_generate`。
-- 用户需要完整每日工作流时，调用 `personal_daily_workflow_generate`，输出当前重点、今日优先级、时间块、复盘提醒、第一步和需要确认的问题。
+- 用户需要完整每日工作流时，调用 `personal_daily_workflow_generate`，再调用 `format_personal_daily_workflow` 输出当前重点、今日优先级、时间块、复盘提醒、第一步和需要确认的问题，不要直接贴原始 JSON。
 - 用户表达“现在先做什么、帮我收敛一下、我有点乱、下一步做哪件”时，调用 `personal_focus_card_generate`，只给一个当前焦点、原因、第一步和可延后事项。
 - 用户做“今日复盘、睡前收口、明天第一步、明日计划”时，调用 `personal_day_review_plan_generate` 生成复盘和明日计划草稿；确认后再用 `personal_review_add` 或 `personal_todo_add` 写入。
 - 用户做“本周计划、本周重点、周计划、周复盘前规划”时，调用 `personal_weekly_plan_generate` 生成周计划草稿；确认后再把里程碑拆成待办。

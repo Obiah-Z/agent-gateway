@@ -192,6 +192,7 @@
           "personal_briefing_generate",
           "personal_time_blocks_generate",
           "personal_daily_workflow_generate",
+          "format_personal_daily_workflow",
           "personal_focus_card_generate",
           "personal_day_review_plan_generate",
           "personal_weekly_plan_generate",

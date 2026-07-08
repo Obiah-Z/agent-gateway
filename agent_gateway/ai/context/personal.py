@@ -11,6 +11,21 @@ from agent_gateway.ai.context.memory import MemoryStore
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
 
 
+def _clean_strings(items: list[object] | None) -> list[str]:
+    """清洗工具输出中用于 Markdown 展示的字符串列表。"""
+
+    return [str(item).strip() for item in items or [] if str(item).strip()]
+
+
+def _markdown_bullets(items: list[object] | None) -> str:
+    """把列表渲染成 Markdown bullet list。"""
+
+    cleaned = _clean_strings(items)
+    if not cleaned:
+        return "- 暂无"
+    return "\n".join(f"- {item}" for item in cleaned)
+
+
 @dataclass(slots=True)
 class PersonalTodo:
     """个人秘书待办事项。"""
@@ -1040,6 +1055,67 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
         )
         return json.dumps(workflow, ensure_ascii=False, indent=2)
 
+    def format_personal_daily_workflow(workflow_json: str) -> str:
+        if not workflow_json.strip():
+            return "Error: workflow_json is required"
+        data = json.loads(workflow_json)
+        if not isinstance(data, dict):
+            return "Error: workflow_json must be a JSON object"
+
+        priorities = data.get("today_priorities") if isinstance(data.get("today_priorities"), list) else []
+        priority_lines = []
+        for index, item in enumerate(priorities, start=1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            details = []
+            if item.get("priority"):
+                details.append(f"优先级：{item.get('priority')}")
+            if item.get("due_at"):
+                details.append(f"时间：{item.get('due_at')}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            priority_lines.append(f"{index}. {title}{suffix}")
+
+        block_lines = []
+        blocks = data.get("time_blocks") if isinstance(data.get("time_blocks"), list) else []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            name = str(block.get("name") or "时间块").strip()
+            items = block.get("items") if isinstance(block.get("items"), list) else []
+            titles = [
+                str(item.get("title") or "").strip()
+                for item in items
+                if isinstance(item, dict) and str(item.get("title") or "").strip()
+            ]
+            block_lines.append(f"- {name}：" + ("、".join(titles) if titles else "留作缓冲"))
+
+        needs_confirmation = data.get("needs_confirmation")
+        if not isinstance(needs_confirmation, list):
+            needs_confirmation = []
+        sections = [
+            "## 今日工作流",
+            f"- 当前重点：{data.get('current_focus') or '待确认'}",
+            f"- 第一步：{data.get('first_action') or '先确认今天最重要的一件事。'}",
+            "",
+            "## 今日优先级",
+            "\n".join(priority_lines) if priority_lines else "暂无明确待办，请先确认今天最重要的一件事。",
+            "",
+            "## 时间块",
+            "\n".join(block_lines) if block_lines else "- 暂无时间块，请先补充待办。",
+            "",
+            "## 复盘提醒",
+            _markdown_bullets(data.get("review_reminders") if isinstance(data.get("review_reminders"), list) else []),
+            "",
+            "## 需要确认",
+            _markdown_bullets(needs_confirmation),
+            "",
+            f"> 边界：{data.get('note') or '这是个人工作流建议，不会自动完成或修改待办。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def personal_focus_card_generate(
         todo_limit: int = 8,
         review_limit: int = 3,
@@ -1261,6 +1337,27 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_daily_workflow_generate,
             tags=("personal", "workflow", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_daily_workflow",
+            description=(
+                "Format a personal_daily_workflow_generate JSON object into a concise "
+                "Chinese Markdown daily workflow for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["workflow_json"],
+                "properties": {
+                    "workflow_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_daily_workflow_generate.",
+                    },
+                },
+            },
+            handler=format_personal_daily_workflow,
+            tags=("personal", "workflow", "format", "user-facing"),
         )
     )
     registry.register(

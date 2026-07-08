@@ -218,6 +218,42 @@ def test_personal_daily_workflow_combines_todos_reviews_and_time_blocks(tmp_path
     assert workflow["note"] == "这是基于个人待办和近期复盘生成的每日工作流，不会自动完成或修改待办。"
 
 
+def test_format_personal_daily_workflow_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+
+    registry.dispatch(
+        "personal_todo_add",
+        {"title": "复习项目难点", "priority": "urgent", "due_at": "2026-07-08"},
+        runtime_context=context,
+    )
+    registry.dispatch(
+        "personal_review_add",
+        {
+            "summary": "昨天完成 Redis 复盘",
+            "next_step": "今天练 RabbitMQ 选型",
+        },
+        runtime_context=context,
+    )
+    workflow = registry.dispatch(
+        "personal_daily_workflow_generate",
+        {"todo_limit": 6, "review_limit": 2},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_personal_daily_workflow", {"workflow_json": workflow})
+
+    assert "## 今日工作流" in formatted
+    assert "- 当前重点：复习项目难点" in formatted
+    assert "- 第一步：先处理「复习项目难点」。" in formatted
+    assert "1. 复习项目难点（优先级：urgent；时间：2026-07-08）" in formatted
+    assert "- 上午：复习项目难点" in formatted
+    assert "- 今天练 RabbitMQ 选型" in formatted
+    assert "不会自动完成或修改待办" in formatted
+
+
 def test_personal_focus_card_selects_one_current_action_without_writing(tmp_path: Path) -> None:
     registry = ToolRegistry()
     store = PersonalStore(tmp_path / "workspace")
