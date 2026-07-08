@@ -2850,6 +2850,55 @@ def register_builtin_tools(
             ]
         ).strip()
 
+    def format_github_repo_reading_guide(reading_guide_json: str) -> str:
+        """把 github_repo_reading_guide JSON 转成中文阅读路线。"""
+
+        if not reading_guide_json.strip():
+            return "Error: reading_guide_json is required"
+        data = json.loads(reading_guide_json)
+        if not isinstance(data, dict):
+            return "Error: reading_guide_json must be a JSON object"
+        if data.get("type") != "github_repo_reading_guide":
+            return "Error: reading_guide_json type must be github_repo_reading_guide"
+
+        file_rows: list[list[object]] = []
+        for index, item in enumerate(data.get("priority_files") or [], start=1):
+            if not isinstance(item, dict):
+                continue
+            file_rows.append(
+                [
+                    index,
+                    item.get("path") or "未知文件",
+                    item.get("category") or "unknown",
+                    item.get("reason") or "需要人工确认阅读价值。",
+                ]
+            )
+        return "\n".join(
+            [
+                "## 仓库阅读路线",
+                f"- 仓库：{data.get('repository') or 'unknown/repository'}",
+                f"- 目标：{data.get('reading_goal') or '快速理解仓库结构和关键入口。'}",
+                f"- 地址：{data.get('url') or '未提供'}",
+                "",
+                "## 优先文件",
+                _markdown_table(["顺序", "文件", "类型", "为什么先看"], file_rows),
+                "",
+                "## 阅读顺序",
+                _markdown_bullets(
+                    data.get("reading_order") if isinstance(data.get("reading_order"), list) else []
+                ),
+                "",
+                "## 需要回答的问题",
+                _markdown_bullets(
+                    data.get("questions_to_answer")
+                    if isinstance(data.get("questions_to_answer"), list)
+                    else []
+                ),
+                "",
+                f"> 边界：{data.get('note') or '这是轻量阅读路线，不代表完整分析、风险审查或采纳计划。'}",
+            ]
+        ).strip()
+
     def format_github_repo_analysis(analysis_json: str) -> str:
         """把 github_repo_analysis JSON 转成 repo-analyzer 可直接回复的中文摘要。"""
 
@@ -7749,6 +7798,27 @@ def register_builtin_tools(
             },
             handler=format_github_repo_decision_card,
             tags=("github", "repository", "decision", "format", "user-facing"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_github_repo_reading_guide",
+            description=(
+                "Format a github_repo_reading_guide JSON object into a Chinese "
+                "user-facing Markdown reading path with priority files and key questions."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["reading_guide_json"],
+                "properties": {
+                    "reading_guide_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_reading_guide.",
+                    },
+                },
+            },
+            handler=format_github_repo_reading_guide,
+            tags=("github", "repository", "reading", "format", "user-facing"),
         )
     )
     registry.register(

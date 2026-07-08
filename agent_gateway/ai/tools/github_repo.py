@@ -591,6 +591,128 @@ def compose_repo_decision_card(
     }
 
 
+def compose_repo_reading_guide(
+    repo_summary: dict[str, Any],
+    *,
+    reading_goal: str = "",
+    max_items: int = 8,
+) -> dict[str, Any]:
+    """基于仓库摘要生成“先看哪些文件”的轻量阅读路线。"""
+
+    max_items = max(1, min(max_items, 20))
+    priority_files: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add_file(path: str, *, category: str, reason: str) -> None:
+        cleaned = path.strip().strip("/")
+        if not cleaned or cleaned in seen or len(priority_files) >= max_items:
+            return
+        seen.add(cleaned)
+        priority_files.append({"path": cleaned, "category": category, "reason": reason})
+
+    readme = repo_summary.get("readme") if isinstance(repo_summary.get("readme"), dict) else {}
+    readme_path = str(readme.get("path") or readme.get("name") or "").strip()
+    if readme_path:
+        add_file(readme_path, category="overview", reason="先确认项目定位、安装方式、核心概念和使用边界。")
+
+    tree_paths = [
+        str(item.get("path") or "").strip()
+        for item in repo_summary.get("tree") or []
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ]
+
+    patterns: list[tuple[str, tuple[str, ...], str]] = [
+        (
+            "dependency-config",
+            (
+                "pyproject.toml",
+                "package.json",
+                "requirements.txt",
+                "poetry.lock",
+                "pnpm-lock.yaml",
+                "dockerfile",
+                "docker-compose.yml",
+                "compose.yml",
+            ),
+            "再看依赖和启动配置，判断技术栈、运行成本和外部服务要求。",
+        ),
+        (
+            "entry-runtime",
+            (
+                "main.py",
+                "app.py",
+                "server.py",
+                "cli.py",
+                "src/",
+                "agent_gateway/",
+            ),
+            "接着看入口和运行时目录，确认请求如何进入系统、核心流程在哪里。",
+        ),
+        (
+            "agent-skill-assets",
+            (
+                "skill.md",
+                "agents.md",
+                "soul.md",
+                "workspace/agents/",
+                "skills/",
+            ),
+            "重点看 Agent / Skill 资产，判断是否有可迁移的提示词、工具协议或工作流。",
+        ),
+        (
+            "examples-tests",
+            (
+                "examples/",
+                "tests/",
+                "test/",
+            ),
+            "最后看示例和测试，验证项目真实用法、边界条件和维护质量。",
+        ),
+        (
+            "docs",
+            (
+                "docs/",
+                "doc/",
+                "architecture",
+            ),
+            "补充阅读文档和架构说明，避免只根据入口代码误判项目设计。",
+        ),
+    ]
+    lower_pairs = [(path, path.lower()) for path in tree_paths]
+    for category, needles, reason in patterns:
+        for original, lowered in lower_pairs:
+            if len(priority_files) >= max_items:
+                break
+            if any(lowered == needle or lowered.endswith("/" + needle) or needle in lowered for needle in needles):
+                add_file(original, category=category, reason=reason)
+
+    goal = reading_goal.strip() or "快速理解仓库用途、结构、关键入口和可复用资产。"
+    reading_order = [
+        "先读 README，确认项目解决什么问题、怎么运行、作者强调哪些概念。",
+        "再看依赖和启动配置，判断语言栈、运行方式、数据库/队列/外部 API 等要求。",
+        "然后看入口文件和核心运行时目录，把请求入口、主流程和模块边界串起来。",
+        "如果仓库包含 Agent / Skill / workflow 资产，优先抽取提示词结构、工具接口和约束写法。",
+        "最后用 examples / tests 反证理解是否正确，避免只靠 README 做判断。",
+    ]
+    questions = [
+        "这个项目到底解决什么问题，和用户目标是否一致？",
+        "最小运行入口在哪里，核心调用链从哪里开始？",
+        "哪些文件是配置、协议、提示词或可复用模板？",
+        "是否存在许可证、维护状态、依赖体积或运行成本风险？",
+        "如果迁移到 Gateway，最小可验证切入点是什么？",
+    ]
+    return {
+        "type": "github_repo_reading_guide",
+        "repository": repo_summary.get("repository", ""),
+        "url": repo_summary.get("url", ""),
+        "reading_goal": goal,
+        "priority_files": priority_files,
+        "reading_order": reading_order,
+        "questions_to_answer": questions,
+        "note": "这是基于 github_repo_summary 的轻量阅读路线，不代表已经完成完整仓库分析、风险审查或采纳计划。",
+    }
+
+
 def _adoption_decision(score: int, priority: str, risks: list[str]) -> dict[str, str]:
     severe_risk = any("许可证" in risk or "归档" in risk for risk in risks)
     if severe_risk:
@@ -763,6 +885,23 @@ def register_github_repo_tools(
         )
         return json.dumps(card, ensure_ascii=False, indent=2)
 
+    def github_repo_reading_guide(
+        repo_summary_json: str,
+        reading_goal: str = "",
+        max_items: int = 8,
+    ) -> str:
+        if not repo_summary_json.strip():
+            return "Error: repo_summary_json is required"
+        summary = json.loads(repo_summary_json)
+        if not isinstance(summary, dict):
+            return "Error: repo_summary_json must be a JSON object"
+        guide = compose_repo_reading_guide(
+            summary,
+            reading_goal=reading_goal,
+            max_items=max_items,
+        )
+        return json.dumps(guide, ensure_ascii=False, indent=2)
+
     def compose_github_repo_analysis(
         repo_summary_json: str,
         gateway_fit_json: str = "",
@@ -924,6 +1063,36 @@ def register_github_repo_tools(
             },
             handler=github_repo_decision_card,
             tags=("github", "repository", "decision", "analysis"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="github_repo_reading_guide",
+            description=(
+                "Compose a lightweight repository reading guide from github_repo_summary: "
+                "priority files, reading order, and questions to answer before deeper analysis."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["repo_summary_json"],
+                "properties": {
+                    "repo_summary_json": {
+                        "type": "string",
+                        "description": "JSON string returned by github_repo_summary.",
+                    },
+                    "reading_goal": {
+                        "type": "string",
+                        "description": "What the user wants to understand from the repository.",
+                    },
+                    "max_items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                },
+            },
+            handler=github_repo_reading_guide,
+            tags=("github", "repository", "reading", "analysis"),
         )
     )
     registry.register(

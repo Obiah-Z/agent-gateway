@@ -6,6 +6,7 @@ from agent_gateway.ai.tools.github_repo import (
     assess_gateway_repo_fit,
     compose_repo_analysis,
     compose_repo_decision_card,
+    compose_repo_reading_guide,
     normalize_github_repo_summary,
     plan_repo_adoption,
     parse_github_repo,
@@ -337,6 +338,86 @@ def test_github_repo_decision_card_tool_outputs_stable_json() -> None:
     assert card["decision"] == "hold"
     assert card["decision_goal"] == "判断是否可以采纳"
     assert card["repo_snapshot"]["archived"] is True
+
+
+def test_compose_repo_reading_guide_prioritizes_key_files() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="skills",
+        repo_data={
+            "html_url": "https://github.com/demo/skills",
+            "description": "Agent skills",
+            "language": "Markdown",
+            "license": {"spdx_id": "MIT"},
+        },
+        readme={"name": "README.md", "path": "README.md", "content": "agent skills", "error": ""},
+        tree=[
+            {"path": "README.md", "type": "blob", "size": 100},
+            {"path": "pyproject.toml", "type": "blob", "size": 100},
+            {"path": "src/main.py", "type": "blob", "size": 100},
+            {"path": "skills/writer/SKILL.md", "type": "blob", "size": 100},
+            {"path": "tests/test_skill.py", "type": "blob", "size": 100},
+        ],
+    )
+
+    guide = compose_repo_reading_guide(summary, reading_goal="快速判断可复用 Skill", max_items=5)
+
+    assert guide["type"] == "github_repo_reading_guide"
+    assert guide["repository"] == "demo/skills"
+    assert guide["reading_goal"] == "快速判断可复用 Skill"
+    paths = [item["path"] for item in guide["priority_files"]]
+    assert paths == [
+        "README.md",
+        "pyproject.toml",
+        "src/main.py",
+        "skills/writer/SKILL.md",
+        "tests/test_skill.py",
+    ]
+    assert guide["priority_files"][3]["category"] == "agent-skill-assets"
+    assert "轻量阅读路线" in guide["note"]
+
+
+def test_github_repo_reading_guide_tool_outputs_stable_json() -> None:
+    summary = normalize_github_repo_summary(
+        owner="demo",
+        repo="repo",
+        repo_data={
+            "html_url": "https://github.com/demo/repo",
+            "description": "agent gateway templates",
+            "language": "Python",
+            "topics": ["agent"],
+            "license": {"spdx_id": "Apache-2.0"},
+        },
+        readme={"name": "README.md", "path": "README.md", "content": "agent gateway", "error": ""},
+        tree=[
+            {"path": "Dockerfile", "type": "blob", "size": 5},
+            {"path": "agent_gateway/app.py", "type": "blob", "size": 5},
+            {"path": "AGENTS.md", "type": "blob", "size": 5},
+        ],
+    )
+    registry = ToolRegistry()
+    register_github_repo_tools(registry, client=object())
+
+    guide = json.loads(
+        registry.dispatch(
+            "github_repo_reading_guide",
+            {
+                "repo_summary_json": json.dumps(summary, ensure_ascii=False),
+                "reading_goal": "先看核心入口",
+                "max_items": 4,
+            },
+        )
+    )
+
+    assert guide["type"] == "github_repo_reading_guide"
+    assert guide["repository"] == "demo/repo"
+    assert guide["reading_goal"] == "先看核心入口"
+    assert [item["path"] for item in guide["priority_files"]] == [
+        "README.md",
+        "Dockerfile",
+        "agent_gateway/app.py",
+        "AGENTS.md",
+    ]
 
 
 def test_compose_repo_analysis_combines_summary_fit_and_findings() -> None:

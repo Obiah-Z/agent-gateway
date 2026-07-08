@@ -1545,6 +1545,47 @@ def test_format_github_repo_decision_card_outputs_user_facing_summary(tmp_path: 
     assert "> 边界：这是仓库轻量决策卡片，不代表已经完成正式分析、风险门禁或采纳计划。" in formatted
 
 
+def test_format_github_repo_reading_guide_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    guide = {
+        "type": "github_repo_reading_guide",
+        "repository": "demo/skills",
+        "url": "https://github.com/demo/skills",
+        "reading_goal": "快速判断可复用 Skill",
+        "priority_files": [
+            {
+                "path": "README.md",
+                "category": "overview",
+                "reason": "先确认项目定位、安装方式、核心概念和使用边界。",
+            },
+            {
+                "path": "skills/writer/SKILL.md",
+                "category": "agent-skill-assets",
+                "reason": "重点看 Agent / Skill 资产。",
+            },
+        ],
+        "reading_order": ["先读 README。", "再看 Skill 资产。"],
+        "questions_to_answer": ["这个项目解决什么问题？", "最小可验证切入点是什么？"],
+        "note": "这是基于 github_repo_summary 的轻量阅读路线，不代表已经完成完整仓库分析、风险审查或采纳计划。",
+    }
+
+    formatted = registry.dispatch(
+        "format_github_repo_reading_guide",
+        {"reading_guide_json": json.dumps(guide, ensure_ascii=False)},
+    )
+
+    assert "## 仓库阅读路线" in formatted
+    assert "- 仓库：demo/skills" in formatted
+    assert "| 1 | README.md | overview | 先确认项目定位、安装方式、核心概念和使用边界。 |" in formatted
+    assert "| 2 | skills/writer/SKILL.md | agent-skill-assets | 重点看 Agent / Skill 资产。 |" in formatted
+    assert "## 阅读顺序" in formatted
+    assert "- 先读 README。" in formatted
+    assert "## 需要回答的问题" in formatted
+    assert "- 最小可验证切入点是什么？" in formatted
+    assert "> 边界：这是基于 github_repo_summary 的轻量阅读路线，不代表已经完成完整仓库分析、风险审查或采纳计划。" in formatted
+
+
 def test_save_structured_document_writes_technical_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
