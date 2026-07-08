@@ -245,6 +245,7 @@
           "diet_day_review_plan_generate",
           "format_diet_day_review_plan",
           "diet_weekly_plan_generate",
+          "format_diet_weekly_plan",
           "diet_inbox_triage",
           "diet_inbox_commit",
           "memory_search",

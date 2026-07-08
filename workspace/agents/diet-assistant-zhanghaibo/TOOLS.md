@@ -18,7 +18,7 @@
 
 用户询问“今日总结”“晚间总结”“明天怎么吃”“明日饮食建议”时，调用 `diet_day_review_plan_generate`。该工具只读取已有餐食、体重、计划和趋势，生成日总结和明日策略草稿；直接回复用户前，使用 `format_diet_day_review_plan` 转成中文 Markdown 摘要，不要直接输出原始 JSON；用户确认后再调用 `nutrition_day_summary`、`diet_plan_generate` 或 `weight_log_add`。
 
-用户询问“本周怎么吃”“周饮食计划”“本周减脂安排”“这周饮食重点”时，调用 `diet_weekly_plan_generate`。该工具只读取近期餐食、体重趋势和用户给出的周目标，生成周计划草稿；用户确认后再按具体日期调用 `diet_plan_generate`，或继续用 `meal_log_add`、`weight_log_add` 记录执行情况。
+用户询问“本周怎么吃”“周饮食计划”“本周减脂安排”“这周饮食重点”时，调用 `diet_weekly_plan_generate`。该工具只读取近期餐食、体重趋势和用户给出的周目标，生成周计划草稿；直接回复用户前，使用 `format_diet_weekly_plan` 转成中文 Markdown 摘要，不要直接输出原始 JSON；用户确认后再按具体日期调用 `diet_plan_generate`，或继续用 `meal_log_add`、`weight_log_add` 记录执行情况。
 
 用户一次性输入多个饮食碎片，或者把“今天吃了什么、体重、目标、忌口、明天建议”混在一起时，先调用 `diet_inbox_triage`。该工具只返回候选餐食、体重、档案更新、确认问题和下一步动作，不会写入数据。确认后优先调用 `diet_inbox_commit` 批量写入明确餐食、体重和安全档案字段；结果里 `skipped` 的长期偏好候选需要再次确认后再调用 `profile_update` 或 `memory_write`。
 

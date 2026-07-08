@@ -1762,6 +1762,76 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             }
         )
 
+    def format_diet_weekly_plan(plan_json: str) -> str:
+        if not plan_json.strip():
+            return "Error: plan_json is required"
+        data = json.loads(plan_json)
+        if not isinstance(data, dict):
+            return "Error: plan_json must be a JSON object"
+        plan = data.get("weekly_plan") if isinstance(data.get("weekly_plan"), dict) else data
+        if not isinstance(plan, dict):
+            return "Error: plan_json must contain a weekly_plan object"
+        if plan.get("type") != "diet_weekly_plan":
+            return "Error: plan_json type must be diet_weekly_plan"
+
+        trend = plan.get("trend") if isinstance(plan.get("trend"), dict) else {}
+        target = _as_float(plan.get("target_calories"))
+        weight_change = _as_float(trend.get("weight_change_kg"))
+        average_calories = _as_float(trend.get("average_calories"))
+        average_protein = _as_float(trend.get("average_protein_g"))
+        meal_count = _as_int(trend.get("meal_count"))
+        missing_days = _as_int(trend.get("missing_meal_days"))
+        confirmations = plan.get("needs_confirmation")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        next_actions = plan.get("next_actions")
+        if not isinstance(next_actions, list):
+            next_actions = []
+
+        sections = [
+            "## 本周饮食计划草稿",
+            f"- 本周目标：{plan.get('week_goal') or '稳定记录三餐，按趋势小幅调整饮食。'}",
+            f"- 参考热量：约 {target:.0f} kcal/天",
+            f"- 计划窗口：{_as_int(plan.get('days')) or 7} 天",
+            "",
+            "## 近期趋势",
+            f"- 体重变化：{weight_change:+.1f} kg",
+            f"- 平均热量：约 {average_calories:.0f} kcal",
+            f"- 平均蛋白质：约 {average_protein:.0f}g",
+            f"- 已记录餐次：{meal_count} 餐",
+            f"- 漏记天数：{missing_days} 天",
+            "",
+            "## 本周重点",
+            _markdown_bullets(plan.get("focus_areas") if isinstance(plan.get("focus_areas"), list) else []),
+            "",
+            "## 风险提醒",
+            _markdown_bullets(plan.get("risk_flags") if isinstance(plan.get("risk_flags"), list) else []),
+            "",
+            "## 本周动作",
+            _markdown_bullets(
+                plan.get("weekly_actions") if isinstance(plan.get("weekly_actions"), list) else []
+            ),
+            "",
+            "## 每日规则",
+            _markdown_bullets(
+                plan.get("daily_guidelines")
+                if isinstance(plan.get("daily_guidelines"), list)
+                else []
+            ),
+            "",
+            "## 约束",
+            _markdown_bullets(plan.get("constraints") if isinstance(plan.get("constraints"), list) else []),
+            "",
+            "## 需要确认",
+            _markdown_bullets(confirmations),
+            "",
+            "## 可执行下一步",
+            _markdown_bullets(next_actions),
+            "",
+            f"> 边界：{plan.get('note') or '这是饮食周计划草稿，不会自动生成每日计划、写入体重或补记餐食。'}",
+        ]
+        return "\n".join(sections).strip()
+
     def diet_inbox_triage(
         *,
         text: str,
@@ -2080,6 +2150,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=diet_weekly_plan_generate,
             tags=("diet", "weekly", "planning", "read"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_diet_weekly_plan",
+            description=(
+                "Format a diet_weekly_plan JSON object into a concise Chinese "
+                "Markdown weekly diet plan for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["plan_json"],
+                "properties": {
+                    "plan_json": {
+                        "type": "string",
+                        "description": "JSON string returned by diet_weekly_plan_generate.",
+                    },
+                },
+            },
+            handler=format_diet_weekly_plan,
+            tags=("diet", "weekly", "planning", "format", "user-facing"),
         )
     )
     registry.register(

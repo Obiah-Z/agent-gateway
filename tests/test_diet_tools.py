@@ -576,6 +576,57 @@ def test_diet_weekly_plan_generates_draft_without_writing(tmp_path: Path) -> Non
     assert store.get_day_summary("user:wework:diet", date="2026-07-06") is None
 
 
+def test_format_diet_weekly_plan_outputs_user_facing_summary(tmp_path: Path) -> None:
+    store = DietStore(tmp_path / "workspace")
+    registry = ToolRegistry()
+    register_diet_tools(registry, store)
+    context = {"memory_user_scope": "user:wework:diet"}
+
+    store.update_profile("user:wework:diet", height_cm=178, current_weight_kg=82, target_weight_kg=75)
+    store.add_weight_log("user:wework:diet", 82.0, recorded_at=100.0)
+    store.add_weight_log("user:wework:diet", 81.5, recorded_at=200.0)
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-05",
+        meal_type="lunch",
+        raw_text="炸鸡饭和奶茶",
+        estimated_calories=1200,
+        protein_g=20,
+    )
+    store.add_meal_log(
+        "user:wework:diet",
+        meal_date="2026-07-06",
+        meal_type="dinner",
+        raw_text="炒饭",
+        estimated_calories=900,
+        protein_g=15,
+    )
+    plan_json = registry.dispatch(
+        "diet_weekly_plan_generate",
+        {
+            "week_goal": "本周把三餐记录稳定下来",
+            "focus_areas": ["补早餐记录", "提高蛋白质"],
+            "constraints": ["工作日只能吃外卖"],
+            "days": 7,
+        },
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch("format_diet_weekly_plan", {"plan_json": plan_json})
+
+    assert "## 本周饮食计划草稿" in formatted
+    assert "- 本周目标：本周把三餐记录稳定下来" in formatted
+    assert "- 参考热量：约 1550 kcal/天" in formatted
+    assert "- 补早餐记录" in formatted
+    assert "- 提高蛋白质" in formatted
+    assert "- meal_logging_incomplete" in formatted
+    assert "- protein_low" in formatted
+    assert "- 工作日只能吃外卖" in formatted
+    assert "- 这些限制是否需要转成具体避坑规则？" in formatted
+    assert "每日目标热量参考约 1550 kcal" in formatted
+    assert "不会自动生成每日计划、写入体重或补记餐食" in formatted
+
+
 def test_diet_inbox_triage_suggests_records_without_writing(tmp_path: Path) -> None:
     store = DietStore(tmp_path / "workspace")
     registry = ToolRegistry()
