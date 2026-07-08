@@ -1789,6 +1789,36 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
         row = diet_store.add_weight_log(scope, weight_kg=weight_kg, source=source)
         return _json({"status": "saved", "weight": row})
 
+    def format_weight_log_entry(weight_json: str) -> str:
+        if not weight_json.strip():
+            return "Error: weight_json is required"
+        data = json.loads(weight_json)
+        if not isinstance(data, dict):
+            return "Error: weight_json must be a JSON object"
+        weight = data.get("weight") if isinstance(data.get("weight"), dict) else data
+        if not isinstance(weight, dict):
+            return "Error: weight_json must contain a weight object"
+        if "weight_kg" not in weight:
+            return "Error: weight_json must be a weight_log_add object"
+
+        details = [
+            f"体重：{_as_float(weight.get('weight_kg')):.1f} kg",
+            f"来源：{weight.get('source') or 'user'}",
+        ]
+        if weight.get("recorded_at"):
+            details.append(f"记录时间：{weight.get('recorded_at')}")
+        sections = [
+            "## 体重已记录",
+            _markdown_bullets(details),
+            "",
+            "## 下一步",
+            "- 已同步更新当前体重档案。",
+            "- 后续查询趋势时可使用近 7 天或近 30 天进展统计。",
+            "",
+            "> 边界：这是体重记录确认，只格式化已保存结果，不会新增餐食、生成计划或写入长期记忆。",
+        ]
+        return "\n".join(sections).strip()
+
     def progress_summary(
         *,
         days: int = 7,
@@ -2623,6 +2653,27 @@ def register_diet_tools(registry: ToolRegistry, diet_store: DietStore) -> None:
             },
             handler=weight_log_add,
             tags=("diet", "weight", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_weight_log_entry",
+            description=(
+                "Format a weight_log_add JSON object into a concise Chinese "
+                "Markdown weight record confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["weight_json"],
+                "properties": {
+                    "weight_json": {
+                        "type": "string",
+                        "description": "JSON string returned by weight_log_add.",
+                    },
+                },
+            },
+            handler=format_weight_log_entry,
+            tags=("diet", "weight", "format", "user-facing"),
         )
     )
     registry.register(
