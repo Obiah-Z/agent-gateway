@@ -86,6 +86,14 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
         ),
     ),
     AgentRoutingContract(
+        name="agent-capability-contract",
+        user_text="饮食记录这个任务会不会写入数据，执行前是否需要我确认？",
+        expected_intent="agent-capability-contract",
+        expected_agent_id="main",
+        expected_requires_collaboration=False,
+        required_tools=("explain_agent_capability_contract", "format_agent_capability_contract"),
+    ),
+    AgentRoutingContract(
         name="ops",
         user_text="帮我看一下 Docker 容器和 Redis、RabbitMQ、PostgreSQL 的运行状态",
         expected_intent="ops",

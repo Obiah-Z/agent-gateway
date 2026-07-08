@@ -2995,6 +2995,25 @@ def test_classify_task_intent_routes_agent_capability_query(tmp_path: Path) -> N
     assert "format_agent_capability_catalog" in data["suggested_next_step"]
 
 
+def test_classify_task_intent_routes_agent_capability_contract_query(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    result = registry.dispatch(
+        "classify_task_intent",
+        {"user_text": "饮食记录这个任务会不会写入数据，执行前是否需要我确认？"},
+    )
+
+    data = json.loads(result)
+    assert data["type"] == "task_intent_classification"
+    assert data["intent"] == "agent-capability-contract"
+    assert data["recommended_agent_id"] == "main"
+    assert data["can_answer_directly"] is True
+    assert data["requires_collaboration"] is False
+    assert "explain_agent_capability_contract" in data["suggested_next_step"]
+    assert "format_agent_capability_contract" in data["suggested_next_step"]
+
+
 def test_classify_task_intent_keeps_simple_chat_on_main(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
@@ -3331,6 +3350,26 @@ def test_prepare_entry_route_response_matches_agent_capability(
     assert "目标 Agent：`doc-writer`" in data["formatted_response"]
     assert "```text" in data["formatted_response"]
     assert "不代表目标 Agent 已经自动执行" in data["formatted_response"]
+
+
+def test_prepare_entry_route_response_formats_agent_capability_contract(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+
+    data = json.loads(
+        registry.dispatch(
+            "prepare_entry_route_response",
+            {"user_text": "饮食记录这个任务会不会写入数据，执行前是否需要我确认？"},
+        )
+    )
+
+    assert data["type"] == "entry_route_preparation"
+    assert data["classification"]["intent"] == "agent-capability-contract"
+    assert data["capability_contract"]["type"] == "agent_capability_contract_explanation"
+    assert data["capability_contract"]["contracts"][0]["case_name"] == "diet"
+    assert data["capability_contract"]["contracts"][0]["requires_confirmation"] is True
+    assert "Agent 能力契约说明" in data["formatted_response"]
+    assert "写入前需要用户明确确认" in data["formatted_response"]
 
 
 def test_prepare_entry_route_response_delegates_repo_reading_guide(

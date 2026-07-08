@@ -5162,6 +5162,40 @@ def register_builtin_tools(
                 "collaboration_task_type": "",
             },
             {
+                "intent": "agent-capability-contract",
+                "agent": "main",
+                "keywords": (
+                    "会不会写入",
+                    "是否写入",
+                    "写入数据",
+                    "写数据",
+                    "需要确认",
+                    "是否需要确认",
+                    "确认吗",
+                    "能力边界",
+                    "权限边界",
+                    "执行边界",
+                    "为什么不能直接执行",
+                    "为什么要协作",
+                    "为什么需要协作",
+                    "为什么需要多个 agent",
+                    "为什么需要多个agent",
+                    "为什么要多 agent",
+                    "为什么要多agent",
+                    "多 agent 协作",
+                    "多agent协作",
+                    "contract",
+                    "confirmation",
+                    "read only",
+                    "read-only",
+                ),
+                "reason": "用户询问任务执行边界、写入风险、确认要求或协作原因，入口层可基于能力契约说明。",
+                "next": "调用 explain_agent_capability_contract，再调用 format_agent_capability_contract 输出中文边界说明。",
+                "direct": True,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
+            },
+            {
                 "intent": "agent-capabilities",
                 "agent": "main",
                 "keywords": (
@@ -5655,6 +5689,17 @@ def register_builtin_tools(
                     if len(word) >= 2
                 ]
                 score += sum(2 for word in keywords if word in user_text or word in expected_intent or word in expected_agent)
+                domain_keywords = {
+                    "diet-assistant-zhanghaibo": ("饮食", "早餐", "午餐", "晚餐", "餐食", "体重", "热量"),
+                    "personal-secretary-zhanghaibo": ("待办", "复盘", "提醒", "计划", "日程"),
+                    "repo-analyzer": ("仓库", "github", "repo", "repository", "代码库"),
+                    "ops": ("docker", "容器", "redis", "rabbitmq", "postgres", "日志", "运维"),
+                }
+                score += sum(
+                    20
+                    for word in domain_keywords.get(expected_agent, ())
+                    if word in normalized_goal
+                )
             return score
 
         candidates = sorted(
@@ -6041,6 +6086,7 @@ def register_builtin_tools(
         capability_catalog_json = ""
         capability_match_json = ""
         capability_handoff_package_json = ""
+        capability_contract_json = ""
         capability_response = ""
         if classification.get("requires_collaboration"):
             collaboration_plan_json = plan_agent_collaboration(
@@ -6092,6 +6138,12 @@ def register_builtin_tools(
                     catalog_json=capability_catalog_json,
                     include_tools=False,
                 )
+        elif classification.get("intent") == "agent-capability-contract":
+            capability_contract_json = explain_agent_capability_contract(user_goal=goal)
+            capability_response = format_agent_capability_contract(
+                contract_json=capability_contract_json,
+                include_tools=True,
+            )
         elif classification.get("recommended_agent_id") not in {"", "main"}:
             handoff_prompt = build_agent_handoff_prompt(
                 user_goal=goal,
@@ -6137,6 +6189,7 @@ def register_builtin_tools(
                 "capability_handoff_package": (
                     json.loads(capability_handoff_package_json) if capability_handoff_package_json else None
                 ),
+                "capability_contract": json.loads(capability_contract_json) if capability_contract_json else None,
                 "route_explanation": json.loads(route_explanation_json),
                 "handoff_prompt": handoff_prompt,
                 "formatted_response": formatted_response,

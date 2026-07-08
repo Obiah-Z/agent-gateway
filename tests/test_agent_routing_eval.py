@@ -16,6 +16,7 @@ def test_default_routing_eval_cases_cover_key_agents() -> None:
         "research-option-validation",
         "planning",
         "agent-capabilities",
+        "agent-capability-contract",
         "ops",
         "diet",
         "personal",
@@ -38,6 +39,8 @@ def test_default_routing_eval_cases_pass() -> None:
     assert by_name["personal"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["personal-due-reminders"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["diet"].actual_agent_id == "diet-assistant-zhanghaibo"
+    assert by_name["agent-capability-contract"].actual_intent == "agent-capability-contract"
+    assert by_name["agent-capability-contract"].actual_agent_id == "main"
     assert all(not row.missing_required_tools for row in results)
 
 
@@ -69,6 +72,7 @@ def test_default_routing_eval_cases_declare_risk_contracts() -> None:
     assert by_name["personal"].read_only is False
     assert by_name["personal"].requires_confirmation is True
     assert by_name["personal-due-reminders"].read_only is True
+    assert by_name["agent-capability-contract"].read_only is True
 
 
 def test_agent_routing_eval_cli_outputs_summary() -> None:
@@ -79,8 +83,9 @@ def test_agent_routing_eval_cli_outputs_summary() -> None:
         text=True,
     )
 
-    assert "Summary: 13/13 passed" in completed.stdout
+    assert "Summary: 14/14 passed" in completed.stdout
     assert "repo-reading-guide" in completed.stdout
     assert "personal-due-reminders" in completed.stdout
+    assert "agent-capability-contract" in completed.stdout
     assert "risk" in completed.stdout
     assert "write+confirm" in completed.stdout
