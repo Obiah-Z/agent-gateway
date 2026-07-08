@@ -2850,6 +2850,79 @@ def register_builtin_tools(
             ]
         ).strip()
 
+    def format_github_repo_analysis(analysis_json: str) -> str:
+        """把 github_repo_analysis JSON 转成 repo-analyzer 可直接回复的中文摘要。"""
+
+        if not analysis_json.strip():
+            return "Error: analysis_json is required"
+        analysis = json.loads(analysis_json)
+        if not isinstance(analysis, dict):
+            return "Error: analysis_json must be a JSON object"
+        if analysis.get("type") != "github_repo_analysis":
+            return "Error: analysis_json type must be github_repo_analysis"
+
+        positioning = analysis.get("project_positioning")
+        if not isinstance(positioning, dict):
+            positioning = {}
+        gateway_fit = analysis.get("gateway_fit")
+        if not isinstance(gateway_fit, dict):
+            gateway_fit = {}
+
+        topics = positioning.get("topics") if isinstance(positioning.get("topics"), list) else []
+        project_rows = [
+            ["仓库", analysis.get("repository") or "unknown/repository"],
+            ["地址", analysis.get("url") or "未提供"],
+            ["语言", positioning.get("language") or "unknown"],
+            ["许可证", positioning.get("license") or "unknown"],
+            ["生命周期", positioning.get("lifecycle") or "unknown"],
+        ]
+        if topics:
+            project_rows.append(["Topics", ", ".join(str(item) for item in topics if str(item).strip())])
+
+        fit_rows = [
+            ["适配分", gateway_fit.get("score", 0)],
+            ["优先级", gateway_fit.get("priority") or "unknown"],
+            [
+                "适配信号",
+                "；".join(str(item).strip() for item in gateway_fit.get("signals") or [] if str(item).strip())
+                or "暂无",
+            ],
+        ]
+
+        return "\n".join(
+            [
+                "## GitHub 仓库分析摘要",
+                f"- 分析目标：{analysis.get('analysis_goal') or '说明项目用途、价值、风险和 Gateway 可借鉴点。'}",
+                f"- 一句话结论：{positioning.get('description') or '仓库描述不足，需要继续核验 README 和关键文件。'}",
+                "",
+                "## 项目概览",
+                _markdown_table(["项目", "内容"], project_rows),
+                "",
+                "## Gateway 适配评估",
+                _markdown_table(["项目", "内容"], fit_rows),
+                "",
+                "## 关键发现",
+                _markdown_bullets(analysis.get("key_findings") if isinstance(analysis.get("key_findings"), list) else []),
+                "",
+                "## 可借鉴点",
+                _markdown_bullets(
+                    analysis.get("gateway_reuse_ideas")
+                    if isinstance(analysis.get("gateway_reuse_ideas"), list)
+                    else []
+                ),
+                "",
+                "## 风险与不确定点",
+                _markdown_bullets(analysis.get("risks") if isinstance(analysis.get("risks"), list) else []),
+                "",
+                "## 建议下一步",
+                _markdown_bullets(
+                    analysis.get("recommendations") if isinstance(analysis.get("recommendations"), list) else []
+                ),
+                "",
+                "> 边界：这是 repo-analyzer 的即时摘要；正式报告落盘仍应交给 doc-writer 或报告渲染工具处理。",
+            ]
+        ).strip()
+
     def save_structured_document(
         title: str,
         document_type: str,
@@ -7630,6 +7703,27 @@ def register_builtin_tools(
             },
             handler=save_structured_document,
             tags=("filesystem", "write", "report", "document"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_github_repo_analysis",
+            description=(
+                "Format a github_repo_analysis JSON object into a concise Chinese "
+                "user-facing Markdown summary for repo-analyzer replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["analysis_json"],
+                "properties": {
+                    "analysis_json": {
+                        "type": "string",
+                        "description": "JSON string returned by compose_github_repo_analysis.",
+                    },
+                },
+            },
+            handler=format_github_repo_analysis,
+            tags=("github", "repository", "analysis", "format", "user-facing"),
         )
     )
     registry.register(

@@ -1664,6 +1664,48 @@ def test_render_repo_analysis_markdown_formats_structured_analysis(tmp_path: Pat
     assert "```json" in markdown
 
 
+def test_format_github_repo_analysis_outputs_user_facing_summary(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    register_builtin_tools(registry, tmp_path)
+    analysis = {
+        "type": "github_repo_analysis",
+        "repository": "demo/repo",
+        "url": "https://github.com/demo/repo",
+        "analysis_goal": "判断是否值得 Gateway 借鉴。",
+        "project_positioning": {
+            "description": "Agent workflow templates",
+            "language": "Markdown",
+            "topics": ["agent", "workflow"],
+            "license": "MIT",
+            "lifecycle": "active-or-recent",
+        },
+        "gateway_fit": {
+            "score": 85,
+            "priority": "high",
+            "signals": ["包含 Agent / Skill 信号。"],
+        },
+        "key_findings": ["README 提供工作流模板。"],
+        "gateway_reuse_ideas": ["参考工作流组织方式。"],
+        "risks": ["需要确认许可证复用边界。"],
+        "recommendations": ["优先抽取模板并做小规模验证。"],
+    }
+
+    formatted = registry.dispatch(
+        "format_github_repo_analysis",
+        {"analysis_json": json.dumps(analysis, ensure_ascii=False)},
+    )
+
+    assert "## GitHub 仓库分析摘要" in formatted
+    assert "- 分析目标：判断是否值得 Gateway 借鉴。" in formatted
+    assert "- 一句话结论：Agent workflow templates" in formatted
+    assert "| 仓库 | demo/repo |" in formatted
+    assert "| 适配分 | 85 |" in formatted
+    assert "- README 提供工作流模板。" in formatted
+    assert "- 参考工作流组织方式。" in formatted
+    assert "- 需要确认许可证复用边界。" in formatted
+    assert "正式报告落盘仍应交给 doc-writer" in formatted
+
+
 def test_render_repo_analysis_markdown_can_be_saved_as_report(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)

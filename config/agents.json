@@ -303,6 +303,7 @@
           "github_repo_decision_card",
           "format_github_repo_decision_card",
           "compose_github_repo_analysis",
+          "format_github_repo_analysis",
           "plan_github_repo_adoption",
           "read_file",
           "list_directory",
