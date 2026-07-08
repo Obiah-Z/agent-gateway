@@ -209,6 +209,7 @@
           "personal_inbox_triage",
           "format_personal_inbox_triage",
           "personal_inbox_commit",
+          "format_personal_inbox_commit",
           "get_current_time",
           "memory_write",
           "memory_search",

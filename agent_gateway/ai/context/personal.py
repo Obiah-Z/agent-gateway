@@ -1816,6 +1816,82 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             return f"Error: {exc}"
         return json.dumps(result, ensure_ascii=False, indent=2)
 
+    def format_personal_inbox_commit(commit_json: str) -> str:
+        if not commit_json.strip():
+            return "Error: commit_json is required"
+        data = json.loads(commit_json)
+        if not isinstance(data, dict):
+            return "Error: commit_json must be a JSON object"
+        if data.get("type") != "personal_inbox_commit":
+            return "Error: commit_json type must be personal_inbox_commit"
+
+        todos = data.get("written_todos") if isinstance(data.get("written_todos"), list) else []
+        todo_lines = []
+        for todo in todos:
+            if not isinstance(todo, dict):
+                continue
+            title = str(todo.get("title") or "").strip()
+            details = []
+            priority = str(todo.get("priority") or "").strip()
+            due_at = str(todo.get("due_at") or "").strip()
+            notes = str(todo.get("notes") or "").strip()
+            if priority:
+                details.append(f"优先级：{priority}")
+            if due_at:
+                details.append(f"截止：{due_at}")
+            if notes:
+                details.append(f"备注：{notes}")
+            suffix = f"（{'；'.join(details)}）" if details else ""
+            todo_lines.append(f"- {title or '未命名待办'}{suffix}")
+
+        review = data.get("written_review") if isinstance(data.get("written_review"), dict) else None
+        review_lines = []
+        if review:
+            review_lines.append(f"- 总结：{review.get('summary') or '暂无'}")
+            completed = review.get("completed") if isinstance(review.get("completed"), list) else []
+            blockers = review.get("blockers") if isinstance(review.get("blockers"), list) else []
+            review_lines.append("完成：")
+            review_lines.append(_markdown_bullets(completed))
+            review_lines.append("卡点：")
+            review_lines.append(_markdown_bullets(blockers))
+            review_lines.append(f"- 下一步：{review.get('next_step') or '暂无'}")
+
+        skipped = data.get("skipped") if isinstance(data.get("skipped"), list) else []
+        skipped_lines = []
+        for item in skipped:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "unknown").strip()
+            reason = str(item.get("reason") or "需要单独确认").strip()
+            candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+            content = str(candidate.get("content") or candidate.get("summary") or "").strip()
+            label = f"{item_type}：{content}" if content else item_type
+            skipped_lines.append(f"- {label}（{reason}）")
+
+        source = data.get("source") if isinstance(data.get("source"), dict) else {}
+        sections = [
+            "## 个人收件箱已批量写入",
+            f"- 待办：{len(todo_lines)} 条",
+            f"- 复盘：{'已写入' if review else '未写入'}",
+            f"- 长期记忆候选：{'有，需单独确认' if source.get('has_memory_candidate') else '暂无'}",
+            "",
+            "## 已写入待办",
+            "\n".join(todo_lines) if todo_lines else "暂无待办写入。",
+            "",
+            "## 已写入复盘",
+            "\n".join(review_lines) if review_lines else "暂无复盘写入。",
+            "",
+            "## 暂未写入",
+            "\n".join(skipped_lines) if skipped_lines else "- 暂无",
+            "",
+            "## 下一步",
+            "- 如果长期目标、偏好或背景需要长期保存，请再次确认后再写入长期记忆。",
+            "- 后续生成个人简报、时间块和复盘计划时，会读取这些结构化记录。",
+            "",
+            f"> 边界：{data.get('note') or '这是批量写入确认，不会自动写入长期记忆。'}",
+        ]
+        return "\n".join(sections).strip()
+
     registry.register(
         RegisteredTool(
             name="personal_todo_add",
@@ -2298,5 +2374,26 @@ def register_personal_tools(registry: ToolRegistry, personal_store: PersonalStor
             },
             handler=personal_inbox_commit,
             tags=("personal", "inbox", "todo", "review", "write"),
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            name="format_personal_inbox_commit",
+            description=(
+                "Format a personal_inbox_commit JSON object into a concise Chinese "
+                "Markdown confirmation for chat replies."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["commit_json"],
+                "properties": {
+                    "commit_json": {
+                        "type": "string",
+                        "description": "JSON string returned by personal_inbox_commit.",
+                    },
+                },
+            },
+            handler=format_personal_inbox_commit,
+            tags=("personal", "inbox", "format", "user-facing"),
         )
     )

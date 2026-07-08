@@ -909,6 +909,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
         "format_personal_todo_list",
         "format_personal_todo_completion",
         "format_personal_review_recent",
+        "format_personal_inbox_commit",
         "format_personal_briefing",
         "format_personal_time_blocks",
         "format_personal_daily_workflow",
@@ -989,6 +990,7 @@ def test_personal_secretary_has_structured_personal_tools() -> None:
         "personal_inbox_triage",
         "format_personal_inbox_triage",
         "personal_inbox_commit",
+        "format_personal_inbox_commit",
     }.issubset(tools[SECRETARY_AGENT_ID])
 
 
@@ -1066,4 +1068,7 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "personal_inbox_commit" in identity
     assert "personal_inbox_commit" in soul
     assert "personal_inbox_commit" in tools_md
+    assert "format_personal_inbox_commit" in identity
+    assert "format_personal_inbox_commit" in soul
+    assert "format_personal_inbox_commit" in tools_md
     assert "上午下午晚上" in tools_md

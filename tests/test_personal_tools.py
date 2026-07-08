@@ -910,3 +910,41 @@ def test_personal_inbox_commit_writes_confirmed_todos_and_review(tmp_path: Path)
     assert "不会自动写入" in result["note"]
     assert store.list_todos(user_scope="user:alice")[0]["title"] == "要练 RabbitMQ 选型"
     assert store.recent_reviews(user_scope="user:alice")[0]["summary"].startswith("今天完成 Redis")
+
+
+def test_format_personal_inbox_commit_outputs_user_facing_confirmation(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    store = PersonalStore(tmp_path / "workspace")
+    register_personal_tools(registry, store)
+    context = {"memory_user_scope": "user:alice"}
+    triage_json = registry.dispatch(
+        "personal_inbox_triage",
+        {
+            "text": (
+                "今天完成 Redis 复盘，但场景题还是卡点。"
+                "明天要练 RabbitMQ 选型，记一下长期目标是月底前完成面试项目表达。"
+            )
+        },
+        runtime_context=context,
+    )
+    commit_json = registry.dispatch(
+        "personal_inbox_commit",
+        {"triage_json": triage_json},
+        runtime_context=context,
+    )
+
+    formatted = registry.dispatch(
+        "format_personal_inbox_commit",
+        {"commit_json": commit_json},
+    )
+
+    assert "## 个人收件箱已批量写入" in formatted
+    assert "- 待办：1 条" in formatted
+    assert "- 复盘：已写入" in formatted
+    assert "- 长期记忆候选：有，需单独确认" in formatted
+    assert "- 要练 RabbitMQ 选型" in formatted
+    assert "- 总结：今天完成 Redis 复盘" in formatted
+    assert "- 但场景题还是卡点" in formatted
+    assert "memory：" in formatted
+    assert "再次确认后再写入长期记忆" in formatted
+    assert "长期记忆不会自动写入" in formatted
