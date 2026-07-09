@@ -257,6 +257,7 @@ class HeartbeatService:
                 mode="minimal",
                 lane_name="heartbeat",
                 correlation_id=correlation_id,
+                disabled_tools=["memory_write"],
             )
             meaningful = self._parse_response(reply.text)
             self.last_run_at = scheduled_at or time.time()

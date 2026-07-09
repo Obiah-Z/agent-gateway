@@ -279,7 +279,7 @@ def test_format_meal_log_entry_outputs_user_facing_confirmation(tmp_path: Path) 
     assert "- 蛋白质：约 42g" in formatted
     assert "- 估算置信度：80%" in formatted
     assert "不会自动生成饮食计划、写体重或写入长期记忆" in formatted
-    assert store.list_meal_logs("user:wework:diet")[0]["raw_text"] == "鸡胸肉沙拉一份"
+    assert store.list_meal_logs("user:wework:diet", meal_date="2026-07-08")[0]["raw_text"] == "鸡胸肉沙拉一份"
 
 
 def test_meal_log_update_corrects_existing_meal_without_duplicate(tmp_path: Path) -> None:

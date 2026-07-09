@@ -18,10 +18,14 @@ workspace/cron/
 workspace/memory/
 workspace/diet/
 workspace/delivery-queue/
+/workspace/reports/
+/workspace/personal/
+/workspace/agent-news-sources.json
+/workspace/github-skill-sources.json
+
 .DS_Store
 Thumbs.db
 
 /PROJECT_PLAN.md
 /agent-map/
 
-/workspace/reports/

@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
+from agent_gateway.runtime.user_scope import canonicalize_user_scope
 
 
 DIET_TABLES = {
@@ -1354,7 +1355,7 @@ class DietStore:
 
     @staticmethod
     def _normalize_scope(user_scope: str) -> str:
-        return " ".join(str(user_scope or "").strip().split())
+        return canonicalize_user_scope(user_scope)
 
     def _require_scope(self, user_scope: str) -> str:
         scope = self._normalize_scope(user_scope)

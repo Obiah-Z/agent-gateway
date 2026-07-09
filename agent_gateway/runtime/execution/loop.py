@@ -18,19 +18,13 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.execution.resilience import ResilienceRunner
 from agent_gateway.runtime.state.context import ContextGuard
 from agent_gateway.runtime.state.store import SessionStore
+from agent_gateway.runtime.user_scope import user_scope_from_session_key
 
 
 def memory_scope_from_session_key(session_key: str) -> str:
     """从 session_key 推导用户记忆作用域，避免不同用户共享个人记忆。"""
 
-    raw = str(session_key or "").strip()
-    if not raw:
-        return ""
-    parts = raw.split(":")
-    if len(parts) >= 3 and parts[0] == "agent":
-        # 去掉 agent_id，让同一用户在多个 Agent 间可以共享个人记忆。
-        return "user:" + ":".join(parts[2:])
-    return raw
+    return user_scope_from_session_key(session_key)
 
 
 class AgentLoopRunner:
