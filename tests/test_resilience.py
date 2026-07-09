@@ -110,7 +110,13 @@ def test_resilience_runner_does_not_cool_down_profile_for_bad_request(monkeypatc
     assert manager.snapshot()[0]["failure_reason"] == "bad_request"
 
 
-def test_resilience_runner_returns_generated_artifact_on_max_iterations(monkeypatch) -> None:
+def test_resilience_runner_returns_generated_artifact_on_max_iterations(
+    monkeypatch, tmp_path
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifact = workspace / "reports" / "diagrams" / "Agent执行流程.svg"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("<svg />", encoding="utf-8")
     tools = ToolRegistry()
     tools.register(
         RegisteredTool(
@@ -121,7 +127,7 @@ def test_resilience_runner_returns_generated_artifact_on_max_iterations(monkeypa
         )
     )
     runner = ResilienceRunner(
-        GatewaySettings(max_iterations=1),
+        GatewaySettings(max_iterations=1, workspace_root=workspace),
         ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")]),
         tools,
     )
@@ -157,3 +163,53 @@ def test_resilience_runner_returns_generated_artifact_on_max_iterations(monkeypa
     assert result.stop_reason == "max_iterations"
     assert "[max iterations reached]" not in result.text
     assert "workspace/reports/diagrams/Agent执行流程.svg" in result.text
+
+
+def test_resilience_runner_does_not_claim_missing_artifact_on_max_iterations(
+    monkeypatch, tmp_path
+) -> None:
+    tools = ToolRegistry()
+    tools.register(
+        RegisteredTool(
+            name="write_file",
+            description="write file",
+            input_schema={"type": "object", "properties": {}},
+            handler=lambda **kwargs: "Wrote report to workspace/reports/常见午餐搭配参考.md",
+        )
+    )
+    runner = ResilienceRunner(
+        GatewaySettings(max_iterations=1, workspace_root=tmp_path / "workspace"),
+        ProfileManager([AuthProfile(name="primary", provider="anthropic", api_key="k")]),
+        tools,
+    )
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            del kwargs
+            return type(
+                "FakeResponse",
+                (),
+                {
+                    "stop_reason": "tool_use",
+                    "content": [
+                        type(
+                            "FakeBlock",
+                            (),
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "write_file",
+                                "input": {"file_path": "workspace/reports/常见午餐搭配参考.md"},
+                            },
+                        )()
+                    ],
+                },
+            )()
+
+    fake_client = type("FakeClient", (), {"messages": FakeMessages()})()
+    monkeypatch.setattr(runner, "_build_client", lambda profile: fake_client)
+
+    result = runner.run("system", [{"role": "user", "content": "写报告"}], model="m1")
+
+    assert result.stop_reason == "max_iterations"
+    assert result.text == "[max iterations reached]"

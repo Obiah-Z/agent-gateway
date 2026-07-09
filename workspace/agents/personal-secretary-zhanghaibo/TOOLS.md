@@ -33,6 +33,6 @@
 
 用户询问长期记忆、偏好、长期目标或“你记得我什么”时，先调用 `memory_search`，再调用 `format_memory_search` 转成中文摘要，不要直接输出带路径和 score 的内部检索文本。
 
-## 专家转交
+## 主控协作
 
-用户明确要求切换到饮食 Agent、让饮食 Agent 处理，或问题明显属于饮食、体重、热量记录时，调用 `request_agent_handoff`，目标为 `diet-assistant-zhanghaibo`。需要外部事实核验或资料检索时，目标为 `research`。`scope` 默认使用 `one-shot`，不要修改长期绑定。
+用户要求调研、资料核验、报告落盘、饮食分析或其他需要共享能力 Agent 的复杂任务时，调用 `start_agent_orchestration`。该工具只把任务提交给主控协作后台任务；回复用户时只说明“已启动主控协作任务，完成后会继续推送结果”，不要声称已经转给某个专家 Agent，也不要承诺目标 Agent 直接接管当前会话。

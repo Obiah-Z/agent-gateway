@@ -87,6 +87,7 @@ class CollaborationRuntime:
                     mode=mode,
                     correlation_id=correlation_id,
                     disabled_tools=disabled_tools,
+                    persist_history=False,
                 )
                 action = self._parse_orchestration_action(controller_reply.text)
                 action_type = str(action.get("action") or "").strip().lower()
@@ -108,6 +109,7 @@ class CollaborationRuntime:
                     observation = await self._execute_orchestration_delegate(
                         action=action,
                         user_goal=goal,
+                        controller_agent_id=controller_agent_id,
                         run_id=run_id,
                         iteration=iteration,
                         channel=channel,
@@ -195,6 +197,7 @@ class CollaborationRuntime:
         *,
         action: dict[str, Any],
         user_goal: str,
+        controller_agent_id: str,
         run_id: str,
         iteration: int,
         channel: str,
@@ -205,7 +208,7 @@ class CollaborationRuntime:
     ) -> dict[str, Any]:
         """执行主控 Agent 规划出的单个专家委托动作。"""
 
-        target_agent_id = str(
+        requested_target_agent_id = str(
             action.get("target_agent_id") or action.get("agent_id") or ""
         ).strip()
         task_prompt = str(
@@ -214,11 +217,17 @@ class CollaborationRuntime:
             or action.get("prompt")
             or ""
         ).strip()
-        if not target_agent_id:
+        if not requested_target_agent_id:
             raise ValueError("delegate action requires target_agent_id")
         if not task_prompt:
             raise ValueError("delegate action requires task_prompt")
 
+        target_agent_id = self._normalize_delegate_target(
+            requested_target_agent_id,
+            task_prompt=task_prompt,
+            purpose=str(action.get("purpose") or ""),
+            controller_agent_id=controller_agent_id,
+        )
         session_key = f"{session_prefix}:{run_id}:step-{iteration:02d}:{target_agent_id}"
         reply = await self.runner.run_task_turn(
             agent_id=target_agent_id,
@@ -228,11 +237,13 @@ class CollaborationRuntime:
             mode=mode,
             correlation_id=correlation_id,
             disabled_tools=disabled_tools,
+            persist_history=False,
         )
         return {
             "iteration": iteration,
             "action": "delegate",
             "target_agent_id": target_agent_id,
+            "requested_target_agent_id": requested_target_agent_id,
             "purpose": str(action.get("purpose") or ""),
             "task_prompt": task_prompt,
             "session_key": session_key,
@@ -241,6 +252,43 @@ class CollaborationRuntime:
             "stop_reason": reply.stop_reason,
             "tool_calls": list(reply.tool_calls),
         }
+
+    def _normalize_delegate_target(
+        self,
+        requested_target_agent_id: str,
+        *,
+        task_prompt: str,
+        purpose: str,
+        controller_agent_id: str,
+    ) -> str:
+        """把错误委托到入口/主控 Agent 的动作改写到具体专家 Agent。
+
+        主控 Agent 负责规划，不应该再作为专家执行自己的子任务；入口 Agent（main、
+        feishu-entry、wework-entry、个人秘书）也不应该承接写文件、调研、审查等专家任务。
+        """
+
+        blocked = {
+            "",
+            "main",
+            "feishu-entry",
+            "wework-entry",
+            "personal-secretary-zhanghaibo",
+            controller_agent_id,
+        }
+        requested = requested_target_agent_id.strip()
+        if requested and requested not in blocked:
+            return requested
+
+        text = f"{purpose}\n{task_prompt}".lower()
+        if any(token in text for token in ("写入", "本地文档", "markdown", "文件", "报告", "成文")):
+            return "doc-writer"
+        if any(token in text for token in ("调研", "研究", "资料", "搜索", "来源", "证据")):
+            return "research"
+        if any(token in text for token in ("审查", "风险", "评审", "review", "gate")):
+            return "reviewer"
+        if any(token in text for token in ("计划", "规划", "拆解", "路线")):
+            return "planner"
+        return "planner"
 
     def _build_controller_prompt(
         self,

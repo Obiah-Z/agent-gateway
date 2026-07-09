@@ -18,7 +18,7 @@
 - 用户询问为什么交给某个 Agent 或为什么需要协作时，使用 `explain_agent_route` 生成结构化路由解释。
 - 在当前系统尚未实现自动协作前，使用 `suggest_agent_delegation` 生成结构化委派建议。
 - 用户询问当前有哪些 Agent、谁能做什么或某个任务该交给谁时，先用 `list_agent_capabilities` 查询当前系统真实能力目录；列目录用 `format_agent_capability_catalog`，按任务推荐用 `match_agent_capability` 后接 `format_agent_capability_match`。
-- 用户确认要交给推荐 Agent 时，使用 `compose_agent_handoff_package` 生成完整交接包；如果用户明确要求执行转交，继续调用 `request_agent_handoff`，让运行时一次性调用目标 Agent。
+- 用户确认要实际执行复杂协作任务时，使用 `start_agent_orchestration` 创建主控协作后台任务；如果只是要交接说明，使用 `compose_agent_handoff_package` 生成完整交接包。
 - 不确定可用 Agent、协作路线或交接字段时，先用 `list_agent_capabilities` 和 `list_agent_collaboration_routes` 查询当前系统真实能力目录。
 - 给出用户可理解的简短结论，同时保留可交给目标 Agent 的上下文摘要。
 
@@ -28,4 +28,4 @@
 - 不配置个人 Cron。
 - 不写入大量长期记忆。
 - 不主动处理系统运维问题，除非用户明确询问。
-- 不直接伪装成能力 Agent 已经执行完成；只有调用 `request_agent_handoff` 后，才代表本轮已请求运行时调用目标 Agent。
+- 不直接伪装成能力 Agent 已经执行完成；只有调用 `start_agent_orchestration` 后，才代表本轮已进入主控协作执行链路。

@@ -8,13 +8,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 
 from agent_gateway.runtime.domain.agents import AgentManager
 from agent_gateway.config import GatewaySettings
 from agent_gateway.ai.context.prompt import PromptAssembler
-from agent_gateway.runtime.domain.models import AgentHandoffRequest, AgentReply
+from agent_gateway.runtime.domain.models import AgentReply
 from agent_gateway.runtime.observability.events import RuntimeEventStore
 from agent_gateway.runtime.execution.resilience import ResilienceRunner
 from agent_gateway.runtime.state.context import ContextGuard
@@ -87,6 +86,7 @@ class AgentLoopRunner:
         mode: str,
         correlation_id: str = "",
         disabled_tools: list[str] | None = None,
+        persist_history: bool = True,
     ) -> AgentReply:
         """执行一次 Agent 轮次。
 
@@ -110,8 +110,7 @@ class AgentLoopRunner:
             channel=channel,
             metadata={"mode": mode, "input_length": len(user_text)},
         )
-        messages = self.sessions.load_messages(agent_id, session_key)
-        previous_message_count = len(messages)
+        messages = self.sessions.load_messages(agent_id, session_key) if persist_history else []
         messages.append({"role": "user", "content": user_text})
         allowed_tools = agent.allowed_tool_names(self.resilience_runner.tools.names())
         disabled = {name for name in (disabled_tools or []) if name}
@@ -152,15 +151,10 @@ class AgentLoopRunner:
                 allowed_tools=allowed_tools,
                 runtime_context=runtime_context,
             )
-            # Handoff 只能由本轮新产生的工具结果触发。旧会话历史里可能残留
-            # agent_handoff_request，不能让历史请求污染当前用户消息的路由。
-            current_turn_messages = result.messages[previous_message_count:]
-            handoff_request = self._extract_handoff_request(
-                current_turn_messages,
-                source_agent_id=agent_id,
-            )
-            # ResilienceRunner 返回的是经过工具调用闭环后的完整历史，用它覆盖会话文件。
-            self.sessions.rewrite_messages(agent_id, session_key, result.messages)
+            # ResilienceRunner 返回的是经过工具调用闭环后的完整历史。协作中间轮次
+            # 只写 run artifact，避免把 step 会话散落到各 Agent 的普通会话目录。
+            if persist_history:
+                self.sessions.rewrite_messages(agent_id, session_key, result.messages)
             self._record(
                 "agent.turn.completed",
                 status="ok",
@@ -175,9 +169,6 @@ class AgentLoopRunner:
                     "duration_ms": round((time.time() - started_at) * 1000, 1),
                     "stop_reason": result.stop_reason,
                     "tool_calls": list(result.tool_calls),
-                    "handoff_target_agent_id": handoff_request.target_agent_id
-                    if handoff_request
-                    else "",
                     "profile": getattr(result, "profile_name", ""),
                     "model": getattr(result, "model", ""),
                 },
@@ -188,7 +179,6 @@ class AgentLoopRunner:
                 text=result.text,
                 stop_reason=result.stop_reason,
                 tool_calls=result.tool_calls,
-                handoff_request=handoff_request,
             )
         except Exception as exc:
             self._record(
@@ -207,38 +197,6 @@ class AgentLoopRunner:
                 },
             )
             raise
-
-    def _extract_handoff_request(
-        self,
-        messages: list[dict[str, object]],
-        *,
-        source_agent_id: str,
-    ) -> AgentHandoffRequest | None:
-        """从工具结果中提取最新的运行时 handoff 请求。"""
-
-        for message in reversed(messages):
-            for text in self._iter_content_text(message.get("content")):
-                try:
-                    payload = json.loads(text)
-                except (TypeError, json.JSONDecodeError):
-                    continue
-                if not isinstance(payload, dict):
-                    continue
-                if payload.get("type") != "agent_handoff_request":
-                    continue
-                target_agent_id = str(payload.get("target_agent_id") or "").strip()
-                handoff_prompt = str(payload.get("handoff_prompt") or "").strip()
-                if not target_agent_id or not handoff_prompt:
-                    continue
-                return AgentHandoffRequest(
-                    target_agent_id=target_agent_id,
-                    handoff_prompt=handoff_prompt,
-                    reason=str(payload.get("reason") or "").strip(),
-                    scope=str(payload.get("scope") or "one-shot").strip() or "one-shot",
-                    source_agent_id=source_agent_id,
-                    user_goal=str(payload.get("user_goal") or "").strip(),
-                )
-        return None
 
     def _iter_content_text(self, content: object) -> list[str]:
         """兼容纯文本、content block 和 tool_result 嵌套内容。"""

@@ -120,7 +120,7 @@ docker compose -f docker-compose.yml -f docker-compose.roles.yml up -d --build
 | Phase 15 | 已完成 | ChannelRuntime lane 化、入站背压、热重启保护和入站观测。 |
 | Phase 16 | 待实现 | Agent 权限预览、配置校验、审计、快照和回滚。 |
 | Phase 17 | 待实现 | 会话归档、删除、导出、记忆审查、压缩和污染治理。 |
-| Phase 18 | 部分完成 | 后台任务队列已完成；多 Agent handoff、per-agent 并发和任务优先级仍待增强。 |
+| Phase 18 | 部分完成 | 后台任务队列和主控 Agent 协作已完成；per-agent 并发和任务优先级仍待增强。 |
 | Phase 19 | 已完成 | Docker Compose、systemd、数据卷、HTTPS、备份恢复、启动前检查。 |
 | Phase 20 | 已完成 | Redis/PostgreSQL/RabbitMQ 分布式执行基础、可靠队列、分布式 lane、部署与压测闭环。 |
 | Phase 21 | 已完成 | Redis ready index + per-session pending bucket，保证同一 session 严格 FIFO，同时不同 session 并行。 |
@@ -168,7 +168,7 @@ failed=0
 | 模型调用事件和错误分类仍不够细 | 排查模型限流/鉴权/超时不够直观 | Phase 13 增强 |
 | Agent 最终权限缺少预览和 diff | 多 Agent 配置审查成本高 | Phase 16 |
 | 会话与记忆长期治理不足 | 数据膨胀、记忆污染 | Phase 17 |
-| 多 Agent handoff 仍偏 prompt 编排 | 协作任务缺少强状态机 | Phase 18 |
+| 多 Agent 协作仍需增强状态机 | 当前已收敛到主控协作，但阶段级恢复、人工确认和状态查询仍需加强 | Phase 18 |
 | 多 worker 长期部署需显式配置不同 `GATEWAY_TASK_WORKER_ID` | 运维观测可能混淆 | 后续部署增强 |
 | Redis session ready scheduler 需要显式开启 | 默认仍兼容旧路径；分布式多 worker 严格顺序模式需要 `GATEWAY_SESSION_READY_SCHEDULER_ENABLED=true` | 运维配置 |
 | Scheduler 续租失败后不强行中断当前模型调用 | 当前会记录续租失败事件并等待 TTL/后续恢复，自动抢占正在执行的外部调用仍需谨慎设计 | 后续恢复增强 |

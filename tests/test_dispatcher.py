@@ -5,7 +5,6 @@ from agent_gateway.gateways.messaging.manager import ChannelManager
 from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.runtime.domain.models import (
     AgentConfig,
-    AgentHandoffRequest,
     Binding,
     InboundMessage,
 )
@@ -18,6 +17,7 @@ from agent_gateway.runtime.observability.events import RuntimeEventStore
 class FakeRunner:
     def __init__(self) -> None:
         self.calls = []
+        self.sessions = FakeSessionStore()
 
     async def run_turn(
         self,
@@ -41,7 +41,22 @@ class FakeRunner:
         )
 
 
-class HandoffRunner(FakeRunner):
+class FakeSessionStore:
+    def __init__(self) -> None:
+        self.appended = []
+
+    def append_message(self, agent_id: str, session_key: str, role: str, content) -> None:
+        self.appended.append(
+            {
+                "agent_id": agent_id,
+                "session_key": session_key,
+                "role": role,
+                "content": content,
+            }
+        )
+
+
+class LegacyHandoffRunner(FakeRunner):
     async def run_turn(
         self,
         agent_id: str,
@@ -58,17 +73,9 @@ class HandoffRunner(FakeRunner):
             return AgentReply(
                 agent_id=agent_id,
                 session_key=session_key,
-                text="正在转交饮食助手处理。",
+                text="旧版模型声称正在转交饮食助手处理。",
                 stop_reason="end_turn",
                 tool_calls=["request_agent_handoff"],
-                handoff_request=AgentHandoffRequest(
-                    target_agent_id="diet-assistant-zhanghaibo",
-                    handoff_prompt="请记录早餐：鸡蛋和牛奶。",
-                    reason="饮食记录应由饮食助手处理。",
-                    scope="one-shot",
-                    source_agent_id=agent_id,
-                    user_goal="记录早餐",
-                ),
             )
         return AgentReply(
             agent_id=agent_id,
@@ -156,8 +163,11 @@ def test_dispatcher_auto_orchestrates_complex_repo_adoption_request(tmp_path) ->
     call = task_queue.calls[0]
     assert call["task_type"] == "agent_collaboration"
     assert call["source"] == "auto_orchestration"
-    assert call["agent_id"] == "main"
-    assert call["payload"]["controller_agent_id"] == "main"
+    assert call["agent_id"] == "wework-entry"
+    assert call["session_key"] == (
+        f"orchestration:{call['payload']['run_id']}:controller:wework-entry"
+    )
+    assert call["payload"]["controller_agent_id"] == "wework-entry"
     assert call["payload"]["channel"] == "wework"
     assert call["payload"]["response_target"] == {
         "channel": "wework",
@@ -201,7 +211,147 @@ def test_dispatcher_does_not_auto_orchestrate_simple_repo_question(tmp_path) -> 
     assert result.reply.text.startswith("echo:")
 
 
-def test_dispatcher_executes_one_shot_agent_handoff(tmp_path) -> None:
+def test_dispatcher_auto_orchestrates_personal_secretary_research_report_request(
+    tmp_path,
+) -> None:
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            dm_scope="per-account-channel-peer",
+        )
+    )
+    bindings = BindingTable()
+    bindings.add(
+        Binding(
+            agent_id="personal-secretary-zhanghaibo",
+            tier=1,
+            match_key="peer_id",
+            match_value="ZhangHaiBo",
+            priority=100,
+        )
+    )
+    queue = DeliveryQueue(tmp_path / "delivery")
+    runner = FakeRunner()
+    task_queue = FakeTaskQueue()
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        runner,
+        CommandQueue(),
+        queue,
+        task_queue=task_queue,
+    )
+    inbound = InboundMessage(
+        text="调研一下常见的午餐搭配，并写入本地文档",
+        sender_id="ZhangHaiBo",
+        channel="wework",
+        account_id="wework-main",
+        peer_id="ZhangHaiBo",
+        metadata={"correlation_id": "wework_msg_1"},
+    )
+
+    result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+
+    assert runner.calls == []
+    assert result.route.agent_id == "personal-secretary-zhanghaibo"
+    assert result.reply.stop_reason == "orchestration_enqueued"
+    assert result.reply.tool_calls == ["start_agent_orchestration"]
+    assert len(task_queue.calls) == 1
+    call = task_queue.calls[0]
+    assert call["task_type"] == "agent_collaboration"
+    assert call["source"] == "auto_orchestration"
+    assert call["agent_id"] == "personal-secretary-zhanghaibo"
+    assert call["session_key"] == (
+        f"orchestration:{call['payload']['run_id']}:controller:personal-secretary-zhanghaibo"
+    )
+    assert "wework_msg_1" in call["idempotency_key"]
+    assert call["payload"]["user_goal"] == inbound.text
+    assert call["payload"]["controller_agent_id"] == "personal-secretary-zhanghaibo"
+    assert call["payload"]["response_target"] == {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "ZhangHaiBo",
+        "source_session_key": (
+            "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+        ),
+        "source_agent_id": "personal-secretary-zhanghaibo",
+    }
+    assert runner.sessions.appended == [
+        {
+            "agent_id": "personal-secretary-zhanghaibo",
+            "session_key": (
+                "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+            ),
+            "role": "user",
+            "content": inbound.text,
+        },
+        {
+            "agent_id": "personal-secretary-zhanghaibo",
+            "session_key": (
+                "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+            ),
+            "role": "assistant",
+            "content": result.reply.text,
+        },
+    ]
+
+
+def test_dispatcher_auto_orchestration_same_text_distinct_messages_create_distinct_tasks(
+    tmp_path,
+) -> None:
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            dm_scope="per-account-channel-peer",
+        )
+    )
+    bindings = BindingTable()
+    bindings.add(
+        Binding(
+            agent_id="personal-secretary-zhanghaibo",
+            tier=1,
+            match_key="peer_id",
+            match_value="ZhangHaiBo",
+            priority=100,
+        )
+    )
+    queue = DeliveryQueue(tmp_path / "delivery")
+    task_queue = FakeTaskQueue()
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        FakeRunner(),
+        CommandQueue(),
+        queue,
+        task_queue=task_queue,
+    )
+    text = "调研一下常见的午餐搭配，并写入本地文档"
+
+    for correlation_id in ("wework_msg_1", "wework_msg_2"):
+        inbound = InboundMessage(
+            text=text,
+            sender_id="ZhangHaiBo",
+            channel="wework",
+            account_id="wework-main",
+            peer_id="ZhangHaiBo",
+            metadata={"correlation_id": correlation_id},
+        )
+        result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+        assert result.reply.stop_reason == "orchestration_enqueued"
+
+    first, second = task_queue.calls
+    assert first["payload"]["user_goal"] == second["payload"]["user_goal"] == text
+    assert first["payload"]["run_id"] != second["payload"]["run_id"]
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert "wework_msg_1" in first["idempotency_key"]
+    assert "wework_msg_2" in second["idempotency_key"]
+
+
+def test_dispatcher_does_not_execute_legacy_one_shot_agent_handoff(tmp_path) -> None:
     agents = AgentManager()
     agents.register(
         AgentConfig(
@@ -228,7 +378,7 @@ def test_dispatcher_executes_one_shot_agent_handoff(tmp_path) -> None:
         )
     )
     queue = DeliveryQueue(tmp_path / "delivery")
-    runner = HandoffRunner()
+    runner = LegacyHandoffRunner()
     dispatcher = GatewayDispatcher(agents, bindings, runner, CommandQueue(), queue)
     inbound = InboundMessage(
         text="帮我切换到饮食 Agent，记录早餐",
@@ -240,16 +390,10 @@ def test_dispatcher_executes_one_shot_agent_handoff(tmp_path) -> None:
 
     result = asyncio.run(dispatcher.dispatch_inbound(inbound))
 
-    assert result.route.agent_id == "diet-assistant-zhanghaibo"
-    assert result.reply.agent_id == "diet-assistant-zhanghaibo"
-    assert result.reply.text == "diet-result:请记录早餐：鸡蛋和牛奶。"
-    assert [call[0] for call in runner.calls] == [
-        "personal-secretary-zhanghaibo",
-        "diet-assistant-zhanghaibo",
-    ]
-    assert runner.calls[1][1].startswith(
-        "agent:diet-assistant-zhanghaibo:wework:wework-main:direct:zhanghaibo"
-    )
+    assert result.route.agent_id == "personal-secretary-zhanghaibo"
+    assert result.reply.agent_id == "personal-secretary-zhanghaibo"
+    assert result.reply.text == "旧版模型声称正在转交饮食助手处理。"
+    assert [call[0] for call in runner.calls] == ["personal-secretary-zhanghaibo"]
 
 
 def test_dispatcher_propagates_correlation_id_to_events_and_delivery(tmp_path) -> None:

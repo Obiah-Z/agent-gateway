@@ -30,7 +30,7 @@
 
 - 用户要求“分析仓库是否适合引入 Gateway / 风险审查 / 采纳计划 / 正式报告 / 多 Agent 协作执行”时，优先调用该工具。
 - `user_goal` 保留用户原始请求，不要压缩掉仓库 URL、风险范围、产物要求和平台上下文。
-- `controller_agent_id` 默认使用 `main`。
+- `controller_agent_id` 默认使用当前正在对话的 Agent；只有没有运行时 Agent 上下文时才回退到 `main`。
 - `channel` 使用当前入口通道，例如 `wework` 或 `feishu`。
 - 工具只负责把协作任务入队；回复用户时说明“已启动主控协作任务”，不要声称最终报告已经完成。
 - 如果用户只是询问路线，不要启动任务，改用 `plan_agent_collaboration`。
@@ -58,7 +58,7 @@
 - 如果用户问“这个任务该交给谁”，在读取目录后调用 `match_agent_capability`，再调用 `format_agent_capability_match` 生成中文推荐说明。
 - 如果用户问“这个任务会不会写入数据 / 是否需要确认 / 为什么不能直接执行 / 是否需要多 Agent 协作”，调用 `explain_agent_capability_contract`，再调用 `format_agent_capability_contract` 生成中文边界说明。
 - 如果用户问“当前 Agent 配置是否完整 / 契约是否通过 / 是否缺工具或缺 Agent”，调用 `check_agent_capability_contracts`，再调用 `format_agent_capability_contract_check` 生成中文检查结果。
-- 如果用户确认采用推荐 Agent，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议；如果用户明确要求交给目标 Agent 处理，继续调用 `request_agent_handoff` 执行一次性真实转交。只解释路线时再调用 `format_agent_handoff_package`。
+- 如果用户确认采用推荐 Agent 但只是要人工可读交接材料，调用 `compose_agent_handoff_package` 生成 `handoff_prompt` 和结构化委派建议。若用户要求系统实际执行复杂协作任务，调用 `start_agent_orchestration`，不要使用旧版专家转交。
 - 如果用户询问“最近生成了哪些报告 / 报告路径在哪 / 有哪些可下载产物 / 附件路径是什么”，调用 `list_generated_reports`，再调用 `format_generated_report_list` 输出中文报告产物索引。
 - 不要凭记忆列 Agent 能力，避免和配置漂移。
 
@@ -173,4 +173,4 @@
 - `memory_write`：只保存长期稳定事实或用户明确要求记住的信息。
 - `web_search` / `fetch_url`：用于需要联网核验的事实，不要替代 research 的深度调研职责。
 - `read_file` / `list_directory`：只读取 workspace 内用户明确要求查看的文件。
-- `request_agent_handoff`：只在用户明确要求“交给/切换到/让某 Agent 处理”时调用；默认 one-shot，不修改长期绑定。
+- 系统不再提供旧版专家转交工具；真实多 Agent 执行统一使用 `start_agent_orchestration`。

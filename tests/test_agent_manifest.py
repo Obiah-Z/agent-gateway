@@ -245,7 +245,7 @@ def test_agent_loop_runner_excludes_disabled_tools(tmp_path: Path) -> None:
     assert "disabled_tools: memory_write" in resilience.last_system_prompt
 
 
-def test_agent_loop_runner_extracts_handoff_request_from_tool_result(tmp_path: Path) -> None:
+def test_agent_loop_runner_ignores_legacy_handoff_request_from_history(tmp_path: Path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",
         data_dir=tmp_path / "data",
@@ -262,91 +262,7 @@ def test_agent_loop_runner_extracts_handoff_request_from_tool_result(tmp_path: P
             id="personal-secretary-zhanghaibo",
             name="Secretary",
             tool_policy_mode="allowlist",
-            tool_names=("request_agent_handoff",),
-        )
-    )
-    sessions = SessionStore(settings.sessions_dir)
-    resilience = FakeResilienceRunner()
-    resilience.response_tool_calls = ["request_agent_handoff"]
-    resilience.response_messages = [
-        {"role": "user", "content": "帮我切换到饮食 Agent"},
-        {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": "toolu_1",
-                    "name": "request_agent_handoff",
-                    "input": {
-                        "target_agent_id": "diet-assistant-zhanghaibo",
-                        "handoff_prompt": "请处理饮食记录。",
-                        "reason": "饮食任务应由饮食助手处理。",
-                    },
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "toolu_1",
-                    "content": json.dumps(
-                        {
-                            "type": "agent_handoff_request",
-                            "target_agent_id": "diet-assistant-zhanghaibo",
-                            "handoff_prompt": "请处理饮食记录。",
-                            "reason": "饮食任务应由饮食助手处理。",
-                            "scope": "one-shot",
-                        },
-                        ensure_ascii=False,
-                    ),
-                }
-            ],
-        },
-    ]
-    runner = AgentLoopRunner(
-        settings,
-        agents,
-        sessions,
-        PromptAssembler(settings.workspace_root),
-        resilience,
-    )
-
-    reply = asyncio.run(
-        runner.run_turn(
-            "personal-secretary-zhanghaibo",
-            "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo",
-            "帮我切换到饮食 Agent",
-            channel="wework",
-        )
-    )
-
-    assert reply.handoff_request is not None
-    assert reply.handoff_request.source_agent_id == "personal-secretary-zhanghaibo"
-    assert reply.handoff_request.target_agent_id == "diet-assistant-zhanghaibo"
-    assert reply.handoff_request.handoff_prompt == "请处理饮食记录。"
-    assert reply.tool_calls == ["request_agent_handoff"]
-
-
-def test_agent_loop_runner_ignores_stale_handoff_request_from_history(tmp_path: Path) -> None:
-    settings = GatewaySettings(
-        config_dir=tmp_path / "config",
-        data_dir=tmp_path / "data",
-        workspace_root=tmp_path / "workspace",
-        model_id="deepseek-v4-pro",
-    )
-    settings.ensure_directories()
-    settings.workspace_root.mkdir(parents=True, exist_ok=True)
-    (settings.workspace_root / "IDENTITY.md").write_text("Identity", encoding="utf-8")
-
-    agents = AgentManager()
-    agents.register(
-        AgentConfig(
-            id="personal-secretary-zhanghaibo",
-            name="Secretary",
-            tool_policy_mode="allowlist",
-            tool_names=("request_agent_handoff",),
+            tool_names=("start_agent_orchestration",),
         )
     )
     sessions = SessionStore(settings.sessions_dir)
@@ -420,7 +336,7 @@ def test_agent_loop_runner_ignores_stale_handoff_request_from_history(tmp_path: 
         )
     )
 
-    assert reply.handoff_request is None
+    assert not hasattr(reply, "handoff_request")
     assert resilience.last_runtime_context["session_key"] == session_key
 
 

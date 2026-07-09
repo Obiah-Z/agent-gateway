@@ -24,29 +24,30 @@ agent-gateway doctor
 
 通过标准：默认样例全部 `PASS`，脚本退出码为 `0`。单条样例需要同时满足三个条件：入口意图正确、推荐 Agent 正确、目标 Agent 的 allowlist 包含该场景声明的关键工具。脚本还会输出风险契约，标明该场景是只读、写入、需要确认，还是需要多 Agent 协作。
 
-## 专家 Handoff 验收
+## 主控协作验收
 
-入口路由和专家 handoff 是两层能力：路由验收证明“该交给谁”的判断正确，专家 handoff 证明“用户明确要求交给目标 Agent 时，运行时真的执行目标 Agent”。当前实现支持 one-shot handoff，不修改长期绑定，不改变用户后续消息默认归属。
+入口路由和主控协作是两层能力：路由验收证明“该如何判断任务边界”，主控协作验收证明“复杂任务能进入 `agent_collaboration` 后台任务，由 `main` 持续规划并委托专家 Agent 执行”。系统不再支持旧版专家转交。
 
 典型路径：
 
 ```text
-personal-secretary-zhanghaibo
-  -> request_agent_handoff(target_agent_id=diet-assistant-zhanghaibo)
-  -> dispatcher 验证目标 Agent
-  -> forced_agent_id 执行 diet-assistant-zhanghaibo
-  -> 本轮最终回复来自 diet-assistant-zhanghaibo
+平台入站复杂任务
+  -> dispatcher 或入口 Agent 创建 agent_collaboration
+  -> TaskWorkerRuntime 消费任务
+  -> main 输出 delegate/final/abort action
+  -> runtime 调用专家 Agent 并把 observation 回灌 main
+  -> final_output 投递回原平台会话
 ```
 
 针对性测试：
 
 ```bash
-pytest tests/test_dispatcher.py::test_dispatcher_executes_one_shot_agent_handoff \
-  tests/test_builtin_tools.py::test_request_agent_handoff_outputs_runtime_request \
+pytest tests/test_dispatcher.py::test_dispatcher_auto_orchestrates_high_confidence_repo_adoption \
+  tests/test_builtin_tools.py::test_start_agent_orchestration_enqueues_controller_task \
   tests/test_diet_agent_config.py::test_platform_entry_agents_have_delegation_tool_only_at_entry_layer -q
 ```
 
-通过标准：`DispatchResult.route.agent_id` 和最终 `reply.agent_id` 都是目标专家 Agent；源 Agent 只负责发起 handoff 请求，最终投递内容来自目标 Agent。
+通过标准：`agent_collaboration` 任务成功入队，payload 包含 `user_goal`、`controller_agent_id=<当前路由 Agent>` 和 `response_target`；用户先收到“已启动主控协作任务”，最终结果由后台协作任务回投原会话。
 
 ## 当前覆盖场景
 

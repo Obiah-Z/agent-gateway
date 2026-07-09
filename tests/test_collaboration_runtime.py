@@ -16,6 +16,7 @@ class SequencedCollaborationRunner:
     def __init__(self, replies: dict[str, list[str]]) -> None:
         self.calls: list[dict[str, object]] = []
         self.replies = {agent_id: list(items) for agent_id, items in replies.items()}
+        self.sessions = FakeSessionStore()
 
     async def run_task_turn(
         self,
@@ -27,6 +28,7 @@ class SequencedCollaborationRunner:
         mode: str,
         correlation_id: str = "",
         disabled_tools: list[str] | None = None,
+        persist_history: bool = True,
     ) -> AgentReply:
         self.calls.append(
             {
@@ -37,6 +39,7 @@ class SequencedCollaborationRunner:
                 "mode": mode,
                 "correlation_id": correlation_id,
                 "disabled_tools": disabled_tools or [],
+                "persist_history": persist_history,
             }
         )
         queue = self.replies.setdefault(agent_id, [])
@@ -64,6 +67,21 @@ class FakeResultDispatcher:
             }
         )
         return "delivery-1"
+
+
+class FakeSessionStore:
+    def __init__(self) -> None:
+        self.appended: list[dict[str, object]] = []
+
+    def append_message(self, agent_id: str, session_key: str, role: str, content: object) -> None:
+        self.appended.append(
+            {
+                "agent_id": agent_id,
+                "session_key": session_key,
+                "role": role,
+                "content": content,
+            }
+        )
 
 
 def test_agent_collaboration_task_handler_rejects_blueprint_payload(tmp_path: Path) -> None:
@@ -142,6 +160,7 @@ def test_collaboration_runtime_orchestrates_next_actions_until_final(tmp_path: P
     assert [call["agent_id"] for call in runner.calls] == ["main", "repo-analyzer", "main"]
     assert runner.calls[0]["session_key"] == "orchestration:orch-test:controller:main"
     assert runner.calls[1]["session_key"] == "orchestration:orch-test:step-01:repo-analyzer"
+    assert all(call["persist_history"] is False for call in runner.calls)
     assert runner.calls[1]["disabled_tools"] == ["memory_write"]
     assert "仓库分析：存在外部 API" in str(runner.calls[2]["user_text"])
     assert json.loads(
@@ -186,6 +205,49 @@ def test_agent_collaboration_task_handler_executes_orchestration_payload(tmp_pat
     assert [call["agent_id"] for call in runner.calls] == ["main", "repo-analyzer", "main"]
 
 
+def test_collaboration_runtime_rewrites_entry_agent_delegate_to_specific_expert(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                json.dumps(
+                    {
+                        "action": "delegate",
+                        "target_agent_id": "main",
+                        "purpose": "写入本地 Markdown 文档",
+                        "task_prompt": "请把调研内容写入 workspace/reports/晚餐.md",
+                    },
+                    ensure_ascii=False,
+                ),
+                '{"action":"final","final_output":"文档已写入"}',
+            ],
+            "doc-writer": ["写入完成"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="调研晚餐搭配并写入本地文档",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="rewrite-main",
+            max_iterations=3,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert [call["agent_id"] for call in runner.calls] == [
+        "personal-secretary-zhanghaibo",
+        "doc-writer",
+        "personal-secretary-zhanghaibo",
+    ]
+    assert result["observations"][0]["requested_target_agent_id"] == "main"
+    assert result["observations"][0]["target_agent_id"] == "doc-writer"
+
+
 def test_agent_collaboration_task_handler_delivers_orchestration_result(
     tmp_path: Path,
 ) -> None:
@@ -222,6 +284,7 @@ def test_agent_collaboration_task_handler_delivers_orchestration_result(
                 "account_id": "wework-main",
                 "peer_id": "zhanghaibo",
                 "source_session_key": "agent:wework-entry:wework:wework-main:direct:zhanghaibo",
+                "source_agent_id": "wework-entry",
             },
         },
     )
@@ -238,3 +301,11 @@ def test_agent_collaboration_task_handler_delivers_orchestration_result(
     assert target.agent_id == "main"
     assert dispatcher.deliveries[0]["metadata"]["kind"] == "agent_orchestration_result"
     assert dispatcher.deliveries[0]["metadata"]["run_id"] == "orch-deliver"
+    assert runner.sessions.appended == [
+        {
+            "agent_id": "wework-entry",
+            "session_key": "agent:wework-entry:wework:wework-main:direct:zhanghaibo",
+            "role": "assistant",
+            "content": "最终报告已完成",
+        }
+    ]

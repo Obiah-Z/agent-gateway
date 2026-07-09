@@ -9,7 +9,7 @@
 - 用户给出 GitHub 仓库、要求规划、写文档、做审查、联网调研、运维排查、个人计划或饮食管理时，优先调用 `classify_task_intent`。
 - 分类结果推荐专用 Agent 时，先调用 `build_agent_handoff_prompt` 固化用户原始目标、关键上下文、约束、期望输出和落盘要求。
 - 用户询问“有哪些 Agent / 每个 Agent 能做什么”时，先调用 `list_agent_capabilities`，再调用 `format_agent_capability_catalog` 生成用户可读目录；用户询问“这个任务交给谁”时，再调用 `match_agent_capability` 和 `format_agent_capability_match` 做推荐。不要凭记忆列能力。
-- 用户确认采用推荐 Agent 或要求继续交接时，先调用 `compose_agent_handoff_package` 生成 handoff_prompt；如果用户明确要求“交给/切换到/让某 Agent 处理”，继续调用 `request_agent_handoff` 执行一次性真实转交。只解释路线时才用 `format_agent_handoff_package`。
+- 用户确认实际执行复杂协作任务时，调用 `start_agent_orchestration`；如果只是要路线、建议或人工交接提示，才调用 `compose_agent_handoff_package` / `format_agent_handoff_package`。
 - 不确定当前有哪些协作路线、task_type 或阶段顺序时，调用 `list_agent_collaboration_routes`，不要凭记忆编路线。
 - 分类结果为 `repo-adoption` 或 `requires_collaboration=true` 时，先调用 `plan_agent_collaboration`，不要只给单个 `repo-analyzer` 的委派建议。
 - 用户贴出某个协作阶段的输出并要求继续时，先调用 `summarize_collaboration_progress` 判断下一阶段和 handoff 参数，再调用 `format_collaboration_progress` 转成用户可读进度。

@@ -104,7 +104,6 @@ class GatewayDispatcher:
         )
         if orchestration_reply is not None:
             return DispatchResult(inbound=inbound, route=route, reply=orchestration_reply)
-        final_route = route
         try:
             reply = await self._execute_lane_task(
                 lane_name=route.session_key,
@@ -116,12 +115,6 @@ class GatewayDispatcher:
                     correlation_id=correlation_id,
                 ),
             )
-            if reply.handoff_request is not None:
-                reply, final_route = await self._execute_handoff(
-                    inbound,
-                    source_reply=reply,
-                    correlation_id=correlation_id,
-                )
         except Exception as exc:
             self._record(
                 "agent.turn.failed",
@@ -137,7 +130,7 @@ class GatewayDispatcher:
                 error=exc,
             )
             raise
-        return DispatchResult(inbound=inbound, route=final_route, reply=reply)
+        return DispatchResult(inbound=inbound, route=route, reply=reply)
 
     def _maybe_enqueue_orchestration(
         self,
@@ -153,17 +146,18 @@ class GatewayDispatcher:
             return None
         if not self._should_auto_orchestrate(inbound.text, route_agent_id):
             return None
-        run_id = self._orchestration_run_id(route_agent_id, inbound.text)
+        run_id = self._orchestration_run_id(route_agent_id, inbound.text, correlation_id)
+        goal_hash = self._orchestration_goal_hash(route_agent_id, inbound.text)
         task = self.task_queue.enqueue(
             task_type="agent_collaboration",
             source="auto_orchestration",
-            agent_id="main",
-            session_key=f"orchestration:{run_id}:controller:main",
+            agent_id=route_agent_id,
+            session_key=f"orchestration:{run_id}:controller:{route_agent_id}",
             priority=80,
-            idempotency_key=f"auto_orchestration:{route_agent_id}:{run_id}",
+            idempotency_key=f"auto_orchestration:{route_agent_id}:{correlation_id}:{goal_hash}",
             payload={
                 "user_goal": inbound.text,
-                "controller_agent_id": "main",
+                "controller_agent_id": route_agent_id,
                 "run_id": run_id,
                 "channel": inbound.channel,
                 "mode": "minimal",
@@ -185,6 +179,16 @@ class GatewayDispatcher:
                 "correlation_id": correlation_id,
             },
         )
+        reply_text = (
+            "已启动主控协作任务。主 Agent 会持续规划下一步、委托专家 Agent 执行，"
+            "完成后会把最终结果继续推送到当前会话。"
+        )
+        self._append_auto_orchestration_session_notice(
+            agent_id=route_agent_id,
+            session_key=route_session_key,
+            user_text=inbound.text,
+            reply_text=reply_text,
+        )
         self._record(
             "agent.orchestration.enqueued",
             status="ok",
@@ -196,148 +200,85 @@ class GatewayDispatcher:
             channel=inbound.channel,
             account_id=inbound.account_id,
             peer_id=inbound.peer_id,
-            metadata={"task_id": task.id, "run_id": run_id, "controller_agent_id": "main"},
+            metadata={
+                "task_id": task.id,
+                "run_id": run_id,
+                "controller_agent_id": route_agent_id,
+            },
         )
         return AgentReply(
             agent_id=route_agent_id,
             session_key=route_session_key,
-            text=(
-                "已启动主控协作任务。主 Agent 会持续规划下一步、委托专家 Agent 执行，"
-                "完成后会把最终结果继续推送到当前会话。"
-            ),
+            text=reply_text,
             stop_reason="orchestration_enqueued",
             tool_calls=["start_agent_orchestration"],
         )
 
+    def _append_auto_orchestration_session_notice(
+        self,
+        *,
+        agent_id: str,
+        session_key: str,
+        user_text: str,
+        reply_text: str,
+    ) -> None:
+        """把自动协作入口写回用户会话，避免用户主会话缺少上下文。"""
+
+        sessions = getattr(self.runner, "sessions", None)
+        append_message = getattr(sessions, "append_message", None)
+        if append_message is None:
+            return
+        try:
+            append_message(agent_id, session_key, "user", user_text)
+            append_message(agent_id, session_key, "assistant", reply_text)
+        except Exception:
+            # 会话补记不能影响真正的入队和投递。
+            pass
+
     def _should_auto_orchestrate(self, text: str, route_agent_id: str) -> bool:
         """判断是否应跳过入口 Agent，直接进入主控协作。"""
 
-        if route_agent_id not in {"main", "feishu-entry", "wework-entry"}:
+        if route_agent_id not in {
+            "main",
+            "feishu-entry",
+            "wework-entry",
+            "personal-secretary-zhanghaibo",
+        }:
             return False
         normalized = text.lower()
         has_repo = "github.com/" in normalized or "仓库" in text or "repo" in normalized
-        if not has_repo:
-            return False
-        adoption_signals = ("引入 gateway", "适合引入", "采纳计划", "风险审查", "正式报告")
-        if any(signal in normalized for signal in adoption_signals):
+        if has_repo:
+            adoption_signals = ("引入 gateway", "适合引入", "采纳计划", "风险审查", "正式报告")
+            if any(signal in normalized for signal in adoption_signals):
+                return True
+            chinese_signals = ("引入", "风险", "采纳", "报告")
+            return sum(1 for signal in chinese_signals if signal in text) >= 3
+
+        research_signals = ("调研", "研究", "核验", "资料", "分析")
+        artifact_signals = ("写入本地", "本地文档", "落盘", "报告", "文档")
+        if any(signal in text for signal in research_signals) and any(
+            signal in text for signal in artifact_signals
+        ):
             return True
-        chinese_signals = ("引入", "风险", "采纳", "报告")
-        return sum(1 for signal in chinese_signals if signal in text) >= 3
+        return False
 
     @staticmethod
-    def _orchestration_run_id(agent_id: str, user_goal: str) -> str:
-        """生成稳定 run_id，用于自动编排任务幂等。"""
+    def _orchestration_run_id(agent_id: str, user_goal: str, correlation_id: str) -> str:
+        """生成单次自动编排 run_id。
+
+        自动编排由用户消息触发，同一句话可以被用户主动发送多次；run_id 必须包含
+        平台消息级 correlation_id，避免复用上一轮已完成的协作任务。
+        """
+
+        seed = f"{agent_id}:{correlation_id}:{user_goal}".encode("utf-8")
+        return hashlib.sha256(seed).hexdigest()[:12]
+
+    @staticmethod
+    def _orchestration_goal_hash(agent_id: str, user_goal: str) -> str:
+        """生成目标摘要，用于把同一平台消息的 broker 重投压到同一任务。"""
 
         seed = f"{agent_id}:{user_goal}".encode("utf-8")
         return hashlib.sha256(seed).hexdigest()[:12]
-
-    async def _execute_handoff(
-        self,
-        inbound: InboundMessage,
-        *,
-        source_reply: AgentReply,
-        correlation_id: str,
-    ):
-        """执行 Agent 请求的 one-shot 专家转交。"""
-
-        request = source_reply.handoff_request
-        if request is None:
-            route = resolve_route(self.bindings, self.agents, inbound)
-            return source_reply, route
-        target_agent_id = request.target_agent_id.strip()
-        if not target_agent_id:
-            raise ValueError("handoff target_agent_id is empty")
-        if target_agent_id == source_reply.agent_id:
-            raise ValueError("handoff target_agent_id must differ from source agent_id")
-        if self.agents.get(target_agent_id) is None:
-            raise ValueError(f"handoff target agent not found: {target_agent_id}")
-
-        target_route = resolve_route(
-            self.bindings,
-            self.agents,
-            inbound,
-            forced_agent_id=target_agent_id,
-        )
-        self._record(
-            "agent.handoff.requested",
-            status="ok",
-            component="dispatcher",
-            message=(
-                f"Agent handoff requested: {source_reply.agent_id} -> "
-                f"{target_route.agent_id}"
-            ),
-            correlation_id=correlation_id,
-            agent_id=source_reply.agent_id,
-            session_key=source_reply.session_key,
-            channel=inbound.channel,
-            account_id=inbound.account_id,
-            peer_id=inbound.peer_id,
-            metadata={
-                "source_agent_id": source_reply.agent_id,
-                "target_agent_id": target_route.agent_id,
-                "target_session_key": target_route.session_key,
-                "scope": request.scope,
-                "reason": request.reason,
-                "user_goal": request.user_goal,
-            },
-        )
-        try:
-            target_reply = await self._execute_lane_task(
-                lane_name=target_route.session_key,
-                coroutine_factory=lambda: self.runner.run_turn(
-                    target_route.agent_id,
-                    target_route.session_key,
-                    request.handoff_prompt,
-                    channel=inbound.channel,
-                    correlation_id=correlation_id,
-                ),
-            )
-        except Exception as exc:
-            self._record(
-                "agent.handoff.failed",
-                status="error",
-                component="dispatcher",
-                message=(
-                    f"Agent handoff failed: {source_reply.agent_id} -> "
-                    f"{target_route.agent_id}"
-                ),
-                correlation_id=correlation_id,
-                agent_id=target_route.agent_id,
-                session_key=target_route.session_key,
-                channel=inbound.channel,
-                account_id=inbound.account_id,
-                peer_id=inbound.peer_id,
-                error=exc,
-                metadata={
-                    "source_agent_id": source_reply.agent_id,
-                    "target_agent_id": target_route.agent_id,
-                    "scope": request.scope,
-                },
-            )
-            raise
-        self._record(
-            "agent.handoff.completed",
-            status="ok",
-            component="dispatcher",
-            message=(
-                f"Agent handoff completed: {source_reply.agent_id} -> "
-                f"{target_reply.agent_id}"
-            ),
-            correlation_id=correlation_id,
-            agent_id=target_reply.agent_id,
-            session_key=target_reply.session_key,
-            channel=inbound.channel,
-            account_id=inbound.account_id,
-            peer_id=inbound.peer_id,
-            metadata={
-                "source_agent_id": source_reply.agent_id,
-                "source_session_key": source_reply.session_key,
-                "target_agent_id": target_reply.agent_id,
-                "scope": request.scope,
-                "reason": request.reason,
-            },
-        )
-        return target_reply, target_route
 
     async def dispatch_background(
         self,

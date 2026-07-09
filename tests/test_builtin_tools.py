@@ -64,7 +64,6 @@ def test_start_agent_orchestration_captures_response_target_from_runtime_context
             "start_agent_orchestration",
             {
                 "user_goal": "分析 smart-trip 并生成正式报告",
-                "controller_agent_id": "main",
                 "run_id": "smart-trip",
             },
             runtime_context={
@@ -76,6 +75,9 @@ def test_start_agent_orchestration_captures_response_target_from_runtime_context
     )
 
     assert result["type"] == "agent_orchestration_task"
+    assert calls[0]["agent_id"] == "wework-entry"
+    assert calls[0]["session_key"] == "orchestration:smart-trip:controller:wework-entry"
+    assert calls[0]["payload"]["controller_agent_id"] == "wework-entry"
     assert calls[0]["payload"]["channel"] == "wework"
     assert calls[0]["payload"]["response_target"] == {
         "channel": "wework",
@@ -3952,27 +3954,11 @@ def test_format_agent_handoff_package_outputs_user_facing_summary(
     assert "不要声称目标 Agent 已经自动执行" in result
 
 
-def test_request_agent_handoff_outputs_runtime_request(tmp_path: Path) -> None:
+def test_request_agent_handoff_tool_is_removed(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry, tmp_path)
 
-    data = json.loads(
-        registry.dispatch(
-            "request_agent_handoff",
-            {
-                "target_agent_id": "diet-assistant-zhanghaibo",
-                "handoff_prompt": "请记录早餐：鸡蛋和牛奶。",
-                "reason": "饮食记录应由饮食助手处理。",
-                "user_goal": "记录早餐",
-            },
-        )
-    )
-
-    assert data["type"] == "agent_handoff_request"
-    assert data["target_agent_id"] == "diet-assistant-zhanghaibo"
-    assert data["handoff_prompt"] == "请记录早餐：鸡蛋和牛奶。"
-    assert data["scope"] == "one-shot"
-    assert "不修改长期绑定" in data["boundary"]
+    assert "request_agent_handoff" not in registry.names()
 
 
 def test_ops_readonly_health_reports_disk_and_key_paths(tmp_path: Path) -> None:

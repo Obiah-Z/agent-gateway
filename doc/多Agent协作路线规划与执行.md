@@ -6,11 +6,11 @@
 
 复杂任务有两种进入主控协作的方式。
 
-第一种是 dispatcher 自动识别。用户提出“分析仓库是否适合引入 Gateway，并给风险审查、采纳计划和正式报告”这类高置信复杂目标后，`GatewayDispatcher` 会创建 `agent_collaboration` 后台任务，并把 `user_goal`、`controller_agent_id=main`、`response_target`、`run_id`、`max_iterations` 等信息写入任务 payload。
+第一种是 dispatcher 自动识别。用户提出“分析仓库是否适合引入 Gateway，并给风险审查、采纳计划和正式报告”这类高置信复杂目标后，`GatewayDispatcher` 会创建 `agent_collaboration` 后台任务，并把 `user_goal`、`controller_agent_id=<当前路由 Agent>`、`response_target`、`run_id`、`max_iterations` 等信息写入任务 payload。
 
 第二种是入口 Agent 主动触发。`main`、`feishu-entry` 或 `wework-entry` 在模型执行时可以调用 `start_agent_orchestration`，该工具会把用户目标提交到任务队列。工具会根据当前 `runtime_context.session_key` 尽量恢复原平台、账号和会话目标，便于后台完成后把最终结果投递回原会话。
 
-实际执行由 `TaskWorkerRuntime` 消费 `agent_collaboration` 任务，交给 `AgentCollaborationTaskHandler`。handler 只接受 `user_goal` 和 `controller_agent_id` 这类主控协作 payload；如果旧 payload 只包含 `blueprint_json`，会被拒绝。随后 handler 调用 `CollaborationRuntime.execute_orchestrated()`，由 `main` 作为主控 Agent 持续输出下一步 action。
+实际执行由 `TaskWorkerRuntime` 消费 `agent_collaboration` 任务，交给 `AgentCollaborationTaskHandler`。handler 只接受 `user_goal` 和 `controller_agent_id` 这类主控协作 payload；如果旧 payload 只包含 `blueprint_json`，会被拒绝。随后 handler 调用 `CollaborationRuntime.execute_orchestrated()`，由当前入口或当前会话 Agent 作为主控 Agent 持续输出下一步 action。
 
 ## 主控循环
 
@@ -37,7 +37,7 @@
 ```json
 {
   "user_goal": "分析这个仓库是否适合引入 Gateway，并给我风险审查、采纳计划和正式报告：https://github.com/example/project",
-  "controller_agent_id": "main",
+  "controller_agent_id": "wework-entry",
   "run_id": "repo-review-demo",
   "channel": "wework",
   "mode": "minimal",
@@ -51,7 +51,7 @@
 }
 ```
 
-`user_goal` 是主控协作的原始目标，`controller_agent_id` 通常是 `main`。`response_target` 用于把最终结果投递回原平台会话。`disabled_tools` 默认禁用 `memory_write`，避免后台协作阶段把临时中间结果写入长期记忆。
+`user_goal` 是主控协作的原始目标，`controller_agent_id` 是触发协作的当前入口或当前会话 Agent，例如 `wework-entry`、`feishu-entry` 或 `personal-secretary-zhanghaibo`。`response_target` 用于把最终结果投递回原平台会话。`disabled_tools` 默认禁用 `memory_write`，避免后台协作阶段把临时中间结果写入长期记忆。
 
 ## 执行结果
 
@@ -62,7 +62,7 @@ runtime 返回 `agent_orchestration_run_result`，主要字段如下：
   "type": "agent_orchestration_run_result",
   "run_id": "repo-review-demo",
   "user_goal": "分析仓库并生成采纳计划",
-  "controller_agent_id": "main",
+  "controller_agent_id": "wework-entry",
   "status": "completed",
   "stop_reason": "controller_final",
   "observation_count": 3,

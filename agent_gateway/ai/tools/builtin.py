@@ -344,7 +344,7 @@ def register_builtin_tools(
 
     def start_agent_orchestration(
         user_goal: str,
-        controller_agent_id: str = "main",
+        controller_agent_id: str = "",
         channel: str = "collaboration",
         run_id: str = "",
         max_iterations: int = 8,
@@ -356,7 +356,8 @@ def register_builtin_tools(
 
         runtime_context = dict(__runtime_context or {})
         goal = user_goal.strip()
-        controller = controller_agent_id.strip() or "main"
+        runtime_agent_id = str(runtime_context.get("agent_id") or "").strip()
+        controller = controller_agent_id.strip() or runtime_agent_id or "main"
         if not goal:
             return "Error: start_agent_orchestration requires user_goal"
         if task_enqueue is None:
@@ -4645,42 +4646,6 @@ def register_builtin_tools(
             indent=2,
         )
 
-    def request_agent_handoff(
-        target_agent_id: str,
-        handoff_prompt: str,
-        reason: str,
-        user_goal: str = "",
-        scope: str = "one-shot",
-    ) -> str:
-        """请求运行时把当前任务一次性交给目标 Agent 执行。"""
-
-        target = target_agent_id.strip()
-        prompt = handoff_prompt.strip()
-        normalized_scope = (scope or "one-shot").strip().lower().replace("_", "-")
-        if not target:
-            return "Error: target_agent_id is required"
-        if not prompt:
-            return "Error: handoff_prompt is required"
-        if normalized_scope != "one-shot":
-            return "Error: only one-shot handoff is supported by the current runtime"
-        return json.dumps(
-            {
-                "type": "agent_handoff_request",
-                "target_agent_id": target,
-                "handoff_prompt": prompt,
-                "reason": reason.strip(),
-                "user_goal": user_goal.strip(),
-                "scope": normalized_scope,
-                "status": "requested",
-                "boundary": (
-                    "这是运行时 handoff 请求；dispatcher 会验证并执行。"
-                    "默认 one-shot，不修改长期绑定。"
-                ),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
     def format_agent_handoff_package(
         package_json: str,
         include_prompt: bool = True,
@@ -7783,7 +7748,10 @@ def register_builtin_tools(
                     },
                     "controller_agent_id": {
                         "type": "string",
-                        "description": "Controller agent id, usually main.",
+                        "description": (
+                            "Controller agent id. Defaults to the current runtime agent; "
+                            "falls back to main only when no runtime agent is available."
+                        ),
                     },
                     "channel": {
                         "type": "string",
@@ -9298,45 +9266,6 @@ def register_builtin_tools(
             },
             handler=format_agent_handoff_package,
             tags=("agent", "delegation", "handoff", "format", "routing"),
-        )
-    )
-    registry.register(
-        RegisteredTool(
-            name="request_agent_handoff",
-            description=(
-                "Request the runtime to execute the current task with a target "
-                "expert agent. This is a controlled one-shot handoff by default "
-                "and does not mutate long-term bindings."
-            ),
-            input_schema={
-                "type": "object",
-                "required": ["target_agent_id", "handoff_prompt", "reason"],
-                "properties": {
-                    "target_agent_id": {
-                        "type": "string",
-                        "description": "Target expert agent id to execute the task.",
-                    },
-                    "handoff_prompt": {
-                        "type": "string",
-                        "description": "Complete prompt to send to the target agent.",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Why this task should be handed off.",
-                    },
-                    "user_goal": {
-                        "type": "string",
-                        "description": "Original user goal, if known.",
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": ["one-shot"],
-                        "description": "Handoff scope. The current runtime only supports one-shot.",
-                    },
-                },
-            },
-            handler=request_agent_handoff,
-            tags=("agent", "handoff", "routing", "runtime"),
         )
     )
     registry.register(

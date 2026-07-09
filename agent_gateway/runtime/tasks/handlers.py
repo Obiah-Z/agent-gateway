@@ -314,6 +314,37 @@ class AgentCollaborationTaskHandler:
                 "source_session_key": str(target_payload.get("source_session_key") or ""),
             },
         )
+        self._append_final_to_source_session(task, result, text)
         if self.delivery_runtime is not None and channel == "cli":
             await self.delivery_runtime.flush_once()
         return delivery_id
+
+    def _append_final_to_source_session(
+        self,
+        task: TaskInstance,
+        result: dict[str, object],
+        text: str,
+    ) -> None:
+        """把协作最终输出补记到触发用户会话，不写入中间专家 step。"""
+
+        target_payload = task.payload.get("response_target")
+        if not isinstance(target_payload, dict):
+            return
+        source_session_key = str(target_payload.get("source_session_key") or "").strip()
+        source_agent_id = str(
+            target_payload.get("source_agent_id")
+            or result.get("controller_agent_id")
+            or task.agent_id
+            or ""
+        ).strip()
+        if not source_agent_id or not source_session_key or not text.strip():
+            return
+        sessions = getattr(getattr(self.runtime, "runner", None), "sessions", None)
+        append_message = getattr(sessions, "append_message", None)
+        if append_message is None:
+            return
+        try:
+            append_message(source_agent_id, source_session_key, "assistant", text)
+        except Exception:
+            # 最终投递已完成，补记会话失败不能反向影响用户收消息。
+            pass

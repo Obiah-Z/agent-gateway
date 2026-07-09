@@ -11,6 +11,7 @@ import re
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 try:
@@ -416,10 +417,25 @@ class ResilienceRunner:
                     path = match.group("path")
                     if not path.startswith("workspace/"):
                         path = f"workspace/{path}"
+                    if not self._report_artifact_exists(path):
+                        continue
                     if path not in seen:
                         paths.append(path)
                         seen.add(path)
         return paths
+
+    def _report_artifact_exists(self, path: str) -> bool:
+        """只把真实存在的 workspace/reports 产物报告给用户。"""
+
+        normalized = path.removeprefix("workspace/").lstrip("/")
+        if not normalized.startswith("reports/"):
+            return False
+        candidate = Path(self.settings.workspace_root) / normalized
+        try:
+            candidate.relative_to(self.settings.workspace_root)
+        except ValueError:
+            return False
+        return candidate.is_file()
 
     def _iter_content_text(self, content: Any) -> list[str]:
         """兼容 Anthropic content block、tool_result 和纯文本消息。"""

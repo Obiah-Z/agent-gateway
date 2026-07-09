@@ -102,7 +102,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_agent_capability_contract_check" in tools
     assert "compose_agent_handoff_package" in tools
     assert "format_agent_handoff_package" in tools
-    assert "request_agent_handoff" in tools
+    assert "request_agent_handoff" not in tools
     assert "list_agent_collaboration_routes" in tools
     assert "plan_agent_collaboration" in tools
     assert "compose_collaboration_execution_blueprint" not in tools
@@ -135,7 +135,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
     assert "format_agent_capability_contract_check" in combined_prompt
     assert "compose_agent_handoff_package" in combined_prompt
     assert "format_agent_handoff_package" in combined_prompt
-    assert "request_agent_handoff" in combined_prompt
+    assert "request_agent_handoff" not in combined_prompt
     assert "list_agent_collaboration_routes" in combined_prompt
     assert "plan_agent_collaboration" in combined_prompt
     assert "compose_collaboration_execution_blueprint" not in combined_prompt
@@ -170,7 +170,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_contract_check" in tools
         assert "compose_agent_handoff_package" in tools
         assert "format_agent_handoff_package" in tools
-        assert "request_agent_handoff" in tools
+        assert "request_agent_handoff" not in tools
         assert "list_agent_collaboration_routes" in tools
         assert "suggest_agent_delegation" in tools
         assert "build_agent_handoff_prompt" in tools
@@ -202,7 +202,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
         assert "format_agent_capability_contract" in tools_md
         assert "compose_agent_handoff_package" in identity
         assert "format_agent_handoff_package" in identity or "format_agent_handoff_package" in tools_md
-        assert "request_agent_handoff" in identity
+        assert "request_agent_handoff" not in identity
         assert "format_agent_capability_catalog" in soul
         assert "match_agent_capability" in soul
         assert "format_agent_capability_match" in soul
@@ -889,10 +889,14 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
     assert "compose_agent_handoff_package" in tools["wework-entry"]
     assert "format_agent_handoff_package" in tools["feishu-entry"]
     assert "format_agent_handoff_package" in tools["wework-entry"]
-    assert "request_agent_handoff" in tools["feishu-entry"]
-    assert "request_agent_handoff" in tools["wework-entry"]
-    assert "request_agent_handoff" in tools["main"]
-    assert "request_agent_handoff" in tools[SECRETARY_AGENT_ID]
+    assert "request_agent_handoff" not in tools["feishu-entry"]
+    assert "request_agent_handoff" not in tools["wework-entry"]
+    assert "request_agent_handoff" not in tools["main"]
+    assert "request_agent_handoff" not in tools[SECRETARY_AGENT_ID]
+    assert "start_agent_orchestration" in tools["feishu-entry"]
+    assert "start_agent_orchestration" in tools["wework-entry"]
+    assert "start_agent_orchestration" in tools["main"]
+    assert "start_agent_orchestration" in tools[SECRETARY_AGENT_ID]
     assert "list_agent_collaboration_routes" in tools["feishu-entry"]
     assert "list_agent_collaboration_routes" in tools["wework-entry"]
     assert "build_agent_handoff_prompt" in tools["feishu-entry"]
@@ -929,8 +933,7 @@ def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> Non
         assert "format_agent_capability_match" not in tools[agent_id]
         assert "compose_agent_handoff_package" not in tools[agent_id]
         assert "format_agent_handoff_package" not in tools[agent_id]
-        if agent_id != SECRETARY_AGENT_ID:
-            assert "request_agent_handoff" not in tools[agent_id]
+        assert "request_agent_handoff" not in tools[agent_id]
         assert "list_agent_collaboration_routes" not in tools[agent_id]
         assert "build_agent_handoff_prompt" not in tools[agent_id]
         assert "build_collaboration_stage_handoff" not in tools[agent_id]
@@ -1265,3 +1268,19 @@ def test_personal_secretary_has_time_block_prompt_and_tool_rules() -> None:
     assert "format_memory_search" in soul
     assert "format_memory_search" in tools_md
     assert "上午下午晚上" in tools_md
+
+
+def test_personal_secretary_uses_orchestration_instead_of_one_shot_handoff() -> None:
+    prompt_dir = ROOT / "workspace" / "agents" / SECRETARY_AGENT_ID
+    identity = (prompt_dir / "IDENTITY.md").read_text(encoding="utf-8")
+    soul = (prompt_dir / "SOUL.md").read_text(encoding="utf-8")
+    tools_md = (prompt_dir / "TOOLS.md").read_text(encoding="utf-8")
+    combined = "\n".join([identity, soul, tools_md])
+
+    assert "start_agent_orchestration" in identity
+    assert "start_agent_orchestration" in soul
+    assert "start_agent_orchestration" in tools_md
+    assert "旧版专家转交已废弃" in combined
+    assert "已转给 research" not in combined
+    assert "已转给饮食 Agent" not in combined
+    assert "request_agent_handoff" not in combined
