@@ -260,6 +260,35 @@ class GatewayDispatcher:
             signal in text for signal in artifact_signals
         ):
             return True
+        diet_signals = (
+            "饮食计划",
+            "饮食记录",
+            "餐食记录",
+            "饮食情况",
+            "吃了什么",
+            "早餐",
+            "午餐",
+            "晚餐",
+            "餐食",
+            "热量",
+            "体重",
+            "减脂",
+        )
+        diet_action_signals = (
+            "看一下",
+            "查一下",
+            "查询",
+            "记录",
+            "分析",
+            "现在",
+            "今天",
+            "最近",
+            "计划",
+        )
+        if any(signal in text for signal in diet_signals) and any(
+            signal in text for signal in diet_action_signals
+        ):
+            return True
         return False
 
     @staticmethod

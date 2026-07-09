@@ -351,6 +351,76 @@ def test_dispatcher_auto_orchestration_same_text_distinct_messages_create_distin
     assert "wework_msg_2" in second["idempotency_key"]
 
 
+def test_dispatcher_auto_orchestrates_personal_secretary_diet_query(tmp_path) -> None:
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            dm_scope="per-account-channel-peer",
+        )
+    )
+    agents.register(
+        AgentConfig(
+            id="diet-assistant-zhanghaibo",
+            name="Diet",
+            dm_scope="per-account-channel-peer",
+        )
+    )
+    bindings = BindingTable()
+    bindings.add(
+        Binding(
+            agent_id="personal-secretary-zhanghaibo",
+            tier=1,
+            match_key="peer_id",
+            match_value="zhanghaibo",
+            priority=100,
+        )
+    )
+    queue = DeliveryQueue(tmp_path / "delivery")
+    runner = LegacyHandoffRunner()
+    task_queue = FakeTaskQueue()
+    dispatcher = GatewayDispatcher(
+        agents,
+        bindings,
+        runner,
+        CommandQueue(),
+        queue,
+        task_queue=task_queue,
+    )
+    inbound = InboundMessage(
+        text="看一下我现在的饮食计划",
+        sender_id="zhanghaibo",
+        channel="wework",
+        account_id="wework-main",
+        peer_id="zhanghaibo",
+        metadata={"correlation_id": "wework_diet_1"},
+    )
+
+    result = asyncio.run(dispatcher.dispatch_inbound(inbound))
+
+    assert result.route.agent_id == "personal-secretary-zhanghaibo"
+    assert result.reply.stop_reason == "orchestration_enqueued"
+    assert result.reply.tool_calls == ["start_agent_orchestration"]
+    assert runner.calls == []
+    assert len(task_queue.calls) == 1
+    call = task_queue.calls[0]
+    assert call["task_type"] == "agent_collaboration"
+    assert call["source"] == "auto_orchestration"
+    assert call["agent_id"] == "personal-secretary-zhanghaibo"
+    assert call["payload"]["user_goal"] == inbound.text
+    assert call["payload"]["controller_agent_id"] == "personal-secretary-zhanghaibo"
+    assert call["payload"]["response_target"] == {
+        "channel": "wework",
+        "account_id": "wework-main",
+        "peer_id": "zhanghaibo",
+        "source_session_key": (
+            "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+        ),
+        "source_agent_id": "personal-secretary-zhanghaibo",
+    }
+
+
 def test_dispatcher_does_not_execute_legacy_one_shot_agent_handoff(tmp_path) -> None:
     agents = AgentManager()
     agents.register(

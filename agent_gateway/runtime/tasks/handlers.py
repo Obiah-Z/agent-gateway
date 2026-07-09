@@ -268,6 +268,11 @@ class AgentCollaborationTaskHandler:
             run_id=str(task.payload.get("run_id") or task.id),
             max_iterations=int(task.payload.get("max_iterations") or 8),
             disabled_tools=list(task.payload.get("disabled_tools") or []),
+            response_target=(
+                dict(task.payload.get("response_target") or {})
+                if isinstance(task.payload.get("response_target"), dict)
+                else None
+            ),
         )
         delivery_id = await self._deliver_orchestration_result(task, result)
         delivery_suffix = f" delivered={delivery_id}" if delivery_id else ""

@@ -248,6 +248,188 @@ def test_collaboration_runtime_rewrites_entry_agent_delegate_to_specific_expert(
     assert result["observations"][0]["target_agent_id"] == "doc-writer"
 
 
+def test_collaboration_runtime_routes_blocked_diet_delegate_to_diet_agent(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                json.dumps(
+                    {
+                        "action": "delegate",
+                        "target_agent_id": "personal-secretary-zhanghaibo",
+                        "purpose": "查询用户当前饮食计划",
+                        "task_prompt": "请查询饮食计划、餐食记录和减脂目标，并汇总当前安排。",
+                    },
+                    ensure_ascii=False,
+                ),
+                '{"action":"final","final_output":"已汇总你的当前饮食计划"}',
+            ],
+            "diet-assistant-zhanghaibo": ["当前饮食计划：午餐控油，晚餐高蛋白。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="我现在的饮食计划",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="diet-route",
+            max_iterations=3,
+            response_target={
+                "channel": "wework",
+                "account_id": "wework-main",
+                "peer_id": "zhanghaibo",
+                "source_session_key": (
+                    "agent:personal-secretary-zhanghaibo:wework:"
+                    "wework-main:direct:zhanghaibo"
+                ),
+                "source_agent_id": "personal-secretary-zhanghaibo",
+            },
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert [call["agent_id"] for call in runner.calls] == [
+        "personal-secretary-zhanghaibo",
+        "diet-assistant-zhanghaibo",
+        "personal-secretary-zhanghaibo",
+    ]
+    diet_call = runner.calls[1]
+    assert diet_call["session_key"] == (
+        "agent:diet-assistant-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+    )
+    assert diet_call["persist_history"] is True
+    assert result["observations"][0]["requested_target_agent_id"] == (
+        "personal-secretary-zhanghaibo"
+    )
+    assert result["observations"][0]["target_agent_id"] == "diet-assistant-zhanghaibo"
+    assert result["observations"][0]["persist_history"] is True
+
+
+def test_collaboration_runtime_rewrites_diet_agent_alias_to_real_agent(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                json.dumps(
+                    {
+                        "action": "delegate",
+                        "target_agent_id": "diet-agent",
+                        "purpose": "查询当前饮食计划",
+                        "task_prompt": "看一下我现在的饮食计划",
+                    },
+                    ensure_ascii=False,
+                ),
+                '{"action":"final","final_output":"饮食计划查询完成"}',
+            ],
+            "diet-assistant-zhanghaibo": ["当前没有已记录的饮食计划。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="看一下我现在的饮食计划",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="diet-alias",
+            max_iterations=3,
+            response_target={
+                "source_session_key": (
+                    "agent:personal-secretary-zhanghaibo:wework:"
+                    "wework-main:direct:zhanghaibo"
+                ),
+            },
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert runner.calls[1]["agent_id"] == "diet-assistant-zhanghaibo"
+    assert runner.calls[1]["session_key"] == (
+        "agent:diet-assistant-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+    )
+    assert result["observations"][0]["requested_target_agent_id"] == "diet-agent"
+    assert result["observations"][0]["target_agent_id"] == "diet-assistant-zhanghaibo"
+
+
+def test_collaboration_runtime_rewrites_researcher_alias_to_research(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                '{"action":"delegate","target_agent_id":"web-researcher","task_prompt":"调研 RabbitMQ"}',
+                '{"action":"final","final_output":"调研完成"}',
+            ],
+            "research": ["RabbitMQ 调研结果。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="调研 RabbitMQ",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="research-alias",
+            max_iterations=3,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert runner.calls[1]["agent_id"] == "research"
+    assert result["observations"][0]["requested_target_agent_id"] == "web-researcher"
+    assert result["observations"][0]["target_agent_id"] == "research"
+
+
+def test_collaboration_runtime_repairs_malformed_delegate_json(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                (
+                    '{"action":"delegate","target_agent_id":"personal-secretary-zhanghaibo",'
+                    '"purpose":"搜索长期记忆和待办记录中与饮食计划相关的内容",'
+                    '"task_prompt":"请同时执行以下操作：1) 用 memory_search 查询"饮食计划"'
+                    '相关内容；2) 用 personal_todo_search 查询"饮食"相关的待办事项。"}'
+                ),
+                '{"action":"final","final_output":"饮食计划查询完成"}',
+            ],
+            "diet-assistant-zhanghaibo": ["已从饮食 Agent 汇总。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="我现在的饮食计划",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="diet-repair",
+            max_iterations=3,
+            response_target={
+                "source_session_key": (
+                    "agent:personal-secretary-zhanghaibo:wework:"
+                    "wework-main:direct:zhanghaibo"
+                ),
+            },
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert runner.calls[1]["agent_id"] == "diet-assistant-zhanghaibo"
+    assert runner.calls[1]["persist_history"] is True
+    assert result["observations"][0]["target_agent_id"] == "diet-assistant-zhanghaibo"
+
+
 def test_agent_collaboration_task_handler_delivers_orchestration_result(
     tmp_path: Path,
 ) -> None:

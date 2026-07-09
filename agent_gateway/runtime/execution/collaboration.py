@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -42,6 +43,7 @@ class CollaborationRuntime:
         run_id: str = "",
         max_iterations: int = 8,
         disabled_tools: list[str] | None = None,
+        response_target: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         """由主控 Agent 持续规划下一步并驱动专家 Agent 执行。
 
@@ -117,6 +119,7 @@ class CollaborationRuntime:
                         correlation_id=correlation_id,
                         session_prefix=session_prefix,
                         disabled_tools=disabled_tools,
+                        response_target=response_target,
                     )
                     observations.append(observation)
                     continue
@@ -205,6 +208,7 @@ class CollaborationRuntime:
         correlation_id: str,
         session_prefix: str,
         disabled_tools: list[str] | None,
+        response_target: dict[str, object] | None,
     ) -> dict[str, Any]:
         """执行主控 Agent 规划出的单个专家委托动作。"""
 
@@ -228,7 +232,14 @@ class CollaborationRuntime:
             purpose=str(action.get("purpose") or ""),
             controller_agent_id=controller_agent_id,
         )
-        session_key = f"{session_prefix}:{run_id}:step-{iteration:02d}:{target_agent_id}"
+        persist_history = self._should_persist_delegate_history(target_agent_id)
+        session_key = self._delegate_session_key(
+            target_agent_id=target_agent_id,
+            fallback_session_key=(
+                f"{session_prefix}:{run_id}:step-{iteration:02d}:{target_agent_id}"
+            ),
+            response_target=response_target,
+        )
         reply = await self.runner.run_task_turn(
             agent_id=target_agent_id,
             session_key=session_key,
@@ -237,7 +248,7 @@ class CollaborationRuntime:
             mode=mode,
             correlation_id=correlation_id,
             disabled_tools=disabled_tools,
-            persist_history=False,
+            persist_history=persist_history,
         )
         return {
             "iteration": iteration,
@@ -247,6 +258,7 @@ class CollaborationRuntime:
             "purpose": str(action.get("purpose") or ""),
             "task_prompt": task_prompt,
             "session_key": session_key,
+            "persist_history": persist_history,
             "status": "completed",
             "output_text": reply.text,
             "stop_reason": reply.stop_reason,
@@ -276,12 +288,52 @@ class CollaborationRuntime:
             controller_agent_id,
         }
         requested = requested_target_agent_id.strip()
+        aliases = {
+            "diet-agent": "diet-assistant-zhanghaibo",
+            "diet": "diet-assistant-zhanghaibo",
+            "diet-assistant": "diet-assistant-zhanghaibo",
+            "diet_assistant": "diet-assistant-zhanghaibo",
+            "饮食助手": "diet-assistant-zhanghaibo",
+            "researcher": "research",
+            "web-researcher": "research",
+            "web_researcher": "research",
+            "research-agent": "research",
+            "research_agent": "research",
+            "writer": "doc-writer",
+            "document-writer": "doc-writer",
+            "doc_writer": "doc-writer",
+            "planning": "planner",
+            "planning-agent": "planner",
+            "review-agent": "reviewer",
+            "review_agent": "reviewer",
+        }
+        aliased = aliases.get(requested.lower(), "")
+        if aliased:
+            return aliased
         if requested and requested not in blocked:
             return requested
 
         text = f"{purpose}\n{task_prompt}".lower()
         if any(token in text for token in ("写入", "本地文档", "markdown", "文件", "报告", "成文")):
             return "doc-writer"
+        if any(
+            token in text
+            for token in (
+                "饮食",
+                "餐食",
+                "热量",
+                "减脂",
+                "体重",
+                "午餐",
+                "晚餐",
+                "早餐",
+                "营养",
+                "diet",
+                "meal",
+                "calorie",
+            )
+        ):
+            return "diet-assistant-zhanghaibo"
         if any(token in text for token in ("调研", "研究", "资料", "搜索", "来源", "证据")):
             return "research"
         if any(token in text for token in ("审查", "风险", "评审", "review", "gate")):
@@ -289,6 +341,37 @@ class CollaborationRuntime:
         if any(token in text for token in ("计划", "规划", "拆解", "路线")):
             return "planner"
         return "planner"
+
+    def _should_persist_delegate_history(self, target_agent_id: str) -> bool:
+        """判断专家 step 是否应写入目标 Agent 会话。
+
+        共享能力 Agent 的中间推理不进入长期会话；用户专属领域 Agent 需要保留
+        自己的执行上下文，避免把饮食上下文混进秘书 Agent。
+        """
+
+        return target_agent_id in {"diet-assistant-zhanghaibo"}
+
+    def _delegate_session_key(
+        self,
+        *,
+        target_agent_id: str,
+        fallback_session_key: str,
+        response_target: dict[str, object] | None,
+    ) -> str:
+        """为需要持久化的专家 step 构造目标 Agent 会话 key。"""
+
+        if not self._should_persist_delegate_history(target_agent_id):
+            return fallback_session_key
+        if not isinstance(response_target, dict):
+            return fallback_session_key
+        source_session_key = str(response_target.get("source_session_key") or "").strip()
+        if not source_session_key:
+            return fallback_session_key
+        parts = source_session_key.split(":")
+        if len(parts) >= 2 and parts[0] == "agent":
+            parts[1] = target_agent_id
+            return ":".join(parts)
+        return fallback_session_key
 
     def _build_controller_prompt(
         self,
@@ -309,6 +392,8 @@ class CollaborationRuntime:
                 "- delegate：委托一个专家 Agent 执行子任务。",
                 "- final：给出面向用户的最终结果。",
                 "- abort：任务无法继续时中止，并说明原因。",
+                "可委托的专家 Agent id 只能使用：research、repo-analyzer、doc-writer、planner、reviewer、ops、diet-assistant-zhanghaibo。",
+                "不要输出 diet-agent、researcher、web-researcher 这类未注册别名。",
                 "delegate 格式："
                 '{"action":"delegate","target_agent_id":"repo-analyzer",'
                 '"purpose":"为什么需要这一步","task_prompt":"交给专家的完整任务"}',
@@ -359,12 +444,44 @@ class CollaborationRuntime:
             start = raw.find("{")
             end = raw.rfind("}")
             if start < 0 or end <= start:
-                return {}
+                return self._repair_malformed_action(raw)
             try:
                 payload = json.loads(raw[start : end + 1])
             except json.JSONDecodeError:
-                return {}
+                return self._repair_malformed_action(raw[start : end + 1])
         return payload if isinstance(payload, dict) else {}
+
+    def _repair_malformed_action(self, raw: str) -> dict[str, Any]:
+        """从常见的未转义 JSON 字符串中抢救 action 字段。
+
+        部分模型会输出 `task_prompt":"查询"饮食计划"...` 这类无效 JSON。这里不尝试
+        还原完整结构，只保留调度必需字段，让 runtime 继续走主控协作而不是失败。
+        """
+
+        action = self._extract_jsonish_string(raw, "action")
+        if not action:
+            return {}
+        payload: dict[str, Any] = {"action": action, "parse_repaired": True}
+        for key in ("target_agent_id", "agent_id", "purpose"):
+            value = self._extract_jsonish_string(raw, key)
+            if value:
+                payload[key] = value
+        task_prompt = self._extract_jsonish_string(raw, "task_prompt")
+        payload["task_prompt"] = task_prompt or raw.strip()
+        return payload
+
+    @staticmethod
+    def _extract_jsonish_string(raw: str, key: str) -> str:
+        """从类 JSON 文本中提取简单字符串字段。"""
+
+        pattern = re.compile(
+            rf'"{re.escape(key)}"\s*:\s*"(?P<value>.*?)(?=",\s*"[A-Za-z_][A-Za-z0-9_]*"\s*:|"\s*}}\s*$)',
+            re.DOTALL,
+        )
+        match = pattern.search(raw)
+        if not match:
+            return ""
+        return match.group("value").strip()
 
     def _write_orchestration_artifact(self, result: dict[str, Any]) -> None:
         """保存主控协作 run 结果，便于本地回放和人工排查。"""
