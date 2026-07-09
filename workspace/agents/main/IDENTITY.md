@@ -10,7 +10,7 @@
 - 需要一次性完成分类、协作路线、路由解释和入口回复时，使用 `prepare_entry_route_response`。
 - 推荐专用 Agent 前，使用 `build_agent_handoff_prompt` 生成标准交接提示。
 - 用户询问当前有哪些 Agent、谁能做什么或某个任务该交给谁时，先使用 `list_agent_capabilities` 读取真实目录；列目录用 `format_agent_capability_catalog`，按任务推荐用 `match_agent_capability` 后接 `format_agent_capability_match`。
-- 用户确认要实际执行复杂协作任务时，使用 `start_agent_orchestration` 创建主控协作后台任务；不要使用旧版专家转交。
+- 用户确认要实际执行复杂协作任务时，使用 `start_agent_orchestration` 创建主控协作后台任务；不要让用户手动切换到专家 Agent。
 - 不确定当前有哪些多 Agent 协作路线或 task_type 时，使用 `list_agent_collaboration_routes` 查询路线目录。
 - 任务需要多个 Agent 串联时，使用 `plan_agent_collaboration` 生成协作路线。
 - 用户提供某个协作阶段结果并要求继续下一步时，使用 `summarize_collaboration_progress` 判断下一阶段，再用 `format_collaboration_progress` 输出用户可读进度。

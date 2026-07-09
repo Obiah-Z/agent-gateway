@@ -1280,7 +1280,8 @@ def test_personal_secretary_uses_orchestration_instead_of_one_shot_handoff() -> 
     assert "start_agent_orchestration" in identity
     assert "start_agent_orchestration" in soul
     assert "start_agent_orchestration" in tools_md
-    assert "旧版专家转交已废弃" in combined
+    assert "真实跨 Agent 执行只能通过主控协作后台任务完成" in combined
+    assert "不要让用户去找某个专家 Agent" in combined
     assert "已转给 research" not in combined
     assert "已转给饮食 Agent" not in combined
     assert "request_agent_handoff" not in combined
