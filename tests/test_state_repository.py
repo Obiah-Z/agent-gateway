@@ -22,6 +22,8 @@ def test_state_repository_exposes_expected_tables() -> None:
     assert STATE_TABLES == (
         "sessions",
         "tasks",
+        "agent_orchestration_runs",
+        "agent_orchestration_steps",
         "runtime_events",
         "errors",
         "metrics",

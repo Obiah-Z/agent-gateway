@@ -26,10 +26,12 @@ class CollaborationRuntime:
         *,
         event_store: RuntimeEventStore | None = None,
         artifact_root: Path | None = None,
+        state_write_repository: Any | None = None,
     ) -> None:
         self.runner = runner
         self.event_store = event_store
         self.artifact_root = artifact_root
+        self.state_write_repository = state_write_repository
 
     async def execute_orchestrated(
         self,
@@ -122,6 +124,20 @@ class CollaborationRuntime:
                         response_target=response_target,
                     )
                     observations.append(observation)
+                    self._write_orchestration_step(
+                        {
+                            **observation,
+                            "run_id": run_id,
+                            "id": f"{run_id}:{iteration:04d}",
+                            "created_at": time.time(),
+                            "updated_at": time.time(),
+                            "metadata": {
+                                "user_goal": goal,
+                                "controller_agent_id": controller_agent_id,
+                                "correlation_id": correlation_id,
+                            },
+                        }
+                    )
                     continue
 
                 if action_type == "final":
@@ -132,17 +148,92 @@ class CollaborationRuntime:
                         or controller_reply.text
                     ).strip()
                     stop_reason = "controller_final"
+                    self._write_orchestration_step(
+                        {
+                            "id": f"{run_id}:{iteration:04d}",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "action": "final",
+                            "target_agent_id": controller_agent_id,
+                            "requested_target_agent_id": controller_agent_id,
+                            "purpose": "controller final output",
+                            "task_prompt": "",
+                            "session_key": f"{session_prefix}:{run_id}:controller:{controller_agent_id}",
+                            "persist_history": False,
+                            "status": "completed",
+                            "output_text": final_output,
+                            "stop_reason": stop_reason,
+                            "tool_calls": [],
+                            "created_at": time.time(),
+                            "updated_at": time.time(),
+                            "metadata": {
+                                "user_goal": goal,
+                                "controller_agent_id": controller_agent_id,
+                                "correlation_id": correlation_id,
+                            },
+                        }
+                    )
                     break
 
                 if action_type == "abort":
                     status = "aborted"
                     final_output = str(action.get("reason") or "主控 Agent 中止协作。").strip()
                     stop_reason = "controller_abort"
+                    self._write_orchestration_step(
+                        {
+                            "id": f"{run_id}:{iteration:04d}",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "action": "abort",
+                            "target_agent_id": controller_agent_id,
+                            "requested_target_agent_id": controller_agent_id,
+                            "purpose": "controller abort",
+                            "task_prompt": "",
+                            "session_key": f"{session_prefix}:{run_id}:controller:{controller_agent_id}",
+                            "persist_history": False,
+                            "status": "aborted",
+                            "output_text": final_output,
+                            "stop_reason": stop_reason,
+                            "tool_calls": [],
+                            "created_at": time.time(),
+                            "updated_at": time.time(),
+                            "metadata": {
+                                "user_goal": goal,
+                                "controller_agent_id": controller_agent_id,
+                                "correlation_id": correlation_id,
+                            },
+                        }
+                    )
                     break
 
                 status = "failed"
                 final_output = f"主控 Agent 返回了无法识别的动作：{controller_reply.text}"
                 stop_reason = "invalid_controller_action"
+                self._write_orchestration_step(
+                    {
+                        "id": f"{run_id}:{iteration:04d}",
+                        "run_id": run_id,
+                        "iteration": iteration,
+                        "action": action_type or "invalid",
+                        "target_agent_id": controller_agent_id,
+                        "requested_target_agent_id": controller_agent_id,
+                        "purpose": "invalid controller action",
+                        "task_prompt": "",
+                        "session_key": f"{session_prefix}:{run_id}:controller:{controller_agent_id}",
+                        "persist_history": False,
+                        "status": "failed",
+                        "output_text": controller_reply.text,
+                        "stop_reason": stop_reason,
+                        "tool_calls": [],
+                        "created_at": time.time(),
+                        "updated_at": time.time(),
+                        "metadata": {
+                            "user_goal": goal,
+                            "controller_agent_id": controller_agent_id,
+                            "correlation_id": correlation_id,
+                        },
+                    }
+                )
                 break
             else:
                 status = "max_iterations_reached"
@@ -177,7 +268,7 @@ class CollaborationRuntime:
             "duration_ms": round((finished_at - started_at) * 1000, 1),
             "boundary": "该结果表示主控 Agent 已完成规划执行闭环；不包含消息投递状态。",
         }
-        self._write_orchestration_artifact(result)
+        self._write_orchestration_result(result)
         self._record(
             "collaboration.orchestration.completed"
             if status == "completed"
@@ -483,14 +574,86 @@ class CollaborationRuntime:
             return ""
         return match.group("value").strip()
 
-    def _write_orchestration_artifact(self, result: dict[str, Any]) -> None:
-        """保存主控协作 run 结果，便于本地回放和人工排查。"""
+    def _write_orchestration_result(self, result: dict[str, Any]) -> None:
+        """保存主控协作 run 结果。
+
+        PostgreSQL 可用时数据库是事实来源；只有未接入数据库写仓储时，才保留
+        本地 run.json 降级文件。
+        """
+
+        if self._write_orchestration_run(result):
+            return
 
         if self.artifact_root is None:
             return
         run_id = str(result.get("run_id") or "unknown")
         path = self._safe_artifact_path(f"workspace/reports/orchestration/{run_id}/run.json")
         path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _write_orchestration_run(self, result: dict[str, Any]) -> bool:
+        """把一次协作运行结果写入数据库。"""
+
+        writer = self.state_write_repository
+        if writer is None:
+            return False
+        method = getattr(writer, "write_agent_orchestration_run", None)
+        if method is None:
+            return False
+        try:
+            method(
+                {
+                    "run_id": str(result.get("run_id") or ""),
+                    "user_goal": str(result.get("user_goal") or ""),
+                    "controller_agent_id": str(result.get("controller_agent_id") or ""),
+                    "status": str(result.get("status") or ""),
+                    "stop_reason": str(result.get("stop_reason") or ""),
+                    "correlation_id": str(result.get("correlation_id") or ""),
+                    "observation_count": int(result.get("observation_count") or 0),
+                    "observations": list(result.get("observations") or []),
+                    "final_output": str(result.get("final_output") or ""),
+                    "started_at": float(result.get("started_at") or 0),
+                    "finished_at": float(result.get("finished_at") or 0),
+                    "duration_ms": float(result.get("duration_ms") or 0),
+                    "updated_at": time.time(),
+                    "metadata": {"boundary": result.get("boundary", "")},
+                }
+            )
+            return True
+        except Exception as exc:
+            self._record(
+                "collaboration.orchestration.persist_failed",
+                status="warning",
+                message="Agent orchestration run persistence failed",
+                correlation_id=str(result.get("correlation_id") or ""),
+                agent_id=str(result.get("controller_agent_id") or ""),
+                error=exc,
+                metadata={"run_id": result.get("run_id", "")},
+            )
+            return False
+
+    def _write_orchestration_step(self, row: dict[str, Any]) -> bool:
+        """把单轮协作动作写入数据库。"""
+
+        writer = self.state_write_repository
+        if writer is None:
+            return False
+        method = getattr(writer, "write_agent_orchestration_step", None)
+        if method is None:
+            return False
+        try:
+            method(row)
+            return True
+        except Exception as exc:
+            self._record(
+                "collaboration.orchestration.step_persist_failed",
+                status="warning",
+                message="Agent orchestration step persistence failed",
+                correlation_id=str(row.get("metadata", {}).get("correlation_id", "")),
+                agent_id=str(row.get("target_agent_id") or ""),
+                error=exc,
+                metadata={"run_id": row.get("run_id", ""), "iteration": row.get("iteration", 0)},
+            )
+            return False
 
     def _safe_artifact_path(self, expected_path: str) -> Path:
         """把蓝图路径约束在 artifact_root 下，避免写出工作区。"""

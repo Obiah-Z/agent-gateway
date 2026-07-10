@@ -389,6 +389,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         runner,
         event_store=event_store,
         artifact_root=settings.workspace_root,
+        state_write_repository=primary_write,
     )
     task_worker = TaskWorkerRuntime(
         task_queue,
@@ -752,7 +753,7 @@ def run_postgres_smoke(settings: GatewaySettings) -> dict[str, object]:
     """执行 PostgreSQL 主存储最小端到端验证。
 
     该验证只触发状态层写入，不调用模型、不发送外部消息。成功标准是核心运行状态
-    能从 PostgreSQL 读回，同时本地 fallback 文件也已经生成。
+    能从 PostgreSQL 读回；任务状态在 PostgreSQL 写入成功时不再生成本地 JSON 文件。
     """
 
     with TemporaryDirectory(prefix="agent-gateway-pg-smoke-") as temp_dir:
@@ -861,6 +862,42 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
     )
     if reserved is not None:
         app.task_queue.ack(reserved.id, result_preview=marker, now=now + 1)
+    orchestration_run_id = f"orch-smoke-{marker}"
+    app.state_repository.write.write_agent_orchestration_run(
+        {
+            "run_id": orchestration_run_id,
+            "user_goal": marker,
+            "controller_agent_id": "main",
+            "status": "completed",
+            "stop_reason": "postgres_smoke",
+            "correlation_id": marker,
+            "observation_count": 1,
+            "observations": [{"iteration": 1, "output_text": marker}],
+            "final_output": marker,
+            "started_at": now,
+            "finished_at": now + 1,
+            "duration_ms": 1000.0,
+            "metadata": {"marker": marker},
+        }
+    )
+    app.state_repository.write.write_agent_orchestration_step(
+        {
+            "run_id": orchestration_run_id,
+            "iteration": 1,
+            "action": "final",
+            "target_agent_id": "main",
+            "requested_target_agent_id": "main",
+            "purpose": "postgres smoke",
+            "task_prompt": marker,
+            "session_key": session_key,
+            "persist_history": False,
+            "status": "completed",
+            "output_text": marker,
+            "stop_reason": "postgres_smoke",
+            "tool_calls": [],
+            "metadata": {"marker": marker},
+        }
+    )
     event = app.event_store.record(
         "postgres.smoke",
         status="ok",
@@ -981,6 +1018,15 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
         "channel_config": bool(reader.get("channels", channel_key)),
         "session": bool(reader.read_session_messages("main", session_key)),
         "task": bool(reader.get("tasks", task.id)),
+        "agent_orchestration_run": bool(
+            reader.get("agent_orchestration_runs", orchestration_run_id)
+        ),
+        "agent_orchestration_step": _postgres_smoke_has_marker(
+            reader,
+            "agent_orchestration_steps",
+            marker,
+            "metadata",
+        ),
         "event": bool(reader.get("runtime_events", str(event.get("event_id", "")))),
         "memory": _postgres_smoke_has_marker(reader, "memory_entries", marker, "metadata"),
         "metric": _postgres_smoke_has_marker(reader, "metrics", marker, "metadata"),
@@ -993,7 +1039,7 @@ def _run_postgres_smoke_with_settings(settings: GatewaySettings) -> dict[str, ob
     }
     local_checks = {
         "session_file": app.sessions.session_path("main", session_key).exists(),
-        "task_file": (settings.tasks_dir / f"{task.id}.json").exists(),
+        "task_file_absent": not (settings.tasks_dir / f"{task.id}.json").exists(),
         "event_file": any(settings.events_dir.glob("runtime-events-*.jsonl")),
         "memory_file": (settings.workspace_root / "memory" / "daily" / f"{datetime.now(timezone.utc).date().isoformat()}.jsonl").exists(),
         "metric_file": any(settings.metrics_dir.glob("metrics-*.jsonl")),

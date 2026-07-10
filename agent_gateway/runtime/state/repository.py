@@ -60,6 +60,8 @@ class StateReadRepository(Protocol):
 STATE_TABLES: tuple[StateTableName, ...] = (
     "sessions",
     "tasks",
+    "agent_orchestration_runs",
+    "agent_orchestration_steps",
     "runtime_events",
     "errors",
     "metrics",

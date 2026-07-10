@@ -165,7 +165,7 @@ class LocalTaskQueue:
             now=now,
         )
         if reserved is not None:
-            self.store.write_task_to_disk(reserved)
+            self.store.persist_task_state(reserved)
             return reserved
         if self._has_enabled_primary_reserve("reserve_task"):
             return None
@@ -212,7 +212,7 @@ class LocalTaskQueue:
             now=now,
         )
         if reserved is not None:
-            self.store.write_task_to_disk(reserved)
+            self.store.persist_task_state(reserved)
             return reserved
         if self._has_enabled_primary_reserve("reserve_task_id"):
             return None

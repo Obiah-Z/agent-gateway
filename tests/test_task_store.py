@@ -5,6 +5,26 @@ import pytest
 from agent_gateway.runtime.tasks import LocalTaskStore, TaskInstance
 
 
+class FakeTaskWriteBackend:
+    def __init__(self) -> None:
+        self.tasks = []
+        self.rows = {}
+
+    def write_task(self, task):
+        row = task.to_dict()
+        self.tasks.append(row)
+        self.rows[row["id"]] = row
+        return row
+
+    def get(self, table, key):
+        assert table == "tasks"
+        return self.rows.get(key)
+
+    def list(self, table, *, limit=50, filters=None):
+        assert table == "tasks"
+        return list(self.rows.values())[:limit]
+
+
 def test_local_task_store_creates_and_reads_task(tmp_path: Path) -> None:
     store = LocalTaskStore(tmp_path / "tasks")
     task = TaskInstance.create(
@@ -72,3 +92,33 @@ def test_local_task_store_rejects_invalid_task_id(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid task id"):
         store.get("../bad")
+
+
+def test_local_task_store_skips_json_file_when_primary_write_succeeds(tmp_path: Path) -> None:
+    store = LocalTaskStore(tmp_path / "tasks")
+    backend = FakeTaskWriteBackend()
+    store.write_backend = backend
+    store.read_backend = backend
+    task = TaskInstance.create(task_type="cron", source="scheduler")
+
+    store.create(task)
+    store.mark_running(task.id, now=100.0)
+
+    assert [row["status"] for row in backend.tasks] == ["pending", "running"]
+    assert not (tmp_path / "tasks" / f"{task.id}.json").exists()
+
+
+def test_local_task_store_falls_back_to_json_file_when_primary_write_fails(
+    tmp_path: Path,
+) -> None:
+    class FailingTaskWriteBackend:
+        def write_task(self, task):
+            raise RuntimeError("db down")
+
+    store = LocalTaskStore(tmp_path / "tasks")
+    store.write_backend = FailingTaskWriteBackend()
+    task = TaskInstance.create(task_type="cron", source="scheduler")
+
+    store.create(task)
+
+    assert (tmp_path / "tasks" / f"{task.id}.json").exists()

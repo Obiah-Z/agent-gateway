@@ -33,8 +33,7 @@ class LocalTaskStore:
         """写入新任务。"""
 
         task.updated_at = time.time()
-        self._write_primary(task)
-        self.write_task_to_disk(task)
+        self._write(task)
         return task
 
     def get(self, task_id: str) -> TaskInstance | None:
@@ -133,8 +132,7 @@ class LocalTaskStore:
         task.status = "running"
         task.started_at = current
         task.updated_at = current
-        self._write_primary(task)
-        self.write_task_to_disk(task)
+        self._write(task)
         return task
 
     def mark_done(
@@ -152,8 +150,7 @@ class LocalTaskStore:
         task.result_preview = result_preview[:500]
         task.finished_at = current
         task.updated_at = current
-        self._write_primary(task)
-        self.write_task_to_disk(task)
+        self._write(task)
         return task
 
     def mark_failed(
@@ -173,8 +170,7 @@ class LocalTaskStore:
         task.retry_count += 1 if retryable else 0
         task.finished_at = 0.0 if retryable else current
         task.updated_at = current
-        self._write_primary(task)
-        self.write_task_to_disk(task)
+        self._write(task)
         return task
 
     def cancel(self, task_id: str, *, now: float | None = None) -> TaskInstance:
@@ -185,8 +181,7 @@ class LocalTaskStore:
         task.status = "cancelled"
         task.finished_at = current
         task.updated_at = current
-        self._write_primary(task)
-        self.write_task_to_disk(task)
+        self._write(task)
         return task
 
     def _require(self, task_id: str) -> TaskInstance:
@@ -196,7 +191,14 @@ class LocalTaskStore:
         return task
 
     def _write(self, task: TaskInstance) -> None:
+        if self._write_primary(task):
+            return
         self.write_task_to_disk(task)
+
+    def persist_task_state(self, task: TaskInstance) -> None:
+        """按当前主存储策略持久化任务状态。"""
+
+        self._write(task)
 
     def write_task_to_disk(self, task: TaskInstance) -> None:
         """仅写入本地 JSON 文件，不触发备份镜像。"""
@@ -223,7 +225,7 @@ class LocalTaskStore:
         except Exception:
             pass
 
-    def _write_primary(self, task: TaskInstance) -> None:
+    def _write_primary(self, task: TaskInstance) -> bool:
         """优先写入数据库主存储；不可用时退回备份 sink。"""
 
         backend = getattr(self, "write_backend", None)
@@ -232,10 +234,11 @@ class LocalTaskStore:
             if method is not None:
                 try:
                     method(task)
-                    return
+                    return True
                 except Exception:
                     pass
         self._mirror(task)
+        return False
 
     @staticmethod
     def _read(path: Path) -> TaskInstance | None:

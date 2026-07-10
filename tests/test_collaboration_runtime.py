@@ -84,6 +84,20 @@ class FakeSessionStore:
         )
 
 
+class FakeOrchestrationWriter:
+    def __init__(self) -> None:
+        self.runs: list[dict[str, object]] = []
+        self.steps: list[dict[str, object]] = []
+
+    def write_agent_orchestration_run(self, row: dict[str, object]) -> dict[str, object]:
+        self.runs.append(dict(row))
+        return row
+
+    def write_agent_orchestration_step(self, row: dict[str, object]) -> dict[str, object]:
+        self.steps.append(dict(row))
+        return row
+
+
 def test_agent_collaboration_task_handler_rejects_blueprint_payload(tmp_path: Path) -> None:
     runner = SequencedCollaborationRunner({})
     runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
@@ -171,6 +185,41 @@ def test_collaboration_runtime_orchestrates_next_actions_until_final(tmp_path: P
     event_types = {row["type"] for row in events.tail(limit=20)}
     assert "collaboration.orchestration.started" in event_types
     assert "collaboration.orchestration.completed" in event_types
+
+
+def test_collaboration_runtime_persists_orchestration_to_database_without_local_artifact(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "main": [
+                '{"action":"delegate","target_agent_id":"repo-analyzer","task_prompt":"分析仓库"}',
+                '{"action":"final","final_output":"最终报告"}',
+            ],
+            "repo-analyzer": ["分析完成"],
+        }
+    )
+    writer = FakeOrchestrationWriter()
+    runtime = CollaborationRuntime(
+        runner,  # type: ignore[arg-type]
+        artifact_root=tmp_path,
+        state_write_repository=writer,
+    )
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="分析仓库",
+            controller_agent_id="main",
+            run_id="orch-db",
+            max_iterations=3,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert [row["run_id"] for row in writer.runs] == ["orch-db"]
+    assert [row["action"] for row in writer.steps] == ["delegate", "final"]
+    assert writer.runs[0]["final_output"] == "最终报告"
+    assert not (tmp_path / "workspace/reports/orchestration/orch-db/run.json").exists()
 
 
 def test_agent_collaboration_task_handler_executes_orchestration_payload(tmp_path: Path) -> None:

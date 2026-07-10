@@ -122,6 +122,7 @@ def backfill_local_state_to_repository(
     _backfill_feishu_card_states(settings.data_dir / "channel-state" / "feishu", buffer)
     _backfill_cron_runs(settings.workspace_root / "cron", buffer)
     _backfill_news_items(settings.data_dir, buffer)
+    _backfill_orchestration_runs(settings.workspace_root / "reports" / "orchestration", buffer)
     _backfill_jsonl_dir(settings.events_dir, "runtime_events", buffer)
     _backfill_metrics(settings.metrics_dir, buffer)
     _backfill_alerts(settings.alerts_dir, buffer)
@@ -298,6 +299,73 @@ def _backfill_tasks(
         if row is None:
             continue
         buffer.add("tasks", row)
+
+
+def _backfill_orchestration_runs(
+    orchestration_dir: Path,
+    buffer: _BackfillBuffer,
+) -> None:
+    """把本地多 Agent 协作 run.json 回填到 PostgreSQL 协作状态表。"""
+
+    if not orchestration_dir.is_dir():
+        return
+    for path in sorted(orchestration_dir.glob("*/run.json")):
+        result = _read_json_file(path, buffer.report, "agent_orchestration_runs")
+        if not isinstance(result, dict):
+            continue
+        run_id = str(result.get("run_id") or path.parent.name)
+        started_at = _as_float(result.get("started_at"))
+        finished_at = _as_float(result.get("finished_at"))
+        observations = result.get("observations", [])
+        if not isinstance(observations, list):
+            observations = []
+        buffer.add(
+            "agent_orchestration_runs",
+            {
+                "run_id": run_id,
+                "user_goal": str(result.get("user_goal") or ""),
+                "controller_agent_id": str(result.get("controller_agent_id") or ""),
+                "status": str(result.get("status") or ""),
+                "stop_reason": str(result.get("stop_reason") or ""),
+                "correlation_id": str(result.get("correlation_id") or ""),
+                "observation_count": int(result.get("observation_count") or len(observations)),
+                "observations": observations,
+                "final_output": str(result.get("final_output") or ""),
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_ms": _as_float(result.get("duration_ms")),
+                "metadata": {"source_path": str(path), "boundary": result.get("boundary", "")},
+                "updated_at": finished_at or started_at or time.time(),
+            },
+        )
+        for index, observation in enumerate(observations, start=1):
+            if not isinstance(observation, dict):
+                continue
+            iteration = int(observation.get("iteration") or index)
+            buffer.add(
+                "agent_orchestration_steps",
+                {
+                    "id": f"{run_id}:{iteration:04d}",
+                    "run_id": run_id,
+                    "iteration": iteration,
+                    "action": str(observation.get("action") or "delegate"),
+                    "target_agent_id": str(observation.get("target_agent_id") or ""),
+                    "requested_target_agent_id": str(
+                        observation.get("requested_target_agent_id") or ""
+                    ),
+                    "purpose": str(observation.get("purpose") or ""),
+                    "task_prompt": str(observation.get("task_prompt") or ""),
+                    "session_key": str(observation.get("session_key") or ""),
+                    "persist_history": bool(observation.get("persist_history", False)),
+                    "status": str(observation.get("status") or ""),
+                    "output_text": str(observation.get("output_text") or ""),
+                    "stop_reason": str(observation.get("stop_reason") or ""),
+                    "tool_calls": list(observation.get("tool_calls") or []),
+                    "metadata": {"source_path": str(path)},
+                    "created_at": started_at,
+                    "updated_at": finished_at or started_at or time.time(),
+                },
+            )
 
 
 def _backfill_delivery_queue(
@@ -767,6 +835,13 @@ def _parse_time(value: Any) -> float | None:
         return datetime.fromisoformat(normalized).timestamp()
     except ValueError:
         return None
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """宽松读取历史 JSON 中的数值字段。"""
+
+    parsed = _parse_time(value)
+    return default if parsed is None else parsed
 
 
 @dataclass(slots=True)

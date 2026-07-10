@@ -59,6 +59,55 @@ def test_backfill_local_state_dry_run_scans_without_writing(tmp_path: Path) -> N
     assert writer.rows == []
 
 
+def test_backfill_local_state_writes_orchestration_artifacts(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    run_dir = settings.workspace_root / "reports" / "orchestration" / "orch-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "orch-1",
+                "user_goal": "分析仓库",
+                "controller_agent_id": "main",
+                "status": "completed",
+                "stop_reason": "controller_final",
+                "correlation_id": "corr-1",
+                "observation_count": 1,
+                "observations": [
+                    {
+                        "iteration": 1,
+                        "action": "delegate",
+                        "target_agent_id": "research",
+                        "requested_target_agent_id": "research",
+                        "purpose": "调研",
+                        "task_prompt": "调研 RabbitMQ",
+                        "session_key": "orchestration:orch-1:step-01:research",
+                        "persist_history": False,
+                        "status": "completed",
+                        "output_text": "完成",
+                        "stop_reason": "end_turn",
+                        "tool_calls": ["web_search"],
+                    }
+                ],
+                "final_output": "最终报告",
+                "started_at": 10.0,
+                "finished_at": 11.0,
+                "duration_ms": 1000.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    writer = RecordingWriter()
+
+    report = backfill_local_state_to_repository(settings, writer)
+
+    batches = {table: rows for table, rows, _ in writer.batches}
+    assert report.written["agent_orchestration_runs"] == 1
+    assert report.written["agent_orchestration_steps"] == 1
+    assert batches["agent_orchestration_runs"][0]["run_id"] == "orch-1"
+    assert batches["agent_orchestration_steps"][0]["id"] == "orch-1:0001"
+
+
 def test_backfill_local_state_writes_config_and_runtime_rows(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     SessionStore(settings.sessions_dir).rewrite_messages(

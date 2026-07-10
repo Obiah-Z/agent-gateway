@@ -19,6 +19,8 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
         "delivery_entries",
         "sessions",
         "tasks",
+        "agent_orchestration_runs",
+        "agent_orchestration_steps",
         "runtime_events",
         "errors",
         "metrics",
@@ -49,27 +51,29 @@ def test_postgres_state_tables_cover_core_runtime_entities() -> None:
     assert "locked_at" in POSTGRES_STATE_TABLES[4].columns
     assert "session_key" in POSTGRES_STATE_TABLES[5].columns
     assert "payload" in POSTGRES_STATE_TABLES[6].columns
-    assert "correlation_id" in POSTGRES_STATE_TABLES[7].columns
-    assert "category" in POSTGRES_STATE_TABLES[8].columns
-    assert "labels" in POSTGRES_STATE_TABLES[9].columns
-    assert "content" in POSTGRES_STATE_TABLES[10].columns
-    assert "actor" in POSTGRES_STATE_TABLES[11].columns
-    assert "expires_at" in POSTGRES_STATE_TABLES[12].columns
-    assert "body_sha256" in POSTGRES_STATE_TABLES[13].columns
-    assert "binding_code" in POSTGRES_STATE_TABLES[14].columns
-    assert "offset_value" in POSTGRES_STATE_TABLES[15].columns
-    assert "output_preview" in POSTGRES_STATE_TABLES[16].columns
-    assert "item_id" in POSTGRES_STATE_TABLES[17].columns
-    assert "user_scope" in POSTGRES_STATE_TABLES[18].columns
-    assert "weight_kg" in POSTGRES_STATE_TABLES[19].columns
-    assert "estimated_calories" in POSTGRES_STATE_TABLES[20].columns
-    assert "actual_calories" in POSTGRES_STATE_TABLES[21].columns
-    assert "target_calories" in POSTGRES_STATE_TABLES[22].columns
-    assert "page_index" in POSTGRES_STATE_TABLES[23].columns
-    assert "owner_token" in POSTGRES_STATE_TABLES[24].columns
-    assert "renewed_at" in POSTGRES_STATE_TABLES[24].columns
-    assert POSTGRES_STATE_TABLES[25].primary_key == "id"
-    assert "occurred_at" in POSTGRES_STATE_TABLES[25].columns
+    assert "observations" in POSTGRES_STATE_TABLES[7].columns
+    assert "tool_calls" in POSTGRES_STATE_TABLES[8].columns
+    assert "correlation_id" in POSTGRES_STATE_TABLES[9].columns
+    assert "category" in POSTGRES_STATE_TABLES[10].columns
+    assert "labels" in POSTGRES_STATE_TABLES[11].columns
+    assert "content" in POSTGRES_STATE_TABLES[12].columns
+    assert "actor" in POSTGRES_STATE_TABLES[13].columns
+    assert "expires_at" in POSTGRES_STATE_TABLES[14].columns
+    assert "body_sha256" in POSTGRES_STATE_TABLES[15].columns
+    assert "binding_code" in POSTGRES_STATE_TABLES[16].columns
+    assert "offset_value" in POSTGRES_STATE_TABLES[17].columns
+    assert "output_preview" in POSTGRES_STATE_TABLES[18].columns
+    assert "item_id" in POSTGRES_STATE_TABLES[19].columns
+    assert "user_scope" in POSTGRES_STATE_TABLES[20].columns
+    assert "weight_kg" in POSTGRES_STATE_TABLES[21].columns
+    assert "estimated_calories" in POSTGRES_STATE_TABLES[22].columns
+    assert "actual_calories" in POSTGRES_STATE_TABLES[23].columns
+    assert "target_calories" in POSTGRES_STATE_TABLES[24].columns
+    assert "page_index" in POSTGRES_STATE_TABLES[25].columns
+    assert "owner_token" in POSTGRES_STATE_TABLES[26].columns
+    assert "renewed_at" in POSTGRES_STATE_TABLES[26].columns
+    assert POSTGRES_STATE_TABLES[27].primary_key == "id"
+    assert "occurred_at" in POSTGRES_STATE_TABLES[27].columns
 
 
 def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
@@ -79,6 +83,8 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert '"tool_policy" JSONB NOT NULL DEFAULT' in sql
     assert 'CREATE TABLE IF NOT EXISTS "sessions"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "delivery_entries"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "agent_orchestration_runs"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "agent_orchestration_steps"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "webhook_dedup_entries"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "feishu_webhook_events"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "feishu_onboarding_sessions"' in sql
@@ -102,6 +108,8 @@ def test_postgres_schema_sql_covers_tables_and_indexes() -> None:
     assert 'CREATE INDEX IF NOT EXISTS "idx_delivery_entries_state_next_retry_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_delivery_entries_locked_by_locked_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_runtime_events_component_status_timestamp"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_agent_orchestration_runs_status_updated_at"' in sql
+    assert 'CREATE INDEX IF NOT EXISTS "idx_agent_orchestration_steps_run_id_iteration"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_webhook_events_outcome_received_at"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_feishu_onboarding_sessions_binding_code"' in sql
     assert 'CREATE INDEX IF NOT EXISTS "idx_channel_offsets_channel_account_id"' in sql
@@ -280,6 +288,18 @@ def test_postgres_write_bulk_upsert_batches_rows(monkeypatch) -> None:
     assert "json_populate_recordset" in calls[0][1]
 
 
+def test_postgres_write_repository_builds_column_explicit_insert_sql() -> None:
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=False)
+
+    insert_sql = repo._build_insert_sql("delivery_entries")
+    upsert_sql = repo._build_upsert_sql("delivery_entries")
+
+    assert "SELECT * FROM json_populate_record" not in insert_sql
+    assert "SELECT * FROM json_populate_record" not in upsert_sql
+    assert 'SELECT "id", "state", "channel"' in insert_sql
+    assert 'SELECT "id", "state", "channel"' in upsert_sql
+
+
 def test_postgres_write_metric_normalizes_snapshot_row(monkeypatch) -> None:
     captured = []
 
@@ -424,6 +444,26 @@ def test_postgres_write_runtime_rows_use_upsert(monkeypatch) -> None:
     ]
     memory_row = calls[2][1]
     assert memory_row["metadata"]["user_scope"] == "user:alice"
+
+
+def test_postgres_write_repository_persists_agent_orchestration_rows(monkeypatch) -> None:
+    calls = []
+
+    def fake_upsert(self, table, row):
+        calls.append((table, row))
+        return row
+
+    monkeypatch.setattr(PostgresWriteRepository, "upsert", fake_upsert)
+    repo = PostgresWriteRepository(url="postgresql://local/db", enabled=True)
+
+    repo.write_agent_orchestration_run({"run_id": "orch-1", "status": "completed"})
+    repo.write_agent_orchestration_step({"run_id": "orch-1", "iteration": 1, "action": "final"})
+
+    assert [table for table, _ in calls] == [
+        "agent_orchestration_runs",
+        "agent_orchestration_steps",
+    ]
+    assert calls[1][1]["id"] == "orch-1:0001"
 
 
 def test_postgres_write_delivery_entry_normalizes_state(monkeypatch) -> None:

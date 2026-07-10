@@ -320,6 +320,7 @@ def _index_name(table: str, columns: tuple[str, ...]) -> str:
 
 def _column_type(table: str, column: str) -> str:
     json_columns = {
+        "observations",
         "before",
         "after",
         "config",
@@ -338,6 +339,7 @@ def _column_type(table: str, column: str) -> str:
         "structured_blocks",
         "tags",
         "tool_policy",
+        "tool_calls",
     }
     float_columns = {
         "created_at",
@@ -370,10 +372,13 @@ def _column_type(table: str, column: str) -> str:
         "expires_at",
         "logged_at",
         "recorded_at",
+        "duration_ms",
     }
     int_columns = {
         "birth_year",
+        "iteration",
         "message_count",
+        "observation_count",
         "offset_value",
         "priority",
         "page_index",
@@ -383,7 +388,7 @@ def _column_type(table: str, column: str) -> str:
         "tier",
         "window_seconds",
     }
-    bool_columns = {"bound_is_group", "enabled", "expanded"}
+    bool_columns = {"bound_is_group", "enabled", "expanded", "persist_history"}
     if column in json_columns:
         return "JSONB NOT NULL DEFAULT '{}'::jsonb"
     if column in float_columns:
@@ -614,6 +619,18 @@ class PostgresReadRepository(StateReadRepository):
         if table == "tasks" and filters.get("statuses"):
             clauses.append("status = ANY(%(statuses)s)")
             params["statuses"] = list(filters["statuses"])
+        if table == "agent_orchestration_runs":
+            for key in ("run_id", "status", "controller_agent_id", "correlation_id"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{key} = %({key})s")
+                    params[key] = value
+        if table == "agent_orchestration_steps":
+            for key in ("run_id", "status", "target_agent_id", "action"):
+                value = str(filters.get(key, ""))
+                if value:
+                    clauses.append(f"{key} = %({key})s")
+                    params[key] = value
         if table == "runtime_events":
             for key in ("event_type", "component", "status", "correlation_id", "agent_id", "channel", "job_id", "delivery_id"):
                 value = str(filters.get(key, ""))
@@ -1015,6 +1032,8 @@ class PostgresReadRepository(StateReadRepository):
             "delivery_entries",
             "sessions",
             "tasks",
+            "agent_orchestration_runs",
+            "agent_orchestration_steps",
             "runtime_events",
             "errors",
             "metrics",
@@ -1049,6 +1068,8 @@ class PostgresReadRepository(StateReadRepository):
             "delivery_entries": "id",
             "sessions": "id",
             "tasks": "id",
+            "agent_orchestration_runs": "run_id",
+            "agent_orchestration_steps": "id",
             "runtime_events": "event_id",
             "errors": "id",
             "metrics": "id",
@@ -1083,6 +1104,8 @@ class PostgresReadRepository(StateReadRepository):
             "sessions": "updated_at",
             "delivery_entries": "enqueued_at",
             "tasks": "updated_at",
+            "agent_orchestration_runs": "updated_at",
+            "agent_orchestration_steps": "updated_at",
             "runtime_events": "timestamp",
             "errors": "timestamp",
             "metrics": "timestamp",
@@ -1363,6 +1386,33 @@ class PostgresWriteRepository:
 
         payload = task.to_dict() if hasattr(task, "to_dict") else dict(task)
         return self.upsert("tasks", payload)
+
+    def write_agent_orchestration_run(self, row: dict[str, Any]) -> dict[str, Any]:
+        """写入一次多 Agent 主控协作的最终状态。"""
+
+        payload = dict(row)
+        if not payload.get("run_id"):
+            raise ValueError("missing primary key for agent_orchestration_runs: run_id")
+        payload.setdefault("metadata", {})
+        payload.setdefault("updated_at", time.time())
+        return self.upsert("agent_orchestration_runs", payload)
+
+    def write_agent_orchestration_step(self, row: dict[str, Any]) -> dict[str, Any]:
+        """写入多 Agent 主控协作中的单轮动作结果。"""
+
+        payload = dict(row)
+        run_id = str(payload.get("run_id") or "")
+        iteration = int(payload.get("iteration") or 0)
+        if not payload.get("id"):
+            if not run_id or iteration <= 0:
+                raise ValueError("missing primary key for agent_orchestration_steps: id")
+            payload["id"] = f"{run_id}:{iteration:04d}"
+        current = time.time()
+        payload.setdefault("created_at", current)
+        payload.setdefault("updated_at", current)
+        payload.setdefault("metadata", {})
+        payload.setdefault("tool_calls", [])
+        return self.upsert("agent_orchestration_steps", payload)
 
     def reserve_task(
         self,
@@ -1849,7 +1899,7 @@ class PostgresWriteRepository:
         return (
             f"WITH inserted AS ("
             f"INSERT INTO {table_name} ({columns_sql}) "
-            "SELECT * FROM json_populate_record(NULL::"
+            f"SELECT {columns_sql} FROM json_populate_record(NULL::"
             f"{table_name}, %(row)s::json)"
             " RETURNING *) "
             "SELECT row_to_json(inserted) AS row FROM inserted"
@@ -1870,7 +1920,7 @@ class PostgresWriteRepository:
         return (
             f"WITH upserted AS ("
             f"INSERT INTO {table_name} ({columns_sql}) "
-            "SELECT * FROM json_populate_record(NULL::"
+            f"SELECT {columns_sql} FROM json_populate_record(NULL::"
             f"{table_name}, %(row)s::json) "
             f"ON CONFLICT ({_quote_ident(primary_key)}) DO UPDATE SET {assignments} "
             "RETURNING *) "
@@ -2353,6 +2403,8 @@ class PostgresWriteRepository:
             "delivery_entries",
             "sessions",
             "tasks",
+            "agent_orchestration_runs",
+            "agent_orchestration_steps",
             "runtime_events",
             "errors",
             "metrics",
@@ -2387,6 +2439,8 @@ class PostgresWriteRepository:
             "delivery_entries": "id",
             "sessions": "id",
             "tasks": "id",
+            "agent_orchestration_runs": "run_id",
+            "agent_orchestration_steps": "id",
             "runtime_events": "event_id",
             "errors": "id",
             "metrics": "id",
@@ -2551,6 +2605,53 @@ POSTGRES_STATE_TABLES: tuple[PostgresTableSpec, ...] = (
             "metadata",
         ),
         indexes=(("status", "updated_at"), ("agent_id", "updated_at"), ("idempotency_key",)),
+    ),
+    PostgresTableSpec(
+        name="agent_orchestration_runs",
+        primary_key="run_id",
+        time_column="updated_at",
+        columns=(
+            "run_id",
+            "user_goal",
+            "controller_agent_id",
+            "status",
+            "stop_reason",
+            "correlation_id",
+            "observation_count",
+            "observations",
+            "final_output",
+            "started_at",
+            "finished_at",
+            "duration_ms",
+            "metadata",
+            "updated_at",
+        ),
+        indexes=(("status", "updated_at"), ("controller_agent_id", "updated_at"), ("correlation_id",)),
+    ),
+    PostgresTableSpec(
+        name="agent_orchestration_steps",
+        primary_key="id",
+        time_column="updated_at",
+        columns=(
+            "id",
+            "run_id",
+            "iteration",
+            "action",
+            "target_agent_id",
+            "requested_target_agent_id",
+            "purpose",
+            "task_prompt",
+            "session_key",
+            "persist_history",
+            "status",
+            "output_text",
+            "stop_reason",
+            "tool_calls",
+            "metadata",
+            "created_at",
+            "updated_at",
+        ),
+        indexes=(("run_id", "iteration"), ("target_agent_id", "updated_at"), ("status", "updated_at")),
     ),
     PostgresTableSpec(
         name="runtime_events",
