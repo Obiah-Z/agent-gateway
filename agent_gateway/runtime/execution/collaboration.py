@@ -557,6 +557,16 @@ class CollaborationRuntime:
             value = self._extract_jsonish_string(raw, key)
             if value:
                 payload[key] = value
+        if action == "final":
+            final_output = self._extract_jsonish_string(raw, "final_output")
+            if final_output:
+                payload["final_output"] = final_output
+            return payload
+        if action == "abort":
+            reason = self._extract_jsonish_string(raw, "reason")
+            if reason:
+                payload["reason"] = reason
+            return payload
         task_prompt = self._extract_jsonish_string(raw, "task_prompt")
         payload["task_prompt"] = task_prompt or raw.strip()
         return payload

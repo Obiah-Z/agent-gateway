@@ -145,10 +145,15 @@ class AgentLoopRunner:
                 allowed_tools=allowed_tools,
                 runtime_context=runtime_context,
             )
+            reply_text = result.text
+            result_messages = result.messages
+            if "start_agent_orchestration" in result.tool_calls:
+                reply_text = "已收到，正在处理。本轮结果生成后会继续推送。"
+                result_messages = self._replace_last_assistant_text(result.messages, reply_text)
             # ResilienceRunner 返回的是经过工具调用闭环后的完整历史。协作中间轮次
             # 只写 run artifact，避免把 step 会话散落到各 Agent 的普通会话目录。
             if persist_history:
-                self.sessions.rewrite_messages(agent_id, session_key, result.messages)
+                self.sessions.rewrite_messages(agent_id, session_key, result_messages)
             self._record(
                 "agent.turn.completed",
                 status="ok",
@@ -170,7 +175,7 @@ class AgentLoopRunner:
             return AgentReply(
                 agent_id=agent_id,
                 session_key=session_key,
-                text=result.text,
+                text=reply_text,
                 stop_reason=result.stop_reason,
                 tool_calls=result.tool_calls,
             )
@@ -212,6 +217,21 @@ class AgentLoopRunner:
             elif isinstance(block_text, list):
                 texts.extend(self._iter_content_text(block_text))
         return texts
+
+    @staticmethod
+    def _replace_last_assistant_text(
+        messages: list[dict[str, object]],
+        text: str,
+    ) -> list[dict[str, object]]:
+        """把后台协作启动后的模型续写替换为受控确认语。"""
+
+        updated = [dict(message) for message in messages]
+        for index in range(len(updated) - 1, -1, -1):
+            if updated[index].get("role") == "assistant":
+                updated[index]["content"] = [{"type": "text", "text": text}]
+                return updated
+        updated.append({"role": "assistant", "content": [{"type": "text", "text": text}]})
+        return updated
 
     def _record(self, event_type: str, **kwargs) -> None:
         if self.event_store is None:

@@ -222,6 +222,30 @@ def test_collaboration_runtime_persists_orchestration_to_database_without_local_
     assert not (tmp_path / "workspace/reports/orchestration/orch-db/run.json").exists()
 
 
+def test_collaboration_runtime_repairs_multiline_final_json(tmp_path: Path) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                '{"action":"final","final_output":"## ✅ 晚餐已记录\n\n| 餐次 | 热量 |\n|---|---|\n| 晚餐 | 530 kcal |"}'
+            ],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="记录晚餐",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            run_id="bad-final-json",
+            max_iterations=1,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert result["final_output"].startswith("## ✅ 晚餐已记录")
+    assert '{"action":"final"' not in result["final_output"]
+
+
 def test_agent_collaboration_task_handler_executes_orchestration_payload(tmp_path: Path) -> None:
     runner = SequencedCollaborationRunner(
         {

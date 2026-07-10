@@ -245,6 +245,74 @@ def test_agent_loop_runner_excludes_disabled_tools(tmp_path: Path) -> None:
     assert "disabled_tools: memory_write" in resilience.last_system_prompt
 
 
+def test_agent_loop_runner_coerces_orchestration_start_reply(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        model_id="deepseek-v4-pro",
+    )
+    settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    (settings.workspace_root / "IDENTITY.md").write_text("Identity", encoding="utf-8")
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            tool_policy_mode="allowlist",
+            tool_names=("memory_search",),
+        )
+    )
+    sessions = SessionStore(settings.sessions_dir)
+    resilience = FakeResilienceRunner()
+    resilience.response_tool_calls = ["start_agent_orchestration"]
+    resilience.response_messages = [
+        {"role": "user", "content": "晚餐吃了：半份蒸面、一个烤的大鸡腿"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "toolu_orch", "name": "start_agent_orchestration"}
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "toolu_orch", "content": "{}"}],
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "已启动，饮食助手记录后会更新今日汇总。稍等～\n\n"
+                "## ✅ 晚餐已记录\n这里是模型脑补出来的汇总。"
+            ),
+        },
+    ]
+    runner = AgentLoopRunner(
+        settings,
+        agents,
+        sessions,
+        PromptAssembler(settings.workspace_root),
+        resilience,
+    )
+    session_key = "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+
+    reply = asyncio.run(
+        runner.run_turn(
+            "personal-secretary-zhanghaibo",
+            session_key,
+            "晚餐吃了：半份蒸面、一个烤的大鸡腿",
+            channel="wework",
+        )
+    )
+
+    assert reply.text == "已收到，正在处理。本轮结果生成后会继续推送。"
+    assert reply.tool_calls == ["start_agent_orchestration"]
+    saved = sessions.load_messages("personal-secretary-zhanghaibo", session_key)
+    assert saved[-1]["content"] == [
+        {"type": "text", "text": "已收到，正在处理。本轮结果生成后会继续推送。"}
+    ]
+
+
 def test_agent_loop_runner_ignores_legacy_handoff_request_from_history(tmp_path: Path) -> None:
     settings = GatewaySettings(
         config_dir=tmp_path / "config",
