@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
-from agent_gateway.runtime.user_scope import canonicalize_user_scope
+from agent_gateway.runtime.user_scope import canonicalize_user_scope, is_transient_scope
 
 
 @dataclass(slots=True)
@@ -41,8 +41,8 @@ class MemoryStore:
     def write_memory(self, content: str, category: str = "general", *, user_scope: str = "") -> str:
         """把一条新记忆追加到当天的 daily memory 文件。"""
 
-        if self._is_system_scope(user_scope):
-            return "Memory write skipped (system task scope)"
+        if self._is_transient_scope(user_scope):
+            return "Memory write skipped (transient task scope)"
         normalized_scope = self.normalize_scope(user_scope)
         self._write_primary(content, category, user_scope=normalized_scope)
         self.write_memory_to_disk(content, category=category, user_scope=normalized_scope)
@@ -59,7 +59,7 @@ class MemoryStore:
     ) -> None:
         """仅写入本地 daily memory，不触发备份镜像。"""
 
-        if self._is_system_scope(user_scope):
+        if self._is_transient_scope(user_scope):
             return
         normalized_scope = self.normalize_scope(user_scope)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -347,8 +347,8 @@ class MemoryStore:
         return canonicalize_user_scope(user_scope)
 
     @staticmethod
-    def _is_system_scope(user_scope: str) -> bool:
-        return str(user_scope or "").strip().startswith("system:")
+    def _is_transient_scope(user_scope: str) -> bool:
+        return is_transient_scope(user_scope)
 
     @staticmethod
     def _scope_dir_name(user_scope: str) -> str:

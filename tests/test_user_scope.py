@@ -29,6 +29,18 @@ def test_system_sessions_do_not_create_user_scope() -> None:
     assert memory_scope_from_session_key("system:heartbeat:research") == ""
 
 
+def test_orchestration_sessions_do_not_create_user_scope() -> None:
+    assert (
+        memory_scope_from_session_key(
+            "orchestration:5adfa5751b41:controller:personal-secretary-zhanghaibo"
+        )
+        == ""
+    )
+    assert canonicalize_user_scope(
+        "orchestration:5adfa5751b41:controller:personal-secretary-zhanghaibo"
+    ) == ""
+
+
 def test_stores_share_canonical_user_scope_for_legacy_alias(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -52,16 +64,20 @@ def test_stores_share_canonical_user_scope_for_legacy_alias(tmp_path: Path) -> N
     assert personal_store.list_todos(user_scope=CANONICAL_ZHANGHAIBO)[0]["title"] == "统一用户 scope"
 
 
-def test_memory_store_skips_system_scope_writes(tmp_path: Path) -> None:
+def test_memory_store_skips_transient_scope_writes(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     memory_store = MemoryStore(workspace)
 
-    result = memory_store.write_memory(
-        "系统任务不应该写入用户记忆。",
-        "test",
-        user_scope="system:cron:health-check",
-    )
+    for scope in (
+        "system:cron:health-check",
+        "orchestration:5adfa5751b41:controller:personal-secretary-zhanghaibo",
+    ):
+        result = memory_store.write_memory(
+            "临时任务不应该写入用户记忆。",
+            "test",
+            user_scope=scope,
+        )
 
-    assert result == "Memory write skipped (system task scope)"
+        assert result == "Memory write skipped (transient task scope)"
     assert not (workspace / "memory" / "users").exists()

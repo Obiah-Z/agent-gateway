@@ -13,11 +13,20 @@ USER_SCOPE_ALIASES = {
 }
 
 
+def is_transient_scope(user_scope: str) -> bool:
+    """判断作用域是否来自临时运行上下文，不能作为长期用户 scope。"""
+
+    raw = " ".join(str(user_scope or "").strip().split())
+    return raw.startswith(("system:", "orchestration:"))
+
+
 def canonicalize_user_scope(user_scope: str) -> str:
     """返回规范 user_scope；空值表示全局作用域。"""
 
     raw = " ".join(str(user_scope or "").strip().split())
     if not raw:
+        return ""
+    if is_transient_scope(raw):
         return ""
     if raw.startswith("agent:"):
         raw = user_scope_from_session_key(raw)
@@ -38,7 +47,7 @@ def user_scope_from_session_key(session_key: str) -> str:
     raw = " ".join(str(session_key or "").strip().split())
     if not raw:
         return ""
-    if raw.startswith("system:"):
+    if is_transient_scope(raw):
         return ""
     parts = raw.split(":")
     if len(parts) >= 6 and parts[0] == "agent":
