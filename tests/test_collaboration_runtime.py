@@ -12,11 +12,20 @@ from agent_gateway.runtime.tasks.handlers import AgentCollaborationTaskHandler
 from agent_gateway.runtime.tasks.models import TaskInstance
 
 
+class FakeAgentRegistry:
+    def __init__(self, agent_ids: set[str]) -> None:
+        self.agent_ids = set(agent_ids)
+
+    def get(self, agent_id: str) -> object | None:
+        return object() if agent_id in self.agent_ids else None
+
+
 class SequencedCollaborationRunner:
     def __init__(self, replies: dict[str, list[str]]) -> None:
         self.calls: list[dict[str, object]] = []
         self.replies = {agent_id: list(items) for agent_id, items in replies.items()}
         self.sessions = FakeSessionStore()
+        self.agents = FakeAgentRegistry(set(replies))
 
     async def run_task_turn(
         self,
@@ -185,6 +194,54 @@ def test_collaboration_runtime_orchestrates_next_actions_until_final(tmp_path: P
     event_types = {row["type"] for row in events.tail(limit=20)}
     assert "collaboration.orchestration.started" in event_types
     assert "collaboration.orchestration.completed" in event_types
+
+
+def test_collaboration_runtime_maps_unknown_delegate_agent_before_execution(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "main": [
+                json.dumps(
+                    {
+                        "action": "delegate",
+                        "target_agent_id": "diet-agent-typo",
+                        "purpose": "记录用户饮食",
+                        "task_prompt": "晚餐吃了半份蒸面和一个烤鸡腿，请更新饮食计划。",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "action": "final",
+                        "final_output": "饮食记录已更新。",
+                    },
+                    ensure_ascii=False,
+                ),
+            ],
+            "diet-assistant-zhanghaibo": ["晚餐已记录。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="记录晚餐",
+            controller_agent_id="main",
+            run_id="unknown-delegate",
+            max_iterations=3,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert [call["agent_id"] for call in runner.calls] == [
+        "main",
+        "diet-assistant-zhanghaibo",
+        "main",
+    ]
+    observation = result["observations"][0]
+    assert observation["requested_target_agent_id"] == "diet-agent-typo"
+    assert observation["target_agent_id"] == "diet-assistant-zhanghaibo"
 
 
 def test_collaboration_runtime_persists_orchestration_to_database_without_local_artifact(

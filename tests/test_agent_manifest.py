@@ -29,6 +29,7 @@ class FakeResilienceRunner:
         self.last_runtime_context = {}
         self.response_messages = None
         self.response_tool_calls = []
+        self.response_text = "ok"
 
     def run(self, system: str, messages, *, model: str, allowed_tools=None, runtime_context=None):
         self.last_system_prompt = system
@@ -40,7 +41,7 @@ class FakeResilienceRunner:
             "Result",
             (),
             {
-                "text": "ok",
+                "text": self.response_text,
                 "stop_reason": "end_turn",
                 "messages": response_messages,
                 "tool_calls": list(self.response_tool_calls),
@@ -277,7 +278,21 @@ def test_agent_loop_runner_coerces_orchestration_start_reply(tmp_path: Path) -> 
         },
         {
             "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": "toolu_orch", "content": "{}"}],
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_orch",
+                    "content": json.dumps(
+                        {
+                            "type": "agent_orchestration_task",
+                            "task_id": "task-1",
+                            "status": "pending",
+                            "run_id": "diet-run",
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
         },
         {
             "role": "assistant",
@@ -310,6 +325,76 @@ def test_agent_loop_runner_coerces_orchestration_start_reply(tmp_path: Path) -> 
     saved = sessions.load_messages("personal-secretary-zhanghaibo", session_key)
     assert saved[-1]["content"] == [
         {"type": "text", "text": "已收到，正在处理。本轮结果生成后会继续推送。"}
+    ]
+
+
+def test_agent_loop_runner_does_not_mask_failed_orchestration_start(
+    tmp_path: Path,
+) -> None:
+    settings = GatewaySettings(
+        config_dir=tmp_path / "config",
+        data_dir=tmp_path / "data",
+        workspace_root=tmp_path / "workspace",
+        model_id="deepseek-v4-pro",
+    )
+    settings.ensure_directories()
+    settings.workspace_root.mkdir(parents=True, exist_ok=True)
+    (settings.workspace_root / "IDENTITY.md").write_text("Identity", encoding="utf-8")
+    agents = AgentManager()
+    agents.register(
+        AgentConfig(
+            id="personal-secretary-zhanghaibo",
+            name="Secretary",
+            tool_policy_mode="allowlist",
+            tool_names=("memory_search",),
+        )
+    )
+    sessions = SessionStore(settings.sessions_dir)
+    resilience = FakeResilienceRunner()
+    resilience.response_text = "协作任务启动失败：任务队列不可用。"
+    resilience.response_tool_calls = ["start_agent_orchestration"]
+    resilience.response_messages = [
+        {"role": "user", "content": "调研 RabbitMQ 并生成报告"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "toolu_orch", "name": "start_agent_orchestration"}
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_orch",
+                    "content": "Error: task queue is not available in this runtime",
+                }
+            ],
+        },
+        {"role": "assistant", "content": "协作任务启动失败：任务队列不可用。"},
+    ]
+    runner = AgentLoopRunner(
+        settings,
+        agents,
+        sessions,
+        PromptAssembler(settings.workspace_root),
+        resilience,
+    )
+    session_key = "agent:personal-secretary-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+
+    reply = asyncio.run(
+        runner.run_turn(
+            "personal-secretary-zhanghaibo",
+            session_key,
+            "调研 RabbitMQ 并生成报告",
+            channel="wework",
+        )
+    )
+
+    assert reply.text == "协作任务启动失败：任务队列不可用。"
+    saved = sessions.load_messages("personal-secretary-zhanghaibo", session_key)
+    assert saved[-1]["content"] == [
+        {"type": "text", "text": "协作任务启动失败：任务队列不可用。"}
     ]
 
 

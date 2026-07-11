@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 from agent_gateway.runtime.domain.agents import AgentManager
@@ -147,7 +148,10 @@ class AgentLoopRunner:
             )
             reply_text = result.text
             result_messages = result.messages
-            if "start_agent_orchestration" in result.tool_calls:
+            if (
+                "start_agent_orchestration" in result.tool_calls
+                and self._has_successful_orchestration_start(result.messages)
+            ):
                 reply_text = "已收到，正在处理。本轮结果生成后会继续推送。"
                 result_messages = self._replace_last_assistant_text(result.messages, reply_text)
             # ResilienceRunner 返回的是经过工具调用闭环后的完整历史。协作中间轮次
@@ -196,6 +200,52 @@ class AgentLoopRunner:
                 },
             )
             raise
+
+    def _has_successful_orchestration_start(self, messages: list[dict[str, object]]) -> bool:
+        """只在后台协作任务真实入队后，才把模型回复改写为受控确认语。"""
+
+        tool_use_ids: set[str] = set()
+        for message in messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_use":
+                    continue
+                if block.get("name") != "start_agent_orchestration":
+                    continue
+                tool_use_id = str(block.get("id") or "").strip()
+                if tool_use_id:
+                    tool_use_ids.add(tool_use_id)
+
+        if not tool_use_ids:
+            return False
+
+        for message in messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_result":
+                    continue
+                if str(block.get("tool_use_id") or "").strip() not in tool_use_ids:
+                    continue
+                for text in self._iter_content_text(block.get("content")):
+                    try:
+                        payload = json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("type") != "agent_orchestration_task":
+                        continue
+                    if payload.get("task_id") and payload.get("run_id"):
+                        return True
+        return False
 
     def _iter_content_text(self, content: object) -> list[str]:
         """兼容纯文本、content block 和 tool_result 嵌套内容。"""

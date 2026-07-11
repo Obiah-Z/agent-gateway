@@ -399,14 +399,25 @@ class CollaborationRuntime:
             "review_agent": "reviewer",
         }
         aliased = aliases.get(requested.lower(), "")
-        if aliased:
+        if aliased and self._agent_exists(aliased):
             return aliased
-        if requested and requested not in blocked:
+        if requested and requested not in blocked and self._agent_exists(requested):
             return requested
 
         text = f"{purpose}\n{task_prompt}".lower()
+        if any(
+            token in text
+            for token in (
+                "github",
+                "仓库",
+                "repository",
+                "代码库",
+                "开源项目",
+            )
+        ):
+            return self._existing_agent_or_default("repo-analyzer", "research")
         if any(token in text for token in ("写入", "本地文档", "markdown", "文件", "报告", "成文")):
-            return "doc-writer"
+            return self._existing_agent_or_default("doc-writer", "planner")
         if any(
             token in text
             for token in (
@@ -424,14 +435,26 @@ class CollaborationRuntime:
                 "calorie",
             )
         ):
-            return "diet-assistant-zhanghaibo"
+            return self._existing_agent_or_default("diet-assistant-zhanghaibo", "research")
         if any(token in text for token in ("调研", "研究", "资料", "搜索", "来源", "证据")):
-            return "research"
+            return self._existing_agent_or_default("research", "planner")
         if any(token in text for token in ("审查", "风险", "评审", "review", "gate")):
-            return "reviewer"
+            return self._existing_agent_or_default("reviewer", "planner")
         if any(token in text for token in ("计划", "规划", "拆解", "路线")):
-            return "planner"
-        return "planner"
+            return self._first_existing_agent("planner", "research", "doc-writer")
+        return self._first_existing_agent("planner", "research", "doc-writer")
+
+    def _agent_exists(self, agent_id: str) -> bool:
+        return self.runner.agents.get(agent_id) is not None
+
+    def _existing_agent_or_default(self, preferred: str, fallback: str) -> str:
+        return self._first_existing_agent(preferred, fallback)
+
+    def _first_existing_agent(self, *agent_ids: str) -> str:
+        for agent_id in agent_ids:
+            if self._agent_exists(agent_id):
+                return agent_id
+        raise ValueError(f"no registered delegate agent available: {', '.join(agent_ids)}")
 
     def _should_persist_delegate_history(self, target_agent_id: str) -> bool:
         """判断专家 step 是否应写入目标 Agent 会话。
