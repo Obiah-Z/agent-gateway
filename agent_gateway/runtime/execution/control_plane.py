@@ -1688,9 +1688,7 @@ class GatewayControlPlane:
             "features": {
                 "web_search_enabled": self.settings.web_search_enabled,
                 "web_search_provider": self.settings.web_search_provider,
-                "web_search_has_key": bool(self.settings.tavily_api_key)
-                if self.settings.web_search_provider == "tavily"
-                else True,
+                "web_search_has_key": self._web_search_has_key(),
                 "proactive_target": {
                     "channel": self.settings.proactive_channel,
                     "account_id": self.settings.proactive_account_id,
@@ -1699,6 +1697,16 @@ class GatewayControlPlane:
                 },
             },
         }
+
+    def _web_search_has_key(self) -> bool:
+        """检查当前联网搜索 provider 是否已配置凭据。"""
+
+        provider = self.settings.web_search_provider.strip().lower()
+        if provider == "tavily":
+            return bool(self.settings.tavily_api_key)
+        if provider == "firecrawl":
+            return bool(self.settings.firecrawl_api_key)
+        return False
 
     def _session_scheduler_status(
         self,

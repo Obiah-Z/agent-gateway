@@ -62,6 +62,8 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
                 "GATEWAY_WEB_SEARCH_PROVIDER=tavily",
                 "TAVILY_API_KEY=tvly-test-key",
                 "TAVILY_BASE_URL=https://api.tavily.test",
+                "FIRECRAWL_API_KEY=fc-test-key",
+                "FIRECRAWL_BASE_URL=https://api.firecrawl.test",
                 "GATEWAY_DASHBOARD_ENABLED=false",
                 "GATEWAY_DASHBOARD_HOST=0.0.0.0",
                 "GATEWAY_DASHBOARD_PORT=8870",
@@ -103,6 +105,8 @@ def test_load_env_overrides_empty_process_env(tmp_path: Path, monkeypatch) -> No
     assert GatewaySettings.from_env().web_search_provider == "tavily"
     assert GatewaySettings.from_env().tavily_api_key == "tvly-test-key"
     assert GatewaySettings.from_env().tavily_base_url == "https://api.tavily.test"
+    assert GatewaySettings.from_env().firecrawl_api_key == "fc-test-key"
+    assert GatewaySettings.from_env().firecrawl_base_url == "https://api.firecrawl.test"
     assert GatewaySettings.from_env().dashboard_enabled is False
     assert GatewaySettings.from_env().dashboard_host == "0.0.0.0"
     assert GatewaySettings.from_env().dashboard_port == 8870

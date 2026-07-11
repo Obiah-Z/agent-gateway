@@ -137,6 +137,8 @@ class GatewaySettings:
     web_search_provider: str = "tavily"
     tavily_api_key: str = ""
     tavily_base_url: str = "https://api.tavily.com"
+    firecrawl_api_key: str = ""
+    firecrawl_base_url: str = "https://api.firecrawl.dev"
     web_search_timeout_seconds: float = 15.0
     web_search_max_results: int = 5
     web_search_max_output_chars: int = 12_000
@@ -393,6 +395,10 @@ class GatewaySettings:
             web_search_provider=os.getenv("GATEWAY_WEB_SEARCH_PROVIDER", "tavily"),
             tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
             tavily_base_url=os.getenv("TAVILY_BASE_URL", "https://api.tavily.com").rstrip("/"),
+            firecrawl_api_key=os.getenv("FIRECRAWL_API_KEY", ""),
+            firecrawl_base_url=os.getenv(
+                "FIRECRAWL_BASE_URL", "https://api.firecrawl.dev"
+            ).rstrip("/"),
             web_search_timeout_seconds=float(
                 os.getenv("GATEWAY_WEB_SEARCH_TIMEOUT_SECONDS", "15")
             ),
