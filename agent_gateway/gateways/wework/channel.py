@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import re
 import time
+from typing import Any
 import xml.etree.ElementTree as ET
 from urllib.parse import parse_qs
 
@@ -23,6 +26,11 @@ class WeWorkChannel(Channel):
     """
 
     name = "wework"
+    _TOKEN_ERROR_CODES = {40001, 40014, 42001}
+    _REPORT_PATH_PATTERN = re.compile(
+        r"(?P<path>(?:workspace/)?reports/(?:github-repos/[^\s`，。；,;]+\.md|diagrams/[^\s`，。；,;]+\.(?:drawio|png|jpg|jpeg|svg|pdf)))",
+        re.IGNORECASE,
+    )
 
     def __init__(self, account: ChannelAccount) -> None:
         """根据账号配置初始化企业微信通道。"""
@@ -48,13 +56,17 @@ class WeWorkChannel(Channel):
         return None
 
     def send(self, outbound: OutboundMessage) -> bool:
-        """通过企业微信应用消息接口发送 Markdown 或普通文本消息。"""
+        """通过企业微信应用消息接口发送 Markdown、普通文本和文件附件。"""
 
         token = self._refresh_access_token()
         if not token:
             print(f"[wework] send failed: access token unavailable account={self.account_id}")
             return False
-        return self._send_message(token, outbound, retry_on_token_error=True)
+        ok = self._send_message(token, outbound, retry_on_token_error=True)
+        for attachment in self._collect_file_attachments(outbound):
+            if not self._send_file_attachment(token, outbound, attachment):
+                ok = False
+        return ok
 
     def close(self) -> None:
         """关闭底层 HTTP 客户端。"""
@@ -203,7 +215,7 @@ class WeWorkChannel(Channel):
                 f" msgtype={msgtype}"
             )
             return True
-        if retry_on_token_error and errcode in {40001, 40014, 42001}:
+        if retry_on_token_error and errcode in self._TOKEN_ERROR_CODES:
             self._access_token = ""
             refreshed = self._refresh_access_token()
             return bool(refreshed) and self._send_message(
@@ -219,6 +231,192 @@ class WeWorkChannel(Channel):
             f" errmsg={data.get('errmsg', '')}"
         )
         return False
+
+    def _upload_file_attachment(
+        self,
+        token: str,
+        attachment: dict[str, str],
+        *,
+        retry_on_token_error: bool = True,
+    ) -> str:
+        """上传本地文件为企业微信临时素材，返回 media_id。"""
+
+        path = Path(attachment["path"])
+        file_name = attachment.get("name") or path.name
+        with path.open("rb") as file_obj:
+            response = self._http.post(
+                f"{self.api_base}/cgi-bin/media/upload",
+                params={"access_token": token, "type": "file"},
+                files={"media": (file_name, file_obj)},
+            )
+        data = response.json()
+        errcode = data.get("errcode")
+        if errcode == 0:
+            return str(data.get("media_id") or "")
+        if retry_on_token_error and errcode in self._TOKEN_ERROR_CODES:
+            self._access_token = ""
+            refreshed = self._refresh_access_token()
+            return (
+                self._upload_file_attachment(
+                    refreshed,
+                    attachment,
+                    retry_on_token_error=False,
+                )
+                if refreshed
+                else ""
+            )
+        if errcode != 0:
+            print(
+                "[wework] file upload failed:"
+                f" account={self.account_id}"
+                f" file={file_name}"
+                f" errcode={errcode}"
+                f" errmsg={data.get('errmsg', '')}"
+            )
+            return ""
+        return ""
+
+    def _send_file_attachment(
+        self,
+        token: str,
+        outbound: OutboundMessage,
+        attachment: dict[str, str],
+        *,
+        retry_on_token_error: bool = True,
+    ) -> bool:
+        """发送企业微信文件消息。"""
+
+        media_id = self._upload_file_attachment(token, attachment)
+        file_name = attachment.get("name") or Path(attachment["path"]).name
+        if not media_id:
+            return False
+        payload = {
+            "touser": outbound.to,
+            "msgtype": "file",
+            "agentid": int(self.agent_id) if self.agent_id.isdigit() else self.agent_id,
+            "file": {"media_id": media_id},
+            "safe": 0,
+        }
+        response = self._http.post(
+            f"{self.api_base}/cgi-bin/message/send",
+            params={"access_token": token},
+            json=payload,
+        )
+        data = response.json()
+        if data.get("errcode") == 0:
+            print(
+                "[wework] file send ok:"
+                f" account={self.account_id}"
+                f" to={outbound.to}"
+                f" file={file_name}"
+            )
+            return True
+        errcode = data.get("errcode")
+        if retry_on_token_error and errcode in self._TOKEN_ERROR_CODES:
+            self._access_token = ""
+            refreshed = self._refresh_access_token()
+            return bool(refreshed) and self._send_file_attachment(
+                refreshed,
+                outbound,
+                attachment,
+                retry_on_token_error=False,
+            )
+        print(
+            "[wework] file send failed:"
+            f" account={self.account_id}"
+            f" to={outbound.to}"
+            f" file={file_name}"
+            f" errcode={errcode}"
+            f" errmsg={data.get('errmsg', '')}"
+        )
+        return False
+
+    def _collect_file_attachments(self, outbound: OutboundMessage) -> list[dict[str, str]]:
+        """从 metadata 和回复文本中提取可发送的本地文件附件。"""
+
+        attachments: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for raw in self._iter_metadata_attachments(outbound.metadata):
+            attachment = self._normalize_file_attachment(raw)
+            if attachment and attachment["path"] not in seen:
+                attachments.append(attachment)
+                seen.add(attachment["path"])
+        for match in self._REPORT_PATH_PATTERN.finditer(outbound.text):
+            attachment = self._normalize_file_attachment({"path": match.group("path")})
+            if attachment and attachment["path"] not in seen:
+                attachments.append(attachment)
+                seen.add(attachment["path"])
+        return attachments
+
+    def _iter_metadata_attachments(self, metadata: dict[str, Any]) -> list[Any]:
+        """兼容多个 metadata 字段名，便于不同调用方接入文件附件。"""
+
+        raw = (
+            metadata.get("attachments")
+            or metadata.get("wework_attachments")
+            or metadata.get("files")
+            or metadata.get("wework_files")
+            or []
+        )
+        if isinstance(raw, (str, Path)):
+            return [raw]
+        if isinstance(raw, dict):
+            return [raw]
+        if isinstance(raw, list):
+            return raw
+        return []
+
+    def _normalize_file_attachment(self, raw: Any) -> dict[str, str] | None:
+        """把路径或字典形式的附件描述转换成可发送的安全本地文件路径。"""
+
+        if isinstance(raw, (str, Path)):
+            raw_path = str(raw)
+            name = ""
+        elif isinstance(raw, dict):
+            raw_path = str(raw.get("path") or raw.get("file_path") or "").strip()
+            name = str(raw.get("name") or raw.get("file_name") or "").strip()
+        else:
+            return None
+        if not raw_path:
+            return None
+        path = self._resolve_attachment_path(raw_path)
+        if path is None:
+            print(
+                "[wework] ignore unsafe attachment path:"
+                f" account={self.account_id}"
+                f" path={raw_path}"
+            )
+            return None
+        if not path.is_file():
+            print(
+                "[wework] ignore missing attachment:"
+                f" account={self.account_id}"
+                f" path={path}"
+            )
+            return None
+        return {"path": str(path), "name": name or path.name}
+
+    def _resolve_attachment_path(self, raw_path: str) -> Path | None:
+        """只允许发送当前项目 workspace/reports 下的文件，避免任意文件泄漏。"""
+
+        normalized = raw_path.strip()
+        if not normalized:
+            return None
+        candidate = Path(normalized)
+        base = Path.cwd().resolve()
+        workspace = (base / "workspace").resolve()
+        reports = (workspace / "reports").resolve()
+        if not candidate.is_absolute():
+            if candidate.parts and candidate.parts[0] == "workspace":
+                candidate = base / candidate
+            else:
+                candidate = workspace / candidate
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(reports)
+        except ValueError:
+            return None
+        return resolved
 
     def _message_type(self, outbound: OutboundMessage) -> str:
         """根据配置和内容选择企业微信消息类型。"""
