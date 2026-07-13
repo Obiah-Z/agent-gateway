@@ -20,6 +20,7 @@ from agent_gateway.runtime.state.queue import DeliveryQueue
 from agent_gateway.ai.context.prompt import PromptAssembler
 from agent_gateway.ai.context.memory import MemoryStore, register_memory_tools
 from agent_gateway.ai.context.diet import DietStore, register_diet_tools
+from agent_gateway.ai.context.internship import InternshipStore, register_internship_tools
 from agent_gateway.ai.context.personal import PersonalStore, register_personal_tools
 from agent_gateway.ai.context.skills import SkillsManager
 from agent_gateway.monitoring.static_server import DashboardConfig, DashboardStaticServer
@@ -92,6 +93,7 @@ class GatewayApplication:
     tools: ToolRegistry  # 工具注册表，向模型暴露可调用工具及 schema。
     memory_store: MemoryStore  # 长期记忆存储，负责记忆写入、检索和召回。
     diet_store: DietStore  # 个人饮食与体重管理结构化存储。
+    internship_store: InternshipStore  # 实习记录结构化存储。
     personal_store: PersonalStore  # 个人秘书待办和复盘结构化存储。
     skills_manager: SkillsManager  # Skill 发现与注入管理器。
     prompt_assembler: PromptAssembler  # System prompt 组装器。
@@ -209,6 +211,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     sessions = SessionStore(settings.sessions_dir)
     memory_store = MemoryStore(settings.workspace_root)
     diet_store = DietStore(settings.workspace_root)
+    internship_store = InternshipStore(settings.workspace_root)
     personal_store = PersonalStore(settings.workspace_root)
     event_store = RuntimeEventStore(
         settings.events_dir,
@@ -307,6 +310,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
     )
     register_memory_tools(tools, memory_store)
     register_diet_tools(tools, diet_store)
+    register_internship_tools(tools, internship_store)
     register_personal_tools(tools, personal_store)
     register_github_repo_tools(
         tools,
@@ -498,6 +502,7 @@ def build_application(settings: GatewaySettings | None = None) -> GatewayApplica
         tools=tools,
         memory_store=memory_store,
         diet_store=diet_store,
+        internship_store=internship_store,
         personal_store=personal_store,
         skills_manager=skills_manager,
         prompt_assembler=prompt_assembler,

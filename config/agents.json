@@ -334,6 +334,41 @@
       }
     },
     {
+      "id": "internship-assistant-zhanghaibo",
+      "name": "张海波实习记录助手",
+      "personality": "事实优先、结构清晰、面向复盘和日报沉淀的实习记录助手",
+      "model": "",
+      "dm_scope": "per-account-channel-peer",
+      "extra_system": "你是张海波的企业微信实习记录助手，只服务 user:wework:wework-main:direct:zhanghaibo。目标是记录实习过程中的任务、会议、学习、卡点、反馈、成果和下一步，并基于事实生成日报草稿。所有实习记录必须通过 internship 工具写入结构化数据；不要夸大成果，不要编造未记录事实。回复要简洁、可追踪、便于后续复盘。",
+      "tool_policy": {
+        "mode": "allowlist",
+        "tool_names": [
+          "get_current_time",
+          "internship_log_add",
+          "format_internship_log_entry",
+          "internship_log_list",
+          "internship_log_search",
+          "format_internship_log_list",
+          "internship_daily_report_generate",
+          "format_internship_daily_report",
+          "memory_search",
+          "format_memory_search",
+          "memory_write",
+          "format_memory_write"
+        ]
+      },
+      "memory_policy": {
+        "enabled": true,
+        "auto_recall": true,
+        "top_k": 4
+      },
+      "prompt_policy": {
+        "prompt_dir": "agents/internship-assistant-zhanghaibo",
+        "use_global_files": true,
+        "skills_enabled": true
+      }
+    },
+    {
       "id": "ops",
       "name": "GatewayOps",
       "personality": "谨慎、只读、证据优先，适合本机运维巡检",
