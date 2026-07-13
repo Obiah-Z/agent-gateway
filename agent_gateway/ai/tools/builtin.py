@@ -5603,6 +5603,29 @@ def register_builtin_tools(
                 "collaboration_task_type": "",
             },
             {
+                "intent": "internship",
+                "agent": "internship-assistant-zhanghaibo",
+                "keywords": (
+                    "实习",
+                    "日报",
+                    "周报",
+                    "导师",
+                    "mentor",
+                    "leader",
+                    "项目进展",
+                    "联调",
+                    "blocker",
+                    "卡点",
+                    "简历素材",
+                    "工作记录",
+                ),
+                "reason": "用户关注实习过程记录、日报周报、导师反馈或项目卡点，实习记录助手更适合处理。",
+                "next": "确认用户身份、日期和要记录的事实后，建议交给 internship-assistant-zhanghaibo。",
+                "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
+            },
+            {
                 "intent": "personal",
                 "agent": "personal-secretary-zhanghaibo",
                 "keywords": (
@@ -5842,7 +5865,7 @@ def register_builtin_tools(
                 return "shared-capability"
             if agent_id in {"ops"}:
                 return "ops"
-            if agent_id.startswith(("personal-", "diet-")):
+            if agent_id.startswith(("personal-", "diet-", "internship-")):
                 return "personal"
             return "custom"
 
@@ -6053,6 +6076,7 @@ def register_builtin_tools(
                 score += sum(2 for word in keywords if word in user_text or word in expected_intent or word in expected_agent)
                 domain_keywords = {
                     "diet-assistant-zhanghaibo": ("饮食", "早餐", "午餐", "晚餐", "餐食", "体重", "热量"),
+                    "internship-assistant-zhanghaibo": ("实习", "日报", "周报", "导师", "项目进展", "联调", "卡点", "简历素材"),
                     "personal-secretary-zhanghaibo": ("待办", "复盘", "提醒", "计划", "日程"),
                     "repo-analyzer": ("仓库", "github", "repo", "repository", "代码库"),
                     "ops": ("docker", "容器", "redis", "rabbitmq", "postgres", "日志", "运维"),

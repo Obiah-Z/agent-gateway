@@ -385,6 +385,12 @@ class CollaborationRuntime:
             "diet-assistant": "diet-assistant-zhanghaibo",
             "diet_assistant": "diet-assistant-zhanghaibo",
             "饮食助手": "diet-assistant-zhanghaibo",
+            "internship-agent": "internship-assistant-zhanghaibo",
+            "internship": "internship-assistant-zhanghaibo",
+            "internship-assistant": "internship-assistant-zhanghaibo",
+            "internship_assistant": "internship-assistant-zhanghaibo",
+            "实习助手": "internship-assistant-zhanghaibo",
+            "实习记录助手": "internship-assistant-zhanghaibo",
             "researcher": "research",
             "web-researcher": "research",
             "web_researcher": "research",
@@ -436,6 +442,25 @@ class CollaborationRuntime:
             )
         ):
             return self._existing_agent_or_default("diet-assistant-zhanghaibo", "research")
+        if any(
+            token in text
+            for token in (
+                "实习",
+                "日报",
+                "周报",
+                "导师",
+                "mentor",
+                "leader",
+                "项目进展",
+                "联调",
+                "卡点",
+                "blocker",
+                "简历素材",
+                "工作记录",
+                "internship",
+            )
+        ):
+            return self._existing_agent_or_default("internship-assistant-zhanghaibo", "planner")
         if any(token in text for token in ("调研", "研究", "资料", "搜索", "来源", "证据")):
             return self._existing_agent_or_default("research", "planner")
         if any(token in text for token in ("审查", "风险", "评审", "review", "gate")):
@@ -463,7 +488,7 @@ class CollaborationRuntime:
         自己的执行上下文，避免把饮食上下文混进秘书 Agent。
         """
 
-        return target_agent_id in {"diet-assistant-zhanghaibo"}
+        return target_agent_id in {"diet-assistant-zhanghaibo", "internship-assistant-zhanghaibo"}
 
     def _delegate_session_key(
         self,
@@ -506,8 +531,8 @@ class CollaborationRuntime:
                 "- delegate：委托一个专家 Agent 执行子任务。",
                 "- final：给出面向用户的最终结果。",
                 "- abort：任务无法继续时中止，并说明原因。",
-                "可委托的专家 Agent id 只能使用：research、repo-analyzer、doc-writer、planner、reviewer、ops、diet-assistant-zhanghaibo。",
-                "不要输出 diet-agent、researcher、web-researcher 这类未注册别名。",
+                "可委托的专家 Agent id 只能使用：research、repo-analyzer、doc-writer、planner、reviewer、ops、diet-assistant-zhanghaibo、internship-assistant-zhanghaibo。",
+                "不要输出 diet-agent、internship-agent、researcher、web-researcher 这类未注册别名。",
                 "delegate 格式："
                 '{"action":"delegate","target_agent_id":"repo-analyzer",'
                 '"purpose":"为什么需要这一步","task_prompt":"交给专家的完整任务"}',

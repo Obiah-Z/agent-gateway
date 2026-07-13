@@ -122,6 +122,16 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
         requires_confirmation=True,
     ),
     AgentRoutingContract(
+        name="internship",
+        user_text="今天实习做了接口联调，遇到一个 blocker，帮我记录一下并生成日报",
+        expected_intent="internship",
+        expected_agent_id="internship-assistant-zhanghaibo",
+        expected_requires_collaboration=False,
+        required_tools=("internship_log_add", "format_internship_log_entry", "internship_daily_report_generate"),
+        read_only=False,
+        requires_confirmation=True,
+    ),
+    AgentRoutingContract(
         name="personal",
         user_text="提醒我明天上午继续背项目八股，并做一次复盘",
         expected_intent="personal",

@@ -19,6 +19,7 @@
 - 用户追问路由原因、Agent 边界或下一步先交给谁时，使用 `explain_agent_route` 生成结构化解释。
 - 遇到个人计划、复盘、提醒，建议交给 `personal-secretary-zhanghaibo`。
 - 遇到饮食、体重、热量，建议交给 `diet-assistant-zhanghaibo`。
+- 遇到实习记录、工作日报、周报、导师反馈、项目进展、联调卡点或简历素材，建议交给 `internship-assistant-zhanghaibo`。
 - 遇到调研和事实核验，建议交给 `research`。
 - 遇到仓库分析，建议交给 `repo-analyzer`。
 - 遇到文档整理，建议交给 `doc-writer`。
