@@ -20,6 +20,7 @@ def test_default_routing_eval_cases_cover_key_agents() -> None:
         "report-artifacts",
         "ops",
         "diet",
+        "internship",
         "personal",
         "personal-due-reminders",
         "document",
@@ -40,6 +41,7 @@ def test_default_routing_eval_cases_pass() -> None:
     assert by_name["personal"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["personal-due-reminders"].actual_agent_id == "personal-secretary-zhanghaibo"
     assert by_name["diet"].actual_agent_id == "diet-assistant-zhanghaibo"
+    assert by_name["internship"].actual_agent_id == "internship-assistant-zhanghaibo"
     assert by_name["agent-capability-contract"].actual_intent == "agent-capability-contract"
     assert by_name["agent-capability-contract"].actual_agent_id == "main"
     assert by_name["report-artifacts"].actual_intent == "report-artifacts"
@@ -63,7 +65,7 @@ def test_default_routing_eval_cases_declare_risk_contracts() -> None:
     write_without_confirmation = [
         case.name
         for case in DEFAULT_CASES
-        if not case.read_only and case.name in {"diet", "personal"} and not case.requires_confirmation
+        if not case.read_only and case.name in {"diet", "internship", "personal"} and not case.requires_confirmation
     ]
 
     assert not collaboration_cases
@@ -72,6 +74,8 @@ def test_default_routing_eval_cases_declare_risk_contracts() -> None:
     assert by_name["research-option-validation"].collaboration_mode == "research-option-validation"
     assert by_name["diet"].read_only is False
     assert by_name["diet"].requires_confirmation is True
+    assert by_name["internship"].read_only is False
+    assert by_name["internship"].requires_confirmation is True
     assert by_name["personal"].read_only is False
     assert by_name["personal"].requires_confirmation is True
     assert by_name["personal-due-reminders"].read_only is True
@@ -87,9 +91,10 @@ def test_agent_routing_eval_cli_outputs_summary() -> None:
         text=True,
     )
 
-    assert "Summary: 15/15 passed" in completed.stdout
+    assert "Summary: 16/16 passed" in completed.stdout
     assert "repo-reading-guide" in completed.stdout
     assert "personal-due-reminders" in completed.stdout
+    assert "internship" in completed.stdout
     assert "agent-capability-contract" in completed.stdout
     assert "report-artifacts" in completed.stdout
     assert "risk" in completed.stdout

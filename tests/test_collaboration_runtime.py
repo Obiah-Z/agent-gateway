@@ -487,6 +487,94 @@ def test_collaboration_runtime_rewrites_diet_agent_alias_to_real_agent(
     assert result["observations"][0]["target_agent_id"] == "diet-assistant-zhanghaibo"
 
 
+def test_collaboration_runtime_rewrites_internship_agent_alias_to_real_agent(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                json.dumps(
+                    {
+                        "action": "delegate",
+                        "target_agent_id": "internship-agent",
+                        "purpose": "记录今天实习进展",
+                        "task_prompt": "今天实习完成接口联调，生成日报草稿。",
+                    },
+                    ensure_ascii=False,
+                ),
+                '{"action":"final","final_output":"实习记录完成"}',
+            ],
+            "internship-assistant-zhanghaibo": ["实习记录已保存。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="记录今天实习进展",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="internship-alias",
+            max_iterations=3,
+            response_target={
+                "source_session_key": (
+                    "agent:personal-secretary-zhanghaibo:wework:"
+                    "wework-main:direct:zhanghaibo"
+                ),
+            },
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert runner.calls[1]["agent_id"] == "internship-assistant-zhanghaibo"
+    assert runner.calls[1]["session_key"] == (
+        "agent:internship-assistant-zhanghaibo:wework:wework-main:direct:zhanghaibo"
+    )
+    assert runner.calls[1]["persist_history"] is True
+    assert result["observations"][0]["requested_target_agent_id"] == "internship-agent"
+    assert result["observations"][0]["target_agent_id"] == "internship-assistant-zhanghaibo"
+
+
+def test_collaboration_runtime_routes_blocked_internship_task_to_internship_agent(
+    tmp_path: Path,
+) -> None:
+    runner = SequencedCollaborationRunner(
+        {
+            "personal-secretary-zhanghaibo": [
+                json.dumps(
+                    {
+                        "action": "delegate",
+                        "target_agent_id": "personal-secretary-zhanghaibo",
+                        "purpose": "处理实习日报",
+                        "task_prompt": "把今天的实习项目进展和 blocker 记录下来。",
+                    },
+                    ensure_ascii=False,
+                ),
+                '{"action":"final","final_output":"实习日报处理完成"}',
+            ],
+            "internship-assistant-zhanghaibo": ["已记录实习日报素材。"],
+        }
+    )
+    runtime = CollaborationRuntime(runner, artifact_root=tmp_path)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        runtime.execute_orchestrated(
+            user_goal="帮我记录实习日报",
+            controller_agent_id="personal-secretary-zhanghaibo",
+            channel="wework",
+            mode="minimal",
+            run_id="internship-heuristic",
+            max_iterations=3,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert runner.calls[1]["agent_id"] == "internship-assistant-zhanghaibo"
+    assert result["observations"][0]["requested_target_agent_id"] == "personal-secretary-zhanghaibo"
+    assert result["observations"][0]["target_agent_id"] == "internship-assistant-zhanghaibo"
+
+
 def test_collaboration_runtime_rewrites_researcher_alias_to_research(
     tmp_path: Path,
 ) -> None:
