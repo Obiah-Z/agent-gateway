@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
+from agent_gateway.runtime.domain.agent_manifest import load_agent_manifests
+
 
 @dataclass(frozen=True)
 class AgentRoutingContract:
@@ -21,7 +23,7 @@ class AgentRoutingContract:
     collaboration_mode: str = "single-agent"
 
 
-DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
+STATIC_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
     AgentRoutingContract(
         name="simple-chat",
         user_text="你好，简单介绍一下你能做什么",
@@ -112,26 +114,6 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
         required_tools=("ops_readonly_health", "ops_runtime_diagnostics"),
     ),
     AgentRoutingContract(
-        name="diet",
-        user_text="今天早餐吃了鸡蛋和牛奶，帮我记录一下饮食",
-        expected_intent="diet",
-        expected_agent_id="diet-assistant-zhanghaibo",
-        expected_requires_collaboration=False,
-        required_tools=("meal_log_add", "format_meal_log_entry"),
-        read_only=False,
-        requires_confirmation=True,
-    ),
-    AgentRoutingContract(
-        name="internship",
-        user_text="今天实习做了接口联调，遇到一个 blocker，帮我记录一下并生成日报",
-        expected_intent="internship",
-        expected_agent_id="internship-assistant-zhanghaibo",
-        expected_requires_collaboration=False,
-        required_tools=("internship_log_add", "format_internship_log_entry", "internship_daily_report_generate"),
-        read_only=False,
-        requires_confirmation=True,
-    ),
-    AgentRoutingContract(
         name="personal",
         user_text="提醒我明天上午继续背项目八股，并做一次复盘",
         expected_intent="personal",
@@ -170,6 +152,33 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
 )
 
 
+def load_manifest_routing_contracts(workspace_root: Path = Path("workspace")) -> tuple[AgentRoutingContract, ...]:
+    """Load routing contracts declared by Agent manifests."""
+
+    contracts: list[AgentRoutingContract] = []
+    for manifest in load_agent_manifests(workspace_root):
+        for example in manifest.contract_examples:
+            contracts.append(
+                AgentRoutingContract(
+                    name=example.name,
+                    user_text=example.user_text,
+                    expected_intent=manifest.routing.intent or example.name,
+                    expected_agent_id=manifest.id,
+                    expected_requires_collaboration=example.requires_collaboration,
+                    required_tools=example.required_tools,
+                    read_only=example.read_only,
+                    requires_confirmation=example.requires_confirmation,
+                    collaboration_mode=example.collaboration_mode,
+                )
+            )
+    return tuple(contracts)
+
+
+DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
+    STATIC_AGENT_ROUTING_CONTRACTS + load_manifest_routing_contracts()
+)
+
+
 def load_agent_tool_allowlists(config_path: Path) -> dict[str, set[str]]:
     """Load Agent tool allowlists from config/agents.json."""
 
@@ -177,11 +186,15 @@ def load_agent_tool_allowlists(config_path: Path) -> dict[str, set[str]]:
     agents = data.get("agents", [])
     if not isinstance(agents, list):
         raise ValueError("Agent config field 'agents' must be a list")
-    return {
+    allowlists = {
         str(agent.get("id") or ""): set(agent.get("tool_policy", {}).get("tool_names", []))
         for agent in agents
         if isinstance(agent, dict) and agent.get("id")
     }
+    workspace_root = config_path.parent.parent / "workspace"
+    for manifest in load_agent_manifests(workspace_root):
+        allowlists[manifest.id] = set(manifest.tool_names)
+    return allowlists
 
 
 def baseline_agent_required_tools(

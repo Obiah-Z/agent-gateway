@@ -17,6 +17,81 @@ from agent_gateway.ai.agent_contracts import (
     load_agent_tool_allowlists,
 )
 from agent_gateway.ai.tools.registry import RegisteredTool, ToolRegistry
+from agent_gateway.runtime.domain.agent_manifest import AgentManifest, load_agent_manifests
+
+
+def _load_manifest_agents_for_tools(workspace_root: Path) -> list[AgentManifest]:
+    """Best-effort manifest loading for user-facing tools."""
+
+    try:
+        return load_agent_manifests(workspace_root)
+    except ValueError:
+        return []
+
+
+def _manifest_intent_catalog(workspace_root: Path) -> list[dict[str, object]]:
+    """Build classify_task_intent catalog entries from Agent manifests."""
+
+    rows: list[dict[str, object]] = []
+    for manifest in _load_manifest_agents_for_tools(workspace_root):
+        routing = manifest.routing
+        if not routing.intent or not routing.keywords:
+            continue
+        rows.append(
+            {
+                "intent": routing.intent,
+                "agent": manifest.id,
+                "keywords": routing.keywords,
+                "reason": routing.reason or f"该任务更适合交给 {manifest.id}。",
+                "next": routing.next or f"确认目标和上下文后，建议交给 {manifest.id}。",
+                "direct": False,
+                "requires_collaboration": False,
+                "collaboration_task_type": "",
+            }
+        )
+    return rows
+
+
+def _agent_payloads_with_manifests(workspace_root: Path, data: dict[str, object]) -> list[dict[str, object]]:
+    """Overlay config/agents.json payloads with manifest-derived payloads."""
+
+    agents = [row for row in data.get("agents", []) if isinstance(row, dict)]
+    by_id = {str(row.get("id") or ""): dict(row) for row in agents if row.get("id")}
+    order = [str(row.get("id") or "") for row in agents if row.get("id")]
+    for manifest in _load_manifest_agents_for_tools(workspace_root):
+        if manifest.id not in by_id:
+            order.append(manifest.id)
+        by_id[manifest.id] = {
+            "id": manifest.id,
+            "name": manifest.name,
+            "layer": manifest.layer,
+            "personality": manifest.personality,
+            "model": manifest.model,
+            "dm_scope": manifest.dm_scope,
+            "extra_system": manifest.extra_system,
+            "tool_policy": {
+                "mode": manifest.tool_policy_mode,
+                "tool_names": list(manifest.tool_names),
+            },
+            "memory_policy": {
+                "enabled": manifest.memory_enabled,
+                "auto_recall": manifest.memory_auto_recall,
+                "top_k": manifest.memory_top_k,
+            },
+            "prompt_policy": {
+                "prompt_dir": manifest.prompt_dir,
+                "use_global_files": manifest.use_global_prompt_files,
+                "skills_enabled": manifest.skills_enabled,
+            },
+            "routing": {
+                "intent": manifest.routing.intent,
+                "aliases": list(manifest.routing.aliases),
+                "keywords": list(manifest.routing.keywords),
+                "reason": manifest.routing.reason,
+                "next": manifest.routing.next,
+            },
+        }
+    return [by_id[agent_id] for agent_id in order if agent_id in by_id]
 
 
 def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
@@ -5583,49 +5658,6 @@ def register_builtin_tools(
                 "collaboration_task_type": "",
             },
             {
-                "intent": "diet",
-                "agent": "diet-assistant-zhanghaibo",
-                "keywords": (
-                    "饮食",
-                    "减肥",
-                    "减脂",
-                    "热量",
-                    "体重",
-                    "早餐",
-                    "午餐",
-                    "晚餐",
-                    "蛋白质",
-                ),
-                "reason": "用户关注个人饮食、体重或减脂记录，饮食助手更适合处理。",
-                "next": "确认用户身份和餐食/体重数据后，建议交给 diet-assistant-zhanghaibo。",
-                "direct": False,
-                "requires_collaboration": False,
-                "collaboration_task_type": "",
-            },
-            {
-                "intent": "internship",
-                "agent": "internship-assistant-zhanghaibo",
-                "keywords": (
-                    "实习",
-                    "日报",
-                    "周报",
-                    "导师",
-                    "mentor",
-                    "leader",
-                    "项目进展",
-                    "联调",
-                    "blocker",
-                    "卡点",
-                    "简历素材",
-                    "工作记录",
-                ),
-                "reason": "用户关注实习过程记录、日报周报、导师反馈或项目卡点，实习记录助手更适合处理。",
-                "next": "确认用户身份、日期和要记录的事实后，建议交给 internship-assistant-zhanghaibo。",
-                "direct": False,
-                "requires_collaboration": False,
-                "collaboration_task_type": "",
-            },
-            {
                 "intent": "personal",
                 "agent": "personal-secretary-zhanghaibo",
                 "keywords": (
@@ -5645,6 +5677,7 @@ def register_builtin_tools(
                 "collaboration_task_type": "",
             },
         ]
+        catalog.extend(_manifest_intent_catalog(workspace_root))
 
         repo_triggers = ("github.com/", "gitlab.com/", "仓库", "repo", "repository", "代码库")
         adoption_triggers = (
@@ -5856,9 +5889,14 @@ def register_builtin_tools(
             return "Error: config/agents.json not found"
 
         data = json.loads(config_path.read_text(encoding="utf-8"))
+        agent_payloads = _agent_payloads_with_manifests(workspace_root, data)
         wanted = {agent_id.strip() for agent_id in agent_ids or [] if agent_id.strip()}
 
-        def agent_layer(agent_id: str) -> str:
+        def agent_layer(agent: dict[str, object]) -> str:
+            configured_layer = str(agent.get("layer") or "").strip()
+            if configured_layer:
+                return configured_layer
+            agent_id = str(agent.get("id") or "").strip()
             if agent_id in {"main", "feishu-entry", "wework-entry"}:
                 return "entry"
             if agent_id in {"research", "repo-analyzer", "planner", "reviewer", "doc-writer"}:
@@ -5897,7 +5935,7 @@ def register_builtin_tools(
             summary["case_names"] = case_names
 
         capabilities = []
-        for agent in data.get("agents", []):
+        for agent in agent_payloads:
             agent_id = str(agent.get("id", "")).strip()
             if wanted and agent_id not in wanted:
                 continue
@@ -5913,7 +5951,7 @@ def register_builtin_tools(
             row = {
                 "id": agent_id,
                 "name": agent.get("name", ""),
-                "layer": agent_layer(agent_id),
+                "layer": agent_layer(agent),
                 "personality": agent.get("personality", ""),
                 "prompt_dir": prompt_dir,
                 "duties": duties[:8],
@@ -6075,12 +6113,13 @@ def register_builtin_tools(
                 ]
                 score += sum(2 for word in keywords if word in user_text or word in expected_intent or word in expected_agent)
                 domain_keywords = {
-                    "diet-assistant-zhanghaibo": ("饮食", "早餐", "午餐", "晚餐", "餐食", "体重", "热量"),
-                    "internship-assistant-zhanghaibo": ("实习", "日报", "周报", "导师", "项目进展", "联调", "卡点", "简历素材"),
                     "personal-secretary-zhanghaibo": ("待办", "复盘", "提醒", "计划", "日程"),
                     "repo-analyzer": ("仓库", "github", "repo", "repository", "代码库"),
                     "ops": ("docker", "容器", "redis", "rabbitmq", "postgres", "日志", "运维"),
                 }
+                for manifest in _load_manifest_agents_for_tools(workspace_root):
+                    if manifest.routing.keywords:
+                        domain_keywords[manifest.id] = manifest.routing.keywords
                 score += sum(
                     20
                     for word in domain_keywords.get(expected_agent, ())

@@ -13,6 +13,7 @@ import re
 import time
 from typing import Any
 
+from agent_gateway.runtime.domain.agent_manifest import AgentManifest, load_agent_manifests
 from agent_gateway.runtime.execution.loop import AgentLoopRunner
 from agent_gateway.runtime.observability.events import RuntimeEventStore, new_correlation_id
 
@@ -379,18 +380,13 @@ class CollaborationRuntime:
             controller_agent_id,
         }
         requested = requested_target_agent_id.strip()
+        manifest_aliases = {
+            alias.strip().lower(): manifest.id
+            for manifest in self._agent_manifests()
+            for alias in manifest.routing.aliases
+            if alias.strip()
+        }
         aliases = {
-            "diet-agent": "diet-assistant-zhanghaibo",
-            "diet": "diet-assistant-zhanghaibo",
-            "diet-assistant": "diet-assistant-zhanghaibo",
-            "diet_assistant": "diet-assistant-zhanghaibo",
-            "饮食助手": "diet-assistant-zhanghaibo",
-            "internship-agent": "internship-assistant-zhanghaibo",
-            "internship": "internship-assistant-zhanghaibo",
-            "internship-assistant": "internship-assistant-zhanghaibo",
-            "internship_assistant": "internship-assistant-zhanghaibo",
-            "实习助手": "internship-assistant-zhanghaibo",
-            "实习记录助手": "internship-assistant-zhanghaibo",
             "researcher": "research",
             "web-researcher": "research",
             "web_researcher": "research",
@@ -404,6 +400,7 @@ class CollaborationRuntime:
             "review-agent": "reviewer",
             "review_agent": "reviewer",
         }
+        aliases.update(manifest_aliases)
         aliased = aliases.get(requested.lower(), "")
         if aliased and self._agent_exists(aliased):
             return aliased
@@ -424,43 +421,9 @@ class CollaborationRuntime:
             return self._existing_agent_or_default("repo-analyzer", "research")
         if any(token in text for token in ("写入", "本地文档", "markdown", "文件", "报告", "成文")):
             return self._existing_agent_or_default("doc-writer", "planner")
-        if any(
-            token in text
-            for token in (
-                "饮食",
-                "餐食",
-                "热量",
-                "减脂",
-                "体重",
-                "午餐",
-                "晚餐",
-                "早餐",
-                "营养",
-                "diet",
-                "meal",
-                "calorie",
-            )
-        ):
-            return self._existing_agent_or_default("diet-assistant-zhanghaibo", "research")
-        if any(
-            token in text
-            for token in (
-                "实习",
-                "日报",
-                "周报",
-                "导师",
-                "mentor",
-                "leader",
-                "项目进展",
-                "联调",
-                "卡点",
-                "blocker",
-                "简历素材",
-                "工作记录",
-                "internship",
-            )
-        ):
-            return self._existing_agent_or_default("internship-assistant-zhanghaibo", "planner")
+        for manifest in self._agent_manifests():
+            if manifest.routing.keywords and any(token in text for token in manifest.routing.keywords):
+                return self._existing_agent_or_default(manifest.id, "planner")
         if any(token in text for token in ("调研", "研究", "资料", "搜索", "来源", "证据")):
             return self._existing_agent_or_default("research", "planner")
         if any(token in text for token in ("审查", "风险", "评审", "review", "gate")):
@@ -468,6 +431,14 @@ class CollaborationRuntime:
         if any(token in text for token in ("计划", "规划", "拆解", "路线")):
             return self._first_existing_agent("planner", "research", "doc-writer")
         return self._first_existing_agent("planner", "research", "doc-writer")
+
+    def _agent_manifests(self) -> list[AgentManifest]:
+        settings = getattr(self.runner, "settings", None)
+        workspace_root = getattr(settings, "workspace_root", Path("workspace"))
+        try:
+            return load_agent_manifests(Path(workspace_root))
+        except ValueError:
+            return []
 
     def _agent_exists(self, agent_id: str) -> bool:
         return self.runner.agents.get(agent_id) is not None
@@ -481,6 +452,22 @@ class CollaborationRuntime:
                 return agent_id
         raise ValueError(f"no registered delegate agent available: {', '.join(agent_ids)}")
 
+    def _allowed_delegate_agent_ids(self) -> list[str]:
+        base = ["research", "repo-analyzer", "doc-writer", "planner", "reviewer", "ops"]
+        manifest_agents = [
+            manifest.id
+            for manifest in self._agent_manifests()
+            if manifest.routing.intent or manifest.routing.aliases or manifest.routing.keywords
+        ]
+        seen: set[str] = set()
+        result: list[str] = []
+        for agent_id in [*base, *manifest_agents]:
+            if agent_id in seen or not self._agent_exists(agent_id):
+                continue
+            seen.add(agent_id)
+            result.append(agent_id)
+        return result or base
+
     def _should_persist_delegate_history(self, target_agent_id: str) -> bool:
         """判断专家 step 是否应写入目标 Agent 会话。
 
@@ -488,7 +475,10 @@ class CollaborationRuntime:
         自己的执行上下文，避免把饮食上下文混进秘书 Agent。
         """
 
-        return target_agent_id in {"diet-assistant-zhanghaibo", "internship-assistant-zhanghaibo"}
+        for manifest in self._agent_manifests():
+            if manifest.id == target_agent_id:
+                return manifest.routing.persist_delegate_history
+        return False
 
     def _delegate_session_key(
         self,
@@ -531,8 +521,8 @@ class CollaborationRuntime:
                 "- delegate：委托一个专家 Agent 执行子任务。",
                 "- final：给出面向用户的最终结果。",
                 "- abort：任务无法继续时中止，并说明原因。",
-                "可委托的专家 Agent id 只能使用：research、repo-analyzer、doc-writer、planner、reviewer、ops、diet-assistant-zhanghaibo、internship-assistant-zhanghaibo。",
-                "不要输出 diet-agent、internship-agent、researcher、web-researcher 这类未注册别名。",
+                "可委托的专家 Agent id 只能使用：" + "、".join(self._allowed_delegate_agent_ids()) + "。",
+                "不要输出别名；必须输出已注册 Agent id。",
                 "delegate 格式："
                 '{"action":"delegate","target_agent_id":"repo-analyzer",'
                 '"purpose":"为什么需要这一步","task_prompt":"交给专家的完整任务"}',

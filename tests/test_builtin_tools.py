@@ -3627,6 +3627,70 @@ def test_list_agent_capabilities_reads_configured_agent_catalog(tmp_path: Path) 
     assert "planning" in data["agents"][0]["contract_summary"]["case_names"]
 
 
+def test_agent_manifest_only_agent_appears_in_capability_catalog_and_classifier(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config = tmp_path / "config"
+    agent_dir = workspace / "agents" / "demo-agent"
+    agent_dir.mkdir(parents=True)
+    config.mkdir()
+    for name in ["IDENTITY.md", "SOUL.md", "TOOLS.md"]:
+        (agent_dir / name).write_text(
+            "# Demo Agent\n\n## 职责\n\n- 处理 demo-special 请求。\n",
+            encoding="utf-8",
+        )
+    (agent_dir / "agent.yaml").write_text(
+        "\n".join(
+            [
+                "id: demo-agent",
+                "name: DemoAgent",
+                "layer: shared-capability",
+                "personality: demo",
+                "prompt:",
+                "  dir: agents/demo-agent",
+                "tools:",
+                "  mode: allowlist",
+                "  names:",
+                "    - get_current_time",
+                "memory:",
+                "  enabled: true",
+                "routing:",
+                "  intent: demo",
+                "  aliases:",
+                "    - demo-helper",
+                "  keywords:",
+                "    - demo-special",
+                "  reason: demo-special 请求适合 demo-agent。",
+                "  next: 交给 demo-agent。",
+                "contract:",
+                "  examples:",
+                "    - name: demo",
+                "      user_text: 帮我处理 demo-special",
+                "      required_tools:",
+                "        - get_current_time",
+                "      read_only: true",
+                "      requires_confirmation: false",
+                "      requires_collaboration: false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config / "agents.json").write_text(json.dumps({"agents": []}), encoding="utf-8")
+    registry = ToolRegistry()
+    register_builtin_tools(registry, workspace)
+
+    catalog = json.loads(registry.dispatch("list_agent_capabilities", {"agent_ids": ["demo-agent"]}))
+    classification = json.loads(
+        registry.dispatch("classify_task_intent", {"user_text": "帮我处理 demo-special"})
+    )
+
+    assert catalog["count"] == 1
+    assert catalog["agents"][0]["id"] == "demo-agent"
+    assert catalog["agents"][0]["layer"] == "shared-capability"
+    assert classification["intent"] == "demo"
+    assert classification["recommended_agent_id"] == "demo-agent"
+
+
 def test_format_agent_capability_catalog_outputs_user_facing_directory(
     tmp_path: Path,
 ) -> None:
