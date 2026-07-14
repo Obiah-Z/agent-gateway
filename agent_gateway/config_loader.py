@@ -8,6 +8,10 @@ from typing import Any
 from agent_gateway.gateways.messaging.base import ChannelAccount
 from agent_gateway.config import GatewaySettings
 from agent_gateway.runtime.domain.models import AgentConfig, Binding
+from agent_gateway.runtime.domain.agent_manifest import (
+    load_agent_manifests,
+    merge_agent_configs_with_manifests,
+)
 from agent_gateway.runtime.execution.resilience import AuthProfile
 
 
@@ -169,6 +173,9 @@ def load_agents(settings: GatewaySettings) -> list[AgentConfig]:
                 skills_enabled=bool(prompt_policy.get("skills_enabled", True)),
             )
         )
+    manifests = load_agent_manifests(settings.workspace_root)
+    if manifests:
+        agents = merge_agent_configs_with_manifests(agents, manifests)
     return agents
 
 

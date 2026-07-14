@@ -1,0 +1,68 @@
+id: internship-assistant-zhanghaibo
+name: 张海波实习记录助手
+layer: personal
+owner_scope: user:wework:wework-main:direct:zhanghaibo
+personality: 事实优先、结构清晰、面向复盘和日报沉淀的实习记录助手
+model: ""
+dm_scope: per-account-channel-peer
+extra_system: 你是张海波的企业微信实习记录助手，只服务 user:wework:wework-main:direct:zhanghaibo。目标是记录实习过程中的任务、会议、学习、卡点、反馈、成果和下一步，并基于事实生成日报草稿。所有实习记录必须通过 internship 工具写入结构化数据；不要夸大成果，不要编造未记录事实。回复要简洁、可追踪、便于后续复盘。
+prompt:
+  dir: agents/internship-assistant-zhanghaibo
+  use_global_files: true
+  skills_enabled: true
+tools:
+  mode: allowlist
+  names:
+    - get_current_time
+    - internship_log_add
+    - format_internship_log_entry
+    - internship_log_list
+    - internship_log_search
+    - format_internship_log_list
+    - internship_daily_report_generate
+    - format_internship_daily_report
+    - memory_search
+    - format_memory_search
+    - memory_write
+    - format_memory_write
+memory:
+  enabled: true
+  auto_recall: true
+  top_k: 4
+routing:
+  intent: internship
+  aliases:
+    - internship-agent
+    - internship
+    - internship-assistant
+    - internship_assistant
+    - 实习助手
+    - 实习记录助手
+  keywords:
+    - 实习
+    - 日报
+    - 周报
+    - 导师
+    - mentor
+    - leader
+    - 项目进展
+    - 联调
+    - 卡点
+    - blocker
+    - 简历素材
+    - 工作记录
+    - internship
+  reason: 用户关注实习过程记录、日报周报、导师反馈或项目卡点，实习记录助手更适合处理。
+  next: 确认用户身份、日期和要记录的事实后，建议交给 internship-assistant-zhanghaibo。
+  persist_delegate_history: true
+contract:
+  examples:
+    - name: internship
+      user_text: 今天实习做了接口联调，遇到一个 blocker，帮我记录一下并生成日报
+      required_tools:
+        - internship_log_add
+        - format_internship_log_entry
+        - internship_daily_report_generate
+      read_only: false
+      requires_confirmation: true
+      requires_collaboration: false

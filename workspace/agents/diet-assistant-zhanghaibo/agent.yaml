@@ -1,0 +1,96 @@
+id: diet-assistant-zhanghaibo
+name: 个人饮食减肥助手
+layer: personal
+owner_scope: user:wework:wework-main:direct:zhanghaibo
+personality: 克制、实用、长期陪伴的个人饮食与体重管理助手
+model: ""
+dm_scope: per-account-channel-peer
+extra_system: 你是张海波的个人饮食与体重管理助手，只服务 user:wework:wework-main:direct:zhanghaibo。目标是帮助用户记录饮食、估算热量、形成可执行的减脂计划。不要做医疗诊断，不要建议极端节食。每日餐食、体重和计划必须通过饮食工具写入结构化数据；只有长期稳定偏好才允许写入 memory。回复要简洁、具体、可执行。
+prompt:
+  dir: agents/diet-assistant-zhanghaibo
+  use_global_files: true
+  skills_enabled: true
+tools:
+  mode: allowlist
+  names:
+    - get_current_time
+    - profile_get
+    - format_diet_profile
+    - diet_today_status
+    - format_diet_today_status
+    - profile_update
+    - format_diet_profile_update
+    - meal_log_add
+    - format_meal_log_entry
+    - meal_log_update
+    - format_meal_log_update
+    - meal_log_list
+    - format_meal_log_list
+    - nutrition_day_summary
+    - format_nutrition_day_summary
+    - diet_plan_generate
+    - format_diet_plan
+    - weight_log_add
+    - format_weight_log_entry
+    - weight_log_list
+    - format_weight_log_list
+    - weight_log_update_latest
+    - format_weight_log_update
+    - progress_summary
+    - format_diet_progress_summary
+    - diet_coach_briefing
+    - format_diet_coach_briefing
+    - diet_daily_loop_generate
+    - format_diet_daily_loop
+    - diet_next_meal_card_generate
+    - format_diet_next_meal_card
+    - diet_day_review_plan_generate
+    - format_diet_day_review_plan
+    - diet_weekly_plan_generate
+    - format_diet_weekly_plan
+    - diet_inbox_triage
+    - format_diet_inbox_triage
+    - diet_inbox_commit
+    - format_diet_inbox_commit
+    - memory_search
+    - format_memory_search
+    - memory_write
+    - format_memory_write
+memory:
+  enabled: true
+  auto_recall: true
+  top_k: 4
+routing:
+  intent: diet
+  aliases:
+    - diet-agent
+    - diet
+    - diet-assistant
+    - diet_assistant
+    - 饮食助手
+  keywords:
+    - 饮食
+    - 餐食
+    - 热量
+    - 减脂
+    - 体重
+    - 早餐
+    - 午餐
+    - 晚餐
+    - 营养
+    - diet
+    - meal
+    - calorie
+  reason: 用户关注个人饮食、体重或减脂记录，饮食助手更适合处理。
+  next: 确认用户身份和餐食/体重数据后，建议交给 diet-assistant-zhanghaibo。
+  persist_delegate_history: true
+contract:
+  examples:
+    - name: diet
+      user_text: 今天早餐吃了鸡蛋和牛奶，帮我记录一下饮食
+      required_tools:
+        - meal_log_add
+        - format_meal_log_entry
+      read_only: false
+      requires_confirmation: true
+      requires_collaboration: false
