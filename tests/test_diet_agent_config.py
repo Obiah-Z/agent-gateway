@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+from agent_gateway.config import GatewaySettings
+from agent_gateway.config_loader import load_agents
+
 
 ROOT = Path(__file__).resolve().parents[1]
 USER_PEER_ID = "ZhangHaiBo"
@@ -9,8 +12,43 @@ AGENT_ID = "diet-assistant-zhanghaibo"
 SECRETARY_AGENT_ID = "personal-secretary-zhanghaibo"
 
 
+def _agent_rows() -> list[dict[str, object]]:
+    settings = GatewaySettings(
+        config_dir=ROOT / "config",
+        data_dir=ROOT / "data",
+        workspace_root=ROOT / "workspace",
+    )
+    rows = []
+    for agent in load_agents(settings):
+        rows.append(
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "personality": agent.personality,
+                "model": agent.model,
+                "dm_scope": agent.dm_scope,
+                "extra_system": agent.extra_system,
+                "tool_policy": {
+                    "mode": agent.tool_policy_mode,
+                    "tool_names": list(agent.tool_names),
+                },
+                "memory_policy": {
+                    "enabled": agent.memory_enabled,
+                    "auto_recall": agent.memory_auto_recall,
+                    "top_k": agent.memory_top_k,
+                },
+                "prompt_policy": {
+                    "prompt_dir": agent.prompt_dir,
+                    "use_global_files": agent.use_global_prompt_files,
+                    "skills_enabled": agent.skills_enabled,
+                },
+            }
+        )
+    return rows
+
+
 def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
 
     agent = next(row for row in agents if row["id"] == AGENT_ID)
@@ -59,7 +97,7 @@ def test_diet_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
 
 
 def test_platform_entries_and_personal_secretary_are_separated() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
 
     agent_ids = {row["id"] for row in agents}
@@ -79,7 +117,7 @@ def test_platform_entries_and_personal_secretary_are_separated() -> None:
 
 
 def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     by_id = {row["id"]: row for row in agents}
     tools = set(by_id["main"]["tool_policy"]["tool_names"])
     prompt_dir = ROOT / "workspace" / by_id["main"]["prompt_policy"]["prompt_dir"]
@@ -148,7 +186,7 @@ def test_main_agent_has_task_intent_classifier_and_prompt_boundary() -> None:
 
 
 def test_platform_entry_agents_share_intent_classification_flow() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     by_id = {row["id"]: row for row in agents}
 
     for agent_id in ["feishu-entry", "wework-entry"]:
@@ -247,7 +285,7 @@ def test_platform_entry_agents_share_intent_classification_flow() -> None:
 
 
 def test_research_agent_has_brief_tool_and_source_prompt() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
     identity = (ROOT / "workspace" / "agents" / "research" / "IDENTITY.md").read_text(
         encoding="utf-8"
@@ -425,7 +463,7 @@ def test_diet_agent_prompt_requires_gender_inference() -> None:
 
 
 def test_shared_capability_agents_are_configured_without_entry_bindings() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
 
     capability_ids = {"repo-analyzer", "doc-writer", "planner", "reviewer"}
@@ -439,7 +477,7 @@ def test_shared_capability_agents_are_configured_without_entry_bindings() -> Non
 
 
 def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
 
     assert {"github_repo_summary", "read_file", "list_directory", "web_search", "fetch_url"}.issubset(
@@ -518,7 +556,7 @@ def test_shared_capability_agents_have_task_specific_tool_boundaries() -> None:
 
 
 def test_ops_agent_has_readonly_health_tool_and_safety_prompt() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
     identity = (ROOT / "workspace" / "agents" / "ops" / "IDENTITY.md").read_text(
         encoding="utf-8"
@@ -872,7 +910,7 @@ def test_entry_agents_route_complex_repo_tasks_to_collaboration_plan() -> None:
 
 
 def test_platform_entry_agents_have_delegation_tool_only_at_entry_layer() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
 
     assert "suggest_agent_delegation" in tools["feishu-entry"]
@@ -1089,7 +1127,7 @@ def test_agent_capability_boundary_doc_covers_recent_capability_tools() -> None:
 
 
 def test_personal_secretary_has_structured_personal_tools() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     tools = {row["id"]: set(row["tool_policy"]["tool_names"]) for row in agents}
 
     assert {

@@ -1,0 +1,29 @@
+id: research
+name: GatewayResearch
+layer: shared-capability
+personality: careful, source-driven, and concise
+model: ""
+dm_scope: per-peer
+extra_system: 你专注于联网检索、来源核验和资料整理。对需要复用的结论，优先用 memory_write 保存摘要、来源 URL 和检索日期，便于其他 Agent 通过 memory_search 读取。
+prompt:
+  dir: agents/research
+  use_global_files: true
+  skills_enabled: true
+tools:
+  mode: allowlist
+  names:
+    - get_current_time
+    - assess_research_confidence
+    - format_research_confidence_assessment
+    - compose_research_brief
+    - format_research_brief
+    - compose_research_evidence_pack
+    - compose_research_option_comparison
+    - memory_write
+    - memory_search
+    - web_search
+    - fetch_url
+memory:
+  enabled: true
+  auto_recall: true
+  top_k: 5

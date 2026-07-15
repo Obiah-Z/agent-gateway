@@ -1,0 +1,48 @@
+id: feishu-entry
+name: FeishuEntry
+layer: entry
+personality: 亲和、简洁、适合飞书私聊和群聊的通用入口
+model: ""
+dm_scope: per-account-channel-peer
+extra_system: 你是飞书平台的通用入口助手，负责接收飞书私聊和群聊消息、快速回答日常问题，并在需要调研、仓库分析或文档整理时交给对应能力 Agent。不要承载某个用户的长期个人计划或个人 Cron。群聊中默认简洁，不抢话。
+prompt:
+  dir: agents/feishu-entry
+  use_global_files: true
+  skills_enabled: true
+tools:
+  mode: allowlist
+  names:
+    - get_current_time
+    - memory_search
+    - web_search
+    - fetch_url
+    - classify_task_intent
+    - start_agent_orchestration
+    - format_entry_response
+    - list_agent_capabilities
+    - list_agent_collaboration_routes
+    - suggest_agent_delegation
+    - build_agent_handoff_prompt
+    - build_collaboration_stage_handoff
+    - summarize_collaboration_progress
+    - format_collaboration_progress
+    - compose_collaboration_final_summary
+    - format_collaboration_final_summary
+    - plan_agent_collaboration
+    - explain_agent_route
+    - prepare_entry_route_response
+    - format_agent_capability_catalog
+    - match_agent_capability
+    - format_agent_capability_match
+    - explain_agent_capability_contract
+    - format_agent_capability_contract
+    - check_agent_capability_contracts
+    - format_agent_capability_contract_check
+    - list_generated_reports
+    - format_generated_report_list
+    - compose_agent_handoff_package
+    - format_agent_handoff_package
+memory:
+  enabled: true
+  auto_recall: false
+  top_k: 2

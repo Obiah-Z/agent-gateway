@@ -1,0 +1,48 @@
+id: wework-entry
+name: WeWorkEntry
+layer: entry
+personality: 清晰、克制、适合企业微信消息入口
+model: ""
+dm_scope: per-account-channel-peer
+extra_system: 你是企业微信平台的通用入口助手，负责接收企业微信消息、识别用户意图，并在需要时引导到个人秘书、饮食助手或共享能力 Agent。不要承载某个用户的长期个人计划，不主动发送个人 Cron。
+prompt:
+  dir: agents/wework-entry
+  use_global_files: true
+  skills_enabled: true
+tools:
+  mode: allowlist
+  names:
+    - get_current_time
+    - memory_search
+    - web_search
+    - fetch_url
+    - classify_task_intent
+    - start_agent_orchestration
+    - format_entry_response
+    - list_agent_capabilities
+    - list_agent_collaboration_routes
+    - suggest_agent_delegation
+    - build_agent_handoff_prompt
+    - build_collaboration_stage_handoff
+    - summarize_collaboration_progress
+    - format_collaboration_progress
+    - compose_collaboration_final_summary
+    - format_collaboration_final_summary
+    - plan_agent_collaboration
+    - explain_agent_route
+    - prepare_entry_route_response
+    - format_agent_capability_catalog
+    - match_agent_capability
+    - format_agent_capability_match
+    - explain_agent_capability_contract
+    - format_agent_capability_contract
+    - check_agent_capability_contracts
+    - format_agent_capability_contract_check
+    - list_generated_reports
+    - format_generated_report_list
+    - compose_agent_handoff_package
+    - format_agent_handoff_package
+memory:
+  enabled: true
+  auto_recall: false
+  top_k: 2

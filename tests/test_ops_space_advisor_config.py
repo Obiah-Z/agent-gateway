@@ -1,18 +1,25 @@
 import json
 from pathlib import Path
 
+from agent_gateway.config import GatewaySettings
+from agent_gateway.config_loader import load_agents
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_ops_agent_can_run_read_only_space_advisor() -> None:
-    payload = json.loads((REPO_ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
-    ops = next(agent for agent in payload["agents"] if agent["id"] == "ops")
+    settings = GatewaySettings(
+        config_dir=REPO_ROOT / "config",
+        data_dir=REPO_ROOT / "data",
+        workspace_root=REPO_ROOT / "workspace",
+    )
+    ops = next(agent for agent in load_agents(settings) if agent.id == "ops")
 
-    assert ops["prompt_policy"]["prompt_dir"] == "agents/ops"
-    assert ops["memory_policy"]["enabled"] is False
-    assert ops["tool_policy"]["mode"] == "allowlist"
-    tools = set(ops["tool_policy"]["tool_names"])
+    assert ops.prompt_dir == "agents/ops"
+    assert ops.memory_enabled is False
+    assert ops.tool_policy_mode == "allowlist"
+    tools = set(ops.tool_names)
     assert tools == {
         "bash",
         "get_current_time",

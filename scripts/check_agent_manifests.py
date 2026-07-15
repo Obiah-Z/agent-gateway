@@ -25,6 +25,7 @@ def main() -> int:
     register_personal_tools(registry, PersonalStore(workspace))
     register_github_repo_tools(registry)
     tool_names = set(registry.names())
+    tool_names.update({"web_search", "fetch_url"})
     aliases: dict[str, str] = {}
     errors: list[str] = []
     for manifest in manifests:

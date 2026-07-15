@@ -17,6 +17,7 @@ def test_project_agent_manifests_load_private_specialists() -> None:
     manifests = load_agent_manifests(ROOT / "workspace")
     by_id = {manifest.id: manifest for manifest in manifests}
 
+    assert len(manifests) == 12
     assert "diet-assistant-zhanghaibo" in by_id
     assert "internship-assistant-zhanghaibo" in by_id
     assert by_id["diet-assistant-zhanghaibo"].routing.intent == "diet"
@@ -24,6 +25,14 @@ def test_project_agent_manifests_load_private_specialists() -> None:
     assert by_id["internship-assistant-zhanghaibo"].routing.intent == "internship"
     assert "internship-agent" in by_id["internship-assistant-zhanghaibo"].routing.aliases
     assert by_id["internship-assistant-zhanghaibo"].contract_examples[0].requires_confirmation is True
+
+
+def test_project_agents_json_is_compatibility_shell_after_manifest_migration() -> None:
+    import json
+
+    payload = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+
+    assert payload == {"agents": []}
 
 
 def test_manifest_converts_to_agent_config() -> None:

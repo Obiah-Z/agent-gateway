@@ -1,14 +1,43 @@
 import json
 from pathlib import Path
 
+from agent_gateway.config import GatewaySettings
+from agent_gateway.config_loader import load_agents
+
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_ID = "internship-assistant-zhanghaibo"
 SECRETARY_AGENT_ID = "personal-secretary-zhanghaibo"
 
 
+def _agent_rows() -> list[dict[str, object]]:
+    settings = GatewaySettings(
+        config_dir=ROOT / "config",
+        data_dir=ROOT / "data",
+        workspace_root=ROOT / "workspace",
+    )
+    rows = []
+    for agent in load_agents(settings):
+        rows.append(
+            {
+                "id": agent.id,
+                "extra_system": agent.extra_system,
+                "tool_policy": {
+                    "mode": agent.tool_policy_mode,
+                    "tool_names": list(agent.tool_names),
+                },
+                "prompt_policy": {
+                    "prompt_dir": agent.prompt_dir,
+                    "use_global_files": agent.use_global_prompt_files,
+                    "skills_enabled": agent.skills_enabled,
+                },
+            }
+        )
+    return rows
+
+
 def test_internship_agent_config_is_user_scoped_without_owning_wework_entry() -> None:
-    agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))["agents"]
+    agents = _agent_rows()
     bindings = json.loads((ROOT / "config" / "bindings.json").read_text(encoding="utf-8"))["bindings"]
 
     agent = next(row for row in agents if row["id"] == AGENT_ID)
