@@ -92,8 +92,8 @@ class RouteResolution:
 class AgentConfig:
     """Agent 运行配置。
 
-    该配置由 `config/agents.json` 加载，也可由控制面动态创建。它只描述 Agent 的能力、
-    prompt 策略、记忆策略和工具策略，不保存任何会话状态。
+    该配置由 `workspace/agents/*/agent.yaml` 或旧版兼容配置加载，也可由控制面动态创建。
+    它只描述 Agent 的能力、prompt 策略、记忆策略和工具策略，不保存任何会话状态。
     """
 
     id: str

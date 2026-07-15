@@ -42,4 +42,4 @@
 
 新增能力时优先判断应该落在哪一层：入口层只做分类和交接，共享能力层做通用专业能力，个人 Agent 做用户私有闭环，ops 做只读排障。
 
-新增工具应同时更新 `config/agents.json`、对应 `workspace/agents/*` 提示词和测试。写入类工具必须明确数据范围和用户作用域；草稿类工具必须明确不会自动写入。
+新增 Agent 应优先维护 `workspace/agents/<agent-id>/agent.yaml` 和对应提示词；`config/agents.json` 只保留兼容壳。新增工具仍需注册工具实现并更新目标 Agent manifest 的工具白名单和测试。写入类工具必须明确数据范围和用户作用域；草稿类工具必须明确不会自动写入。

@@ -53,7 +53,7 @@ def _manifest_intent_catalog(workspace_root: Path) -> list[dict[str, object]]:
 
 
 def _agent_payloads_with_manifests(workspace_root: Path, data: dict[str, object]) -> list[dict[str, object]]:
-    """Overlay config/agents.json payloads with manifest-derived payloads."""
+    """Overlay legacy JSON payloads with manifest-derived payloads."""
 
     agents = [row for row in data.get("agents", []) if isinstance(row, dict)]
     by_id = {str(row.get("id") or ""): dict(row) for row in agents if row.get("id")}
@@ -9623,7 +9623,7 @@ def register_builtin_tools(
             name="list_agent_capabilities",
             description=(
                 "List configured agent capabilities and handoff input fields "
-                "from config/agents.json and workspace/agents/* prompts."
+                "from workspace/agents/*/agent.yaml and workspace/agents/* prompts."
             ),
             input_schema={
                 "type": "object",
@@ -9765,7 +9765,7 @@ def register_builtin_tools(
         RegisteredTool(
             name="check_agent_capability_contracts",
             description=(
-                "Check whether config/agents.json satisfies baseline agent routing capability "
+                "Check whether Agent manifests satisfy baseline routing capability "
                 "contracts. Returns missing agents and missing tools. This is read-only."
             ),
             input_schema={"type": "object", "properties": {}},

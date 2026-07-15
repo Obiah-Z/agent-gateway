@@ -1,6 +1,7 @@
 """Agent 注册表。
 
-应用层通过这个内存注册表读取当前可用 Agent；持久化来源在 `config/agents.json`，
+应用层通过这个内存注册表读取当前可用 Agent；当前权威配置来源是
+`workspace/agents/*/agent.yaml`，旧版 `config/agents.json` 只保留兼容壳。
 控制面 reload 后会整体替换这里的内容。
 """
 

@@ -147,7 +147,7 @@ def merge_agent_configs_with_manifests(
     config_agents: list[AgentConfig],
     manifests: list[AgentManifest],
 ) -> list[AgentConfig]:
-    """Overlay manifest-derived AgentConfig on top of config/agents.json."""
+    """Overlay manifest-derived AgentConfig on top of legacy JSON config."""
 
     by_id = {agent.id: agent for agent in config_agents}
     order = [agent.id for agent in config_agents]

@@ -143,7 +143,11 @@ def ensure_default_project_files(settings: GatewaySettings) -> None:
 
 
 def load_agents(settings: GatewaySettings) -> list[AgentConfig]:
-    """从 `config/agents.json` 读取 Agent 列表。"""
+    """读取 Agent 列表。
+
+    `workspace/agents/*/agent.yaml` 是当前权威来源；`config/agents.json`
+    只作为旧配置兼容壳保留，manifest 会覆盖同 id 的旧 JSON 配置。
+    """
 
     payload = _read_json(settings.agents_config_file, {"agents": []})
     agents = []
@@ -180,7 +184,7 @@ def load_agents(settings: GatewaySettings) -> list[AgentConfig]:
 
 
 def save_agents(settings: GatewaySettings, agents: list[AgentConfig]) -> None:
-    """把 Agent 配置写回 `config/agents.json`。"""
+    """把 Agent 配置写回旧版 `config/agents.json` 兼容文件。"""
 
     write_json_atomic(
         settings.agents_config_file,

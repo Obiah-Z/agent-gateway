@@ -180,7 +180,7 @@ DEFAULT_AGENT_ROUTING_CONTRACTS: tuple[AgentRoutingContract, ...] = (
 
 
 def load_agent_tool_allowlists(config_path: Path) -> dict[str, set[str]]:
-    """Load Agent tool allowlists from config/agents.json."""
+    """Load Agent tool allowlists from legacy JSON plus Agent manifests."""
 
     data = json.loads(config_path.read_text(encoding="utf-8"))
     agents = data.get("agents", [])

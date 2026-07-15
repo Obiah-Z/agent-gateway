@@ -8,19 +8,19 @@
 
 ## 实施状态
 
-截至当前实现，报告中的 Phase 1 和 Phase 2 已落地为兼容式改造：
+截至当前实现，报告中的 Phase 1 和 Phase 2 已完成，并已把项目内全部 Agent 迁移到 manifest：
 
 - 已新增 `agent_gateway/runtime/domain/agent_manifest.py`，支持读取 `workspace/agents/*/agent.yaml`，并将 manifest 转换为现有 `AgentConfig`。
 - 已新增 `scripts/check_agent_manifests.py`，用于校验 manifest、工具白名单、别名冲突和写入类契约确认要求。
 - 已新增 `scripts/scaffold_agent.py`，用于生成新 Agent 的 manifest 和 prompt 骨架。
 - 已为 `diet-assistant-zhanghaibo` 和 `internship-assistant-zhanghaibo` 补充 `agent.yaml` 作为试点。
-- `load_agents()` 已支持用 manifest 覆盖同 id 的 `config/agents.json` 配置，并保留旧配置兼容。
+- `load_agents()` 已从 12 个 `workspace/agents/*/agent.yaml` 加载全部 Agent；`config/agents.json` 已瘦身为 `{"agents": []}` 兼容壳。
 - `classify_task_intent` 已支持从 manifest routing catalog 派生专科 Agent 分类项。
 - `list_agent_capabilities` 已支持 manifest-only Agent，不再必须先写入 `config/agents.json`。
 - `CollaborationRuntime` 的专科 Agent 别名、关键词兜底和专家历史持久化策略已优先读取 manifest。
 - `AgentRoutingContract` 已支持聚合 manifest 中的 contract examples，减少新增专科 Agent 时手写 Python 常量的必要性。
 
-暂未实施 Phase 3 的动态 tool bundle。原因是该阶段涉及工具 store 生命周期、持久化后端注入和启动失败策略，风险明显高于 Agent 元数据接入。当前建议先使用 Phase 1/2 简化“使用已有工具的 Agent”接入；需要新增工具时仍按现有方式注册，待 manifest 路由稳定后再推进 tool bundle。
+暂未实施 Phase 3 的动态 tool bundle。原因是该阶段涉及工具 store 生命周期、持久化后端注入和启动失败策略，风险明显高于 Agent 元数据接入。当前已完成 Agent 元数据配置化；需要新增工具时仍按现有方式注册，待 manifest 路由稳定后再推进 tool bundle。
 
 当前建议的验收命令：
 
